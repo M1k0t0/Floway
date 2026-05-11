@@ -1605,7 +1605,7 @@ Deno.test("/v1/messages falls back to responses and preserves reasoning round-tr
   assertEquals(responsesRequests, 1);
   assertEquals(upstreamBody!.instructions, "system instructions");
   assertFalse("temperature" in upstreamBody!);
-  assertEquals(upstreamBody!.max_output_tokens, 12800);
+  assertEquals(upstreamBody!.max_output_tokens, 256);
   assertFalse("reasoning" in upstreamBody!);
   assertFalse("include" in upstreamBody!);
   assertEquals(
