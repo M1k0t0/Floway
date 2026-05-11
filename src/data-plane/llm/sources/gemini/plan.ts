@@ -14,6 +14,15 @@ export const geminiModelResolutionIntent = (
   const thinkingConfig = payload.generationConfig?.thinkingConfig;
   if (!thinkingConfig) return {};
 
+  // Google does not publish low/medium/high thresholds for thinkingBudget;
+  // their docs only describe per-model numeric ranges. The 2048/8192 bin
+  // edges below are project-specific policy, derived from a community-default
+  // mapping that uses these same numbers as effort-name -> default budget
+  // (low=512, medium=2048, high=8192). We invert that into bucket boundaries.
+  //
+  // References:
+  // https://ai.google.dev/gemini-api/docs/thinking
+  // https://github.com/krzysztofdudek/AutoReview/blob/main/scripts/lib/providers/google.mjs#L4
   if (thinkingConfig.thinkingBudget !== undefined) {
     if (thinkingConfig.thinkingBudget <= 0) return {};
     if (thinkingConfig.thinkingBudget <= 2048) {
