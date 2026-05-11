@@ -297,3 +297,36 @@ Deno.test("translateToSourceEvents throws on Messages error events", async () =>
     "Upstream Messages stream error: invalid_request_error: bad request",
   );
 });
+
+Deno.test("translateToSourceEvents folds Anthropic cache fields into Gemini promptTokenCount and cachedContentTokenCount", async () => {
+  const frames = await collect([
+    eventFrame(messageStart({
+      input_tokens: 10,
+      output_tokens: 0,
+      cache_read_input_tokens: 30,
+      cache_creation_input_tokens: 5,
+    })),
+    eventFrame({
+      type: "message_delta",
+      delta: { stop_reason: "end_turn" },
+      usage: { output_tokens: 7 },
+    }),
+    eventFrame({ type: "message_stop" }),
+  ]);
+
+  assertEquals(frames, [
+    geminiFrame({
+      candidates: [{
+        index: 0,
+        content: { role: "model", parts: [] },
+        finishReason: "STOP",
+      }],
+      usageMetadata: {
+        promptTokenCount: 45,
+        candidatesTokenCount: 7,
+        totalTokenCount: 52,
+        cachedContentTokenCount: 30,
+      },
+    }),
+  ]);
+});

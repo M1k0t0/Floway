@@ -18,12 +18,16 @@ interface ToolUseState {
 
 interface GeminiViaMessagesStreamState {
   inputTokens: number;
+  cacheReadInputTokens: number;
+  cacheCreationInputTokens: number;
   pendingThoughtSignature?: string;
   toolUses: Record<number, ToolUseState>;
 }
 
 const createState = (): GeminiViaMessagesStreamState => ({
   inputTokens: 0,
+  cacheReadInputTokens: 0,
+  cacheCreationInputTokens: 0,
   toolUses: {},
 });
 
@@ -118,16 +122,28 @@ const messagesStopReasonToGemini = (
   }
 };
 
+// Anthropic's input_tokens excludes cache reads and cache creation; Gemini's
+// promptTokenCount is an inclusive total like OpenAI's prompt_tokens. Fold all
+// three Anthropic buckets into the Gemini total, then surface cache reads
+// separately as cachedContentTokenCount.
 const mapUsage = (
-  inputTokens: number,
+  state: GeminiViaMessagesStreamState,
   usage?: Extract<MessagesStreamEventData, { type: "message_delta" }>["usage"],
 ): GeminiUsageMetadata | undefined => {
   if (!usage) return undefined;
 
+  const promptTokenCount = state.inputTokens +
+    state.cacheReadInputTokens +
+    state.cacheCreationInputTokens;
+  const candidatesTokenCount = usage.output_tokens;
+
   return {
-    promptTokenCount: inputTokens,
-    candidatesTokenCount: usage.output_tokens,
-    totalTokenCount: inputTokens + usage.output_tokens,
+    promptTokenCount,
+    candidatesTokenCount,
+    totalTokenCount: promptTokenCount + candidatesTokenCount,
+    ...(state.cacheReadInputTokens > 0
+      ? { cachedContentTokenCount: state.cacheReadInputTokens }
+      : {}),
   };
 };
 
@@ -156,6 +172,10 @@ export const translateToSourceEvents = async function* (
     switch (event.type) {
       case "message_start":
         state.inputTokens = event.message.usage.input_tokens;
+        state.cacheReadInputTokens =
+          event.message.usage.cache_read_input_tokens ?? 0;
+        state.cacheCreationInputTokens =
+          event.message.usage.cache_creation_input_tokens ?? 0;
         break;
 
       case "content_block_start":
@@ -248,7 +268,7 @@ export const translateToSourceEvents = async function* (
         yield eventFrame(geminiResponse(
           parts,
           messagesStopReasonToGemini(event.delta.stop_reason),
-          mapUsage(state.inputTokens, event.usage),
+          mapUsage(state, event.usage),
         ));
         break;
       }
