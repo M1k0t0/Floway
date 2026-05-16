@@ -200,6 +200,7 @@ export const serveResponses = async (
             performanceFor(attemptPayload.model, "messages");
             const messagesPayload = await buildMessagesTargetRequest(
               attemptPayload,
+              capabilities,
             );
             const performance = performanceFor(
               messagesPayload.model,

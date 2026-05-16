@@ -108,6 +108,7 @@ export const serveChatCompletions = async (
             performanceFor(attemptPayload.model, "messages");
             const targetPayload = await buildMessagesTargetRequest(
               attemptPayload,
+              capabilities,
             );
             const performance = performanceFor(
               targetPayload.model,

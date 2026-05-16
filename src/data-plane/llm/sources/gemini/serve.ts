@@ -112,6 +112,7 @@ export const serveGemini = async (
               attemptPayload,
               modelId,
               wantsStream,
+              capabilities,
             );
             const performance = performanceFor(
               targetPayload.model,

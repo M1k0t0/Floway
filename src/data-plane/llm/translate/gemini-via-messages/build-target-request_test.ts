@@ -1,6 +1,19 @@
 import { assertEquals } from "@std/assert";
 import type { GeminiGenerateContentRequest } from "../../../../lib/gemini-types.ts";
+import type { ModelCapabilities } from "../../shared/models/get-model-capabilities.ts";
 import { buildTargetRequest } from "./build-target-request.ts";
+
+const noCapabilities: ModelCapabilities = {
+  supportsMessages: true,
+  supportsResponses: false,
+  supportsChatCompletions: false,
+  supportsAdaptiveThinking: false,
+};
+
+const withMaxOutputTokens = (maxOutputTokens: number): ModelCapabilities => ({
+  ...noCapabilities,
+  maxOutputTokens,
+});
 
 Deno.test("buildTargetRequest maps system, default max tokens, and multimodal user content", () => {
   const payload: GeminiGenerateContentRequest = {
@@ -16,26 +29,39 @@ Deno.test("buildTargetRequest maps system, default max tokens, and multimodal us
     }],
   };
 
-  assertEquals(buildTargetRequest(payload, "claude-test", true), {
-    model: "claude-test",
-    stream: true,
-    max_tokens: 4096,
-    system: "Be precise.\n\nUse markdown.",
-    messages: [{
-      role: "user",
-      content: [
-        { type: "text", text: "Describe this image." },
-        {
-          type: "image",
-          source: {
-            type: "base64",
-            media_type: "image/png",
-            data: "aW1hZ2U=",
+  assertEquals(
+    buildTargetRequest(payload, "claude-test", true, noCapabilities),
+    {
+      model: "claude-test",
+      stream: true,
+      max_tokens: 4096,
+      system: "Be precise.\n\nUse markdown.",
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "Describe this image." },
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: "image/png",
+              data: "aW1hZ2U=",
+            },
           },
-        },
-      ],
-    }],
-  });
+        ],
+      }],
+    },
+  );
+});
+
+Deno.test("buildTargetRequest prefers capabilities.maxOutputTokens over the gateway default when payload omits maxOutputTokens", () => {
+  const request = buildTargetRequest(
+    {},
+    "claude-test",
+    false,
+    withMaxOutputTokens(6144),
+  );
+  assertEquals(request.max_tokens, 6144);
 });
 
 Deno.test("buildTargetRequest maps generation config and thinking controls", () => {
@@ -53,24 +79,28 @@ Deno.test("buildTargetRequest maps generation config and thinking controls", () 
     },
   };
 
-  assertEquals(buildTargetRequest(payload, "claude-test", false), {
-    model: "claude-test",
-    stream: false,
-    messages: [],
-    max_tokens: 512,
-    temperature: 0.25,
-    top_p: 0.8,
-    top_k: 40,
-    stop_sequences: ["END"],
-    thinking: { type: "enabled", budget_tokens: 2048 },
-    output_config: { effort: "high" },
-  });
+  assertEquals(
+    buildTargetRequest(payload, "claude-test", false, noCapabilities),
+    {
+      model: "claude-test",
+      stream: false,
+      messages: [],
+      max_tokens: 512,
+      temperature: 0.25,
+      top_p: 0.8,
+      top_k: 40,
+      stop_sequences: ["END"],
+      thinking: { type: "enabled", budget_tokens: 2048 },
+      output_config: { effort: "high" },
+    },
+  );
 
   assertEquals(
     buildTargetRequest(
       { generationConfig: { thinkingConfig: { thinkingBudget: 0 } } },
       "claude-test",
       false,
+      noCapabilities,
     ).thinking,
     { type: "disabled" },
   );
@@ -96,32 +126,35 @@ Deno.test("buildTargetRequest maps assistant thinking signatures and tool calls"
     }],
   };
 
-  assertEquals(buildTargetRequest(payload, "claude-test", false).messages, [
-    {
-      role: "assistant",
-      content: [
-        { type: "thinking", thinking: "private trace", signature: "sig_1" },
-        {
-          type: "tool_use",
-          id: "call_1",
-          name: "lookup",
-          input: { q: "deno" },
-        },
-      ],
-    },
-    {
-      role: "assistant",
-      content: [
-        { type: "redacted_thinking", data: "sig_only" },
-        {
-          type: "tool_use",
-          id: "gemini_call_1_0",
-          name: "fallback",
-          input: {},
-        },
-      ],
-    },
-  ]);
+  assertEquals(
+    buildTargetRequest(payload, "claude-test", false, noCapabilities).messages,
+    [
+      {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "private trace", signature: "sig_1" },
+          {
+            type: "tool_use",
+            id: "call_1",
+            name: "lookup",
+            input: { q: "deno" },
+          },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [
+          { type: "redacted_thinking", data: "sig_only" },
+          {
+            type: "tool_use",
+            id: "gemini_call_1_0",
+            name: "fallback",
+            input: {},
+          },
+        ],
+      },
+    ],
+  );
 });
 
 Deno.test("buildTargetRequest correlates omitted function response ids in call order", () => {
@@ -145,41 +178,44 @@ Deno.test("buildTargetRequest correlates omitted function response ids in call o
     }],
   };
 
-  assertEquals(buildTargetRequest(payload, "claude-test", false).messages, [
-    {
-      role: "assistant",
-      content: [
-        {
-          type: "tool_use",
-          id: "gemini_call_0_0",
-          name: "lookup",
-          input: { q: "first" },
-        },
-        {
-          type: "tool_use",
-          id: "gemini_call_0_1",
-          name: "lookup",
-          input: { q: "second" },
-        },
-      ],
-    },
-    {
-      role: "user",
-      content: [{
-        type: "tool_result",
-        tool_use_id: "gemini_call_0_0",
-        content: '{"answer":"first"}',
-      }],
-    },
-    {
-      role: "user",
-      content: [{
-        type: "tool_result",
-        tool_use_id: "gemini_call_0_1",
-        content: '{"answer":"second"}',
-      }],
-    },
-  ]);
+  assertEquals(
+    buildTargetRequest(payload, "claude-test", false, noCapabilities).messages,
+    [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "gemini_call_0_0",
+            name: "lookup",
+            input: { q: "first" },
+          },
+          {
+            type: "tool_use",
+            id: "gemini_call_0_1",
+            name: "lookup",
+            input: { q: "second" },
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [{
+          type: "tool_result",
+          tool_use_id: "gemini_call_0_0",
+          content: '{"answer":"first"}',
+        }],
+      },
+      {
+        role: "user",
+        content: [{
+          type: "tool_result",
+          tool_use_id: "gemini_call_0_1",
+          content: '{"answer":"second"}',
+        }],
+      },
+    ],
+  );
 });
 
 Deno.test("buildTargetRequest maps tool declarations and tool choice modes", () => {
@@ -204,28 +240,32 @@ Deno.test("buildTargetRequest maps tool declarations and tool choice modes", () 
     },
   };
 
-  assertEquals(buildTargetRequest(payload, "claude-test", false), {
-    model: "claude-test",
-    stream: false,
-    messages: [],
-    max_tokens: 4096,
-    tools: [{
-      type: "custom",
-      name: "lookup",
-      description: "Look up facts",
-      input_schema: {
-        type: "object",
-        properties: { query: { type: "string" } },
-      },
-    }],
-    tool_choice: { type: "tool", name: "lookup" },
-  });
+  assertEquals(
+    buildTargetRequest(payload, "claude-test", false, noCapabilities),
+    {
+      model: "claude-test",
+      stream: false,
+      messages: [],
+      max_tokens: 4096,
+      tools: [{
+        type: "custom",
+        name: "lookup",
+        description: "Look up facts",
+        input_schema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+        },
+      }],
+      tool_choice: { type: "tool", name: "lookup" },
+    },
+  );
 
   assertEquals(
     buildTargetRequest(
       { toolConfig: { functionCallingConfig: { mode: "NONE" } } },
       "claude-test",
       false,
+      noCapabilities,
     ).tool_choice,
     { type: "none" },
   );
@@ -234,6 +274,7 @@ Deno.test("buildTargetRequest maps tool declarations and tool choice modes", () 
       { toolConfig: { functionCallingConfig: { mode: "AUTO" } } },
       "claude-test",
       false,
+      noCapabilities,
     ).tool_choice,
     { type: "auto" },
   );
@@ -242,6 +283,7 @@ Deno.test("buildTargetRequest maps tool declarations and tool choice modes", () 
       { toolConfig: { functionCallingConfig: { mode: "VALIDATED" } } },
       "claude-test",
       false,
+      noCapabilities,
     ).tool_choice,
     { type: "auto" },
   );
@@ -250,6 +292,7 @@ Deno.test("buildTargetRequest maps tool declarations and tool choice modes", () 
       { toolConfig: { functionCallingConfig: { mode: "ANY" } } },
       "claude-test",
       false,
+      noCapabilities,
     ).tool_choice,
     { type: "any" },
   );
@@ -272,22 +315,25 @@ Deno.test("buildTargetRequest filters tools to multiple allowed names for ANY mo
     },
   };
 
-  assertEquals(buildTargetRequest(payload, "claude-test", false), {
-    model: "claude-test",
-    stream: false,
-    messages: [],
-    max_tokens: 4096,
-    tools: [{
-      type: "custom",
-      name: "lookup",
-      input_schema: { type: "object", properties: {} },
-    }, {
-      type: "custom",
-      name: "ping",
-      input_schema: { type: "object", properties: {} },
-    }],
-    tool_choice: { type: "any" },
-  });
+  assertEquals(
+    buildTargetRequest(payload, "claude-test", false, noCapabilities),
+    {
+      model: "claude-test",
+      stream: false,
+      messages: [],
+      max_tokens: 4096,
+      tools: [{
+        type: "custom",
+        name: "lookup",
+        input_schema: { type: "object", properties: {} },
+      }, {
+        type: "custom",
+        name: "ping",
+        input_schema: { type: "object", properties: {} },
+      }],
+      tool_choice: { type: "any" },
+    },
+  );
 });
 
 Deno.test("buildTargetRequest maps dynamic thinking budget to adaptive thinking", () => {
@@ -296,6 +342,7 @@ Deno.test("buildTargetRequest maps dynamic thinking budget to adaptive thinking"
       { generationConfig: { thinkingConfig: { thinkingBudget: -1 } } },
       "claude-test",
       false,
+      noCapabilities,
     ).thinking,
     { type: "adaptive" },
   );

@@ -14,6 +14,7 @@ import type {
   MessagesToolResultBlock,
   MessagesUserContentBlock,
 } from "../../../../lib/messages-types.ts";
+import type { ModelCapabilities } from "../../shared/models/get-model-capabilities.ts";
 
 type UnmatchedToolCallIds = Record<string, string[]>;
 
@@ -266,11 +267,11 @@ const applyThinkingConfig = (
 
 const applyGenerationConfig = (
   request: MessagesPayload,
-  generationConfig?: GeminiGenerationConfig,
+  generationConfig: GeminiGenerationConfig | undefined,
+  fallbackMaxOutputTokens: number,
 ): void => {
-  // Gemini can omit maxOutputTokens, but MessagesPayload requires max_tokens;
-  // keep this as an explicit gateway policy instead of guessing upstream state.
-  request.max_tokens = generationConfig?.maxOutputTokens ?? 4096;
+  request.max_tokens = generationConfig?.maxOutputTokens ??
+    fallbackMaxOutputTokens;
 
   if (!generationConfig) return;
 
@@ -346,11 +347,16 @@ export const buildTargetRequest = (
   payload: GeminiGenerateContentRequest,
   model: string,
   wantsStream: boolean,
+  capabilities: ModelCapabilities,
 ): MessagesPayload => {
+  // Gemini can omit maxOutputTokens, but MessagesPayload requires max_tokens.
+  // Prefer the model's advertised `/models` cap when one is known; otherwise
+  // fall back to a fixed policy default consistent with prior behavior.
+  const fallbackMaxOutputTokens = capabilities.maxOutputTokens ?? 4096;
   const request: MessagesPayload = {
     model,
     stream: wantsStream,
-    max_tokens: 4096,
+    max_tokens: fallbackMaxOutputTokens,
     messages: [],
   };
   const unmatchedToolCallIds: UnmatchedToolCallIds = {};
@@ -365,7 +371,11 @@ export const buildTargetRequest = (
     if (message) request.messages.push(message);
   });
 
-  applyGenerationConfig(request, payload.generationConfig);
+  applyGenerationConfig(
+    request,
+    payload.generationConfig,
+    fallbackMaxOutputTokens,
+  );
 
   const tools = buildTools(payload);
   if (tools) request.tools = tools;

@@ -51,7 +51,7 @@ Deno.test("translateResponsesToMessages maps reasoning.effort directly to output
   assertFalse("thinking" in result);
 });
 
-Deno.test("translateResponsesToMessages leaves max_tokens undefined when the source omitted max_output_tokens", async () => {
+Deno.test("translateResponsesToMessages leaves max_tokens undefined when neither source nor fallbackMaxOutputTokens supplies one", async () => {
   const result = await translateResponsesToMessages({
     model: "claude-test",
     input: [{ type: "message", role: "user", content: "hi" }],
@@ -68,6 +68,25 @@ Deno.test("translateResponsesToMessages leaves max_tokens undefined when the sou
   });
 
   assertEquals(result.max_tokens, undefined);
+});
+
+Deno.test("translateResponsesToMessages uses fallbackMaxOutputTokens when the source omitted max_output_tokens", async () => {
+  const result = await translateResponsesToMessages({
+    model: "claude-test",
+    input: [{ type: "message", role: "user", content: "hi" }],
+    instructions: null,
+    temperature: null,
+    top_p: null,
+    max_output_tokens: null,
+    tools: null,
+    tool_choice: "auto",
+    metadata: null,
+    stream: null,
+    store: false,
+    parallel_tool_calls: true,
+  }, { fallbackMaxOutputTokens: 4096 });
+
+  assertEquals(result.max_tokens, 4096);
 });
 
 Deno.test("translateResponsesToMessages preserves reasoning.encrypted_content without encoding the reasoning id", async () => {

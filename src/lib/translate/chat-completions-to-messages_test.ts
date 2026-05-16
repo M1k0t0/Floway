@@ -604,18 +604,29 @@ Deno.test("content with only non-parseable image → empty text fallback", async
 
 // ── Field mapping ──
 
-Deno.test("max_tokens is left undefined when not provided", async () => {
+Deno.test("max_tokens is left undefined when neither payload nor fallbackMaxOutputTokens supply one", async () => {
   const result = await translateChatCompletionsToMessages(mkPayload({
     messages: [{ role: "user", content: "Hi" }],
   }));
   assertEquals(result.max_tokens, undefined);
 });
 
-Deno.test("max_tokens passed through when provided", async () => {
-  const result = await translateChatCompletionsToMessages(mkPayload({
-    messages: [{ role: "user", content: "Hi" }],
-    max_tokens: 1024,
-  }));
+Deno.test("max_tokens uses fallbackMaxOutputTokens when the payload omits it", async () => {
+  const result = await translateChatCompletionsToMessages(
+    mkPayload({ messages: [{ role: "user", content: "Hi" }] }),
+    { fallbackMaxOutputTokens: 6144 },
+  );
+  assertEquals(result.max_tokens, 6144);
+});
+
+Deno.test("max_tokens passed through when provided, overriding fallbackMaxOutputTokens", async () => {
+  const result = await translateChatCompletionsToMessages(
+    mkPayload({
+      messages: [{ role: "user", content: "Hi" }],
+      max_tokens: 1024,
+    }),
+    { fallbackMaxOutputTokens: 6144 },
+  );
   assertEquals(result.max_tokens, 1024);
 });
 

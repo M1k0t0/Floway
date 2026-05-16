@@ -9,6 +9,7 @@ import { stripUnsupportedPartFieldsFromPayload } from "../llm/sources/gemini/int
 import { stripUnsupportedToolsFromPayload } from "../llm/sources/gemini/interceptors/strip-unsupported-tools.ts";
 import { geminiModelResolutionIntent } from "../llm/sources/gemini/plan.ts";
 import { buildTargetRequest as buildMessagesTargetRequest } from "../llm/translate/gemini-via-messages/build-target-request.ts";
+import { getModelCapabilities } from "../llm/shared/models/get-model-capabilities.ts";
 import { resolveModelForRequest } from "../llm/shared/models/resolve-model.ts";
 import { withAccountFallback } from "../shared/account-pool/fallback.ts";
 
@@ -98,21 +99,28 @@ export const countGeminiTokens = async (
       model,
       geminiModelResolutionIntent(generateContentRequest),
     );
-    const messagesPayload = buildMessagesTargetRequest(
-      generateContentRequest,
-      modelId,
-      false,
-    );
 
     const response = await withAccountFallback(
       modelId,
-      ({ account }) =>
-        copilotFetch(
+      async ({ account }) => {
+        const capabilities = await getModelCapabilities(
+          modelId,
+          account.token,
+          account.accountType,
+        );
+        const messagesPayload = buildMessagesTargetRequest(
+          generateContentRequest,
+          modelId,
+          false,
+          capabilities,
+        );
+        return copilotFetch(
           "/v1/messages/count_tokens",
           { method: "POST", body: JSON.stringify(messagesPayload) },
           account.token,
           account.accountType,
-        ),
+        );
+      },
     );
 
     if (!response.ok) {

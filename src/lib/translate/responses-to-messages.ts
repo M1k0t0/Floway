@@ -33,6 +33,13 @@ import { safeJsonParse } from "./utils.ts";
 
 interface TranslateResponsesToMessagesOptions {
   loadRemoteImage?: RemoteImageLoader;
+  /**
+   * Preferred cap used when the source payload omits `max_output_tokens`.
+   * Callers in the data plane forward the model's advertised `/models` output
+   * cap so the translated Messages request reflects the upstream-known limit
+   * rather than being silently capped by a target-side default later.
+   */
+  fallbackMaxOutputTokens?: number;
 }
 
 const combineMessageTextContent = (
@@ -380,6 +387,8 @@ export const translateResponsesToMessages = async (
     part,
   ): part is string => Boolean(part)).join("\n\n");
   const effort = payload.reasoning?.effort;
+  const maxTokens = payload.max_output_tokens ??
+    options.fallbackMaxOutputTokens;
 
   // Responses `metadata` is intentionally omitted on the Messages path instead
   // of being coerced into Anthropic `metadata.user_id`, prompt-cache, or safety
@@ -387,9 +396,7 @@ export const translateResponsesToMessages = async (
   return {
     model: payload.model,
     messages,
-    ...(payload.max_output_tokens != null
-      ? { max_tokens: payload.max_output_tokens }
-      : {}),
+    ...(maxTokens != null ? { max_tokens: maxTokens } : {}),
     ...(system ? { system } : {}),
     ...(payload.temperature != null
       ? { temperature: payload.temperature }

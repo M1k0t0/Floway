@@ -29,6 +29,13 @@ export type { RemoteImageLoader } from "./remote-images.ts";
 
 interface TranslateChatCompletionsToMessagesOptions {
   loadRemoteImage?: RemoteImageLoader;
+  /**
+   * Preferred cap used when the source payload omits `max_tokens`. Callers in
+   * the data plane forward the model's advertised `/models` output cap so the
+   * translated Messages request reflects the upstream-known limit rather than
+   * being silently capped by a target-side default later.
+   */
+  fallbackMaxOutputTokens?: number;
 }
 
 const buildMessagesThinkingBlock = (
@@ -252,15 +259,18 @@ export const translateChatCompletionsToMessages = async (
     options.loadRemoteImage ?? fetchRemoteImage,
   );
 
+  const maxTokens = payload.max_tokens ?? options.fallbackMaxOutputTokens;
+
   // Leave OpenAI `user` and generic metadata out of the Messages fallback instead
   // of treating them as a backchannel for Anthropic `metadata.user_id`.
   return {
     model: payload.model,
     messages,
-    // Messages requires `max_tokens`, but Chat Completions can omit it.
-    // Keep translation literal and let the Messages target decide whether the
-    // chosen upstream path needs a fallback.
-    ...(payload.max_tokens != null ? { max_tokens: payload.max_tokens } : {}),
+    // Messages requires `max_tokens`, but Chat Completions can omit it. Data-
+    // plane callers forward the model's advertised cap via
+    // `fallbackMaxOutputTokens`; the Messages target keeps a last-resort fill
+    // for everything else.
+    ...(maxTokens != null ? { max_tokens: maxTokens } : {}),
     ...(systemParts.length > 0 ? { system: systemParts.join("\n\n") } : {}),
     ...(payload.temperature != null
       ? { temperature: payload.temperature }
