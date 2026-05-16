@@ -338,9 +338,6 @@ Current placement:
   - strip unsupported `service_tier`
 - `src/data-plane/llm/targets/chat-completions/interceptors/include-usage-stream-options.ts`
   - ensure streaming usage options needed by native chat handling
-- `src/data-plane/llm/targets/chat-completions/interceptors/fix-claude-choice-shape.ts`
-  - merge Claude split choices
-  - normalize streaming choice indices
 - shared translation event helpers
   - guard against infinite whitespace in tool/function arguments
 
