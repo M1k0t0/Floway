@@ -302,10 +302,11 @@ function extractUsageFromJson(json: any): UsageInfo | null {
   }
 
   if (json?.usage?.prompt_tokens != null) {
+    const details = asObject(json.usage.prompt_tokens_details);
     return {
       input: json.usage.prompt_tokens,
       output: json.usage.completion_tokens ?? 0,
-      cacheRead: json.usage.prompt_tokens_details?.cached_tokens ?? 0,
+      cacheRead: readNumber(details?.cached_tokens) ?? 0,
       cacheCreation: 0,
     };
   }

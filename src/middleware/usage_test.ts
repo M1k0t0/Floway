@@ -499,6 +499,36 @@ Deno.test("usage middleware records resolved model when non-streaming LLM respon
   assertEquals(usage[0].model, "claude-native");
 });
 
+Deno.test("usage middleware ignores non-numeric non-streaming Chat cached tokens", async () => {
+  const { repo, apiKey } = await setupAppTest();
+
+  const response = await requestUsageMiddlewareOnly(
+    apiKey.id,
+    Response.json({
+      id: "chatcmpl_invalid_cached_tokens",
+      object: "chat.completion",
+      created: 1,
+      model: "gpt-chat-usage",
+      choices: [],
+      usage: {
+        prompt_tokens: 12,
+        completion_tokens: 4,
+        total_tokens: 16,
+        prompt_tokens_details: { cached_tokens: "not-a-number" },
+      },
+    }),
+  );
+
+  assertEquals(response.status, 200);
+  await response.json();
+
+  const usage = await repo.usage.listAll();
+  assertEquals(usage.length, 1);
+  assertEquals(usage[0].inputTokens, 12);
+  assertEquals(usage[0].outputTokens, 4);
+  assertEquals(usage[0].cacheReadTokens, 0);
+});
+
 Deno.test("usage middleware rejects non-streaming usage without any model signal", async () => {
   const { repo, apiKey } = await setupAppTest();
 
