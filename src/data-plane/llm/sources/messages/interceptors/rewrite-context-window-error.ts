@@ -1,6 +1,6 @@
-import type { MessagesStreamEventData } from "../../../../../lib/messages-types.ts";
+import type { MessagesStreamEventData } from "../../../shared/protocol/messages.ts";
 import type { SourceInterceptor } from "../../run-interceptors.ts";
-import type { MessagesSourceContext } from "./types.ts";
+import type { MessagesSourceContext } from "./index.ts";
 
 const isContextWindowError = (text: string): boolean =>
   text.includes("Request body is too large for model context window") ||

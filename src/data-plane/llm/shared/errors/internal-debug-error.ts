@@ -1,5 +1,5 @@
-import type { SourceApi } from "../types/source-api.ts";
-import type { TargetApi } from "../types/target-api.ts";
+type SourceApi = "messages" | "responses" | "chat-completions" | "gemini";
+type TargetApi = "messages" | "responses" | "chat-completions";
 
 export interface InternalDebugError {
   type: "internal_error";

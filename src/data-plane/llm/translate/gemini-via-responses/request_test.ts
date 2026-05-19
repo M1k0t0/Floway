@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import type { GeminiGenerateContentRequest } from "../../../../lib/gemini-types.ts";
+import type { GeminiGenerateContentRequest } from "../../shared/protocol/gemini.ts";
 import { buildTargetRequest } from "./request.ts";
 
 Deno.test("buildTargetRequest maps instructions and multimodal user input without defaults", () => {

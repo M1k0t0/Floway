@@ -3,24 +3,22 @@ import {
   type InternalDebugError,
   toInternalDebugError,
 } from "../../shared/errors/internal-debug-error.ts";
-import {
-  collectResponsesProtocolEventsToResult,
-} from "./events/to-response.ts";
+import { collectResponsesProtocolEventsToResult } from "./events/reassemble.ts";
 import { responsesProtocolEventsToSSEFrames } from "./events/to-sse.ts";
 import type { SourceResponseStreamEvent } from "./events/protocol.ts";
 import type { StreamExecuteResult } from "../../shared/errors/result.ts";
 import { upstreamErrorToResponse } from "../../shared/errors/upstream-error.ts";
 import { proxySSE } from "../../shared/stream/proxy-sse.ts";
-import { downstreamSSECommentKeepAliveFrame } from "../../shared/stream/keep-alive.ts";
-import { type ProtocolFrame, sseFrame } from "../../shared/stream/types.ts";
+import {
+  type ProtocolFrame,
+  sseCommentFrame,
+  sseFrame,
+} from "../../shared/stream/types.ts";
 import {
   type PerformanceFailureCapture,
-  withUsageResponseMetadata,
+  setUsageResponseMetadata,
 } from "../../../../middleware/usage-response-metadata.ts";
-import {
-  markPerformanceFailure,
-  trackPerformanceOutcome,
-} from "../performance.ts";
+import { trackPerformanceOutcome } from "../performance.ts";
 
 const internalResponsesErrorPayload = (error: InternalDebugError) => ({
   error: {
@@ -33,6 +31,8 @@ const internalResponsesErrorPayload = (error: InternalDebugError) => ({
     target_api: error.target_api,
   },
 });
+
+const downstreamSSECommentKeepAliveFrame = sseCommentFrame("keepalive");
 
 const internalResponsesErrorResponse = (
   status: number,
@@ -74,16 +74,19 @@ export const respondResponses = async (
   downstreamAbortController?: AbortController,
 ): Promise<Response> => {
   if (result.type === "upstream-error") {
-    return withUsageResponseMetadata(c, upstreamErrorToResponse(result), {
+    const response = upstreamErrorToResponse(result);
+    setUsageResponseMetadata(c, {
       performance: result.performance,
     });
+    return response;
   }
   if (result.type === "internal-error") {
-    return withUsageResponseMetadata(
-      c,
-      internalResponsesErrorResponse(result.status, result.error),
-      { performance: result.performance },
+    const response = internalResponsesErrorResponse(
+      result.status,
+      result.error,
     );
+    setUsageResponseMetadata(c, { performance: result.performance });
+    return response;
   }
 
   const performanceFailureCapture: PerformanceFailureCapture = {};
@@ -98,31 +101,26 @@ export const respondResponses = async (
     try {
       const response = await collectResponsesProtocolEventsToResult(events);
       if (response.status === "failed") {
-        markPerformanceFailure(performanceFailureCapture);
+        performanceFailureCapture.failed = true;
       }
-      return withUsageResponseMetadata(
-        c,
-        Response.json(response),
-        {
-          usageModel: result.usageModel,
-          performance: result.performance,
-          performanceFailureCapture,
-        },
-      );
+      setUsageResponseMetadata(c, {
+        usageModel: result.usageModel,
+        performance: result.performance,
+        performanceFailureCapture,
+      });
+      return Response.json(response);
     } catch (error) {
-      markPerformanceFailure(performanceFailureCapture);
+      performanceFailureCapture.failed = true;
 
-      return withUsageResponseMetadata(
-        c,
-        internalResponsesErrorResponse(
-          502,
-          toInternalDebugError(error, "responses"),
-        ),
-        {
-          performance: result.performance,
-          performanceFailureCapture,
-        },
+      const response = internalResponsesErrorResponse(
+        502,
+        toInternalDebugError(error, "responses"),
       );
+      setUsageResponseMetadata(c, {
+        performance: result.performance,
+        performanceFailureCapture,
+      });
+      return response;
     }
   }
 
@@ -133,15 +131,16 @@ export const respondResponses = async (
       keepAlive: { frame: downstreamSSECommentKeepAliveFrame },
       downstreamAbortController,
       onError: (error) => {
-        markPerformanceFailure(performanceFailureCapture);
+        performanceFailureCapture.failed = true;
         return internalResponsesStreamErrorFrame(error);
       },
     },
   );
 
-  return withUsageResponseMetadata(c, response, {
+  setUsageResponseMetadata(c, {
     usageModel: result.usageModel,
     performance: result.performance,
     performanceFailureCapture,
   });
+  return response;
 };

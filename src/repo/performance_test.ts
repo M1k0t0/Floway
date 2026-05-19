@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { latencyBucketForMs } from "../lib/performance-histogram.ts";
+import { latencyBucketForMs } from "../shared/performance-histogram.ts";
 import { type D1Database, D1Repo } from "./d1.ts";
 import { DenoKvRepo } from "./deno.ts";
 import { InMemoryRepo } from "./memory.ts";

@@ -1,7 +1,7 @@
 import type {
   ResponsesPayload,
   ResponsesResult,
-} from "../../../../../lib/responses-types.ts";
+} from "../../../shared/protocol/responses.ts";
 import type { EmitInput, RawEmitResult } from "../../emit-types.ts";
 import type { TargetInterceptor } from "../../run-interceptors.ts";
 import { sseFrame, type StreamFrame } from "../../../shared/stream/types.ts";

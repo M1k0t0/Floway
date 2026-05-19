@@ -4,7 +4,7 @@ import type {
   Message,
   Tool,
   ToolCall,
-} from "../../../../lib/chat-completions-types.ts";
+} from "../../shared/protocol/chat-completions.ts";
 import type {
   GeminiContent,
   GeminiFunctionCallingConfig,
@@ -12,7 +12,7 @@ import type {
   GeminiGenerationConfig,
   GeminiPart,
   GeminiThinkingConfig,
-} from "../../../../lib/gemini-types.ts";
+} from "../../shared/protocol/gemini.ts";
 
 type UnmatchedToolCallIds = Record<string, string[]>;
 

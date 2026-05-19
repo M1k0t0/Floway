@@ -1,6 +1,11 @@
-import type { ChatCompletionsPayload } from "../../../../lib/chat-completions-types.ts";
+import type { ChatCompletionsPayload } from "../../shared/protocol/chat-completions.ts";
 import type { ModelCapabilities } from "../../shared/models/get-model-capabilities.ts";
-import type { ChatPlan } from "../../shared/types/plan.ts";
+import type { CopilotFetchOptions } from "../../../../shared/copilot.ts";
+
+export type ChatPlan =
+  | { target: "messages"; fetchOptions: CopilotFetchOptions }
+  | { target: "responses"; fetchOptions: CopilotFetchOptions }
+  | { target: "chat-completions"; fetchOptions: CopilotFetchOptions };
 
 const hasVision = (payload: ChatCompletionsPayload): boolean =>
   payload.messages.some((message) =>
@@ -12,34 +17,27 @@ export const planChatRequest = (
   payload: ChatCompletionsPayload,
   capabilities: ModelCapabilities,
 ): ChatPlan => {
-  const wantsStream = payload.stream === true;
   const fetchOptions = { vision: hasVision(payload) };
 
   // Chat-origin routing intentionally prefers Messages when the model supports
   // it, because that path preserves more Anthropic structure than native Chat.
   if (capabilities.supportsMessages) {
     return {
-      source: "chat-completions",
       target: "messages",
-      wantsStream,
       fetchOptions,
     };
   }
 
   if (capabilities.supportsChatCompletions) {
     return {
-      source: "chat-completions",
       target: "chat-completions",
-      wantsStream,
       fetchOptions,
     };
   }
 
   if (capabilities.supportsResponses) {
     return {
-      source: "chat-completions",
       target: "responses",
-      wantsStream,
       fetchOptions,
     };
   }
@@ -48,15 +46,11 @@ export const planChatRequest = (
   // get the same Claude -> Messages and non-Claude -> Chat routing behavior.
   return payload.model.startsWith("claude")
     ? {
-      source: "chat-completions",
       target: "messages",
-      wantsStream,
       fetchOptions,
     }
     : {
-      source: "chat-completions",
       target: "chat-completions",
-      wantsStream,
       fetchOptions,
     };
 };

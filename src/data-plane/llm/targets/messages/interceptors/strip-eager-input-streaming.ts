@@ -1,4 +1,4 @@
-import type { MessagesResponse } from "../../../../../lib/messages-types.ts";
+import type { MessagesResponse } from "../../../shared/protocol/messages.ts";
 import type { TargetInterceptor } from "../../run-interceptors.ts";
 import type { EmitToMessagesInput } from "../emit.ts";
 
@@ -13,8 +13,9 @@ export const withEagerInputStreamingStripped: TargetInterceptor<
 > = async (ctx, run) => {
   if (ctx.payload.tools) {
     ctx.payload.tools = ctx.payload.tools.map((tool) => {
-      const { eager_input_streaming: _, ...rest } =
-        tool as typeof tool & { eager_input_streaming?: unknown };
+      const { eager_input_streaming: _, ...rest } = tool as typeof tool & {
+        eager_input_streaming?: unknown;
+      };
       return rest;
     });
   }

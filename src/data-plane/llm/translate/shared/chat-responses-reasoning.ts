@@ -1,10 +1,10 @@
-import type { ChatReasoningItem } from "../../../../lib/chat-completions-types.ts";
-import { makeResponsesReasoningId } from "../../../../lib/reasoning.ts";
+import type { ChatReasoningItem } from "../../shared/protocol/chat-completions.ts";
+import { makeResponsesReasoningId } from "./reasoning.ts";
 import type {
   ResponseInputItem,
   ResponseInputReasoning,
   ResponseOutputReasoning,
-} from "../../../../lib/responses-types.ts";
+} from "../../shared/protocol/responses.ts";
 
 export type ChatReasoningSourceItem =
   | Extract<ResponseInputItem, { type: "reasoning" }>

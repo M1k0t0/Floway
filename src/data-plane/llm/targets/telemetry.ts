@@ -2,12 +2,11 @@ import {
   type PerformanceTelemetryContext,
   recordPerformanceError,
   recordPerformanceLatency,
-} from "../../../lib/performance-telemetry.ts";
-import { scheduleBackground } from "../../../lib/background.ts";
+} from "../../shared/performance/telemetry.ts";
 import type { PerformanceApiName } from "../../../repo/types.ts";
 import type { EmitInput } from "./emit-types.ts";
 import type { SseFrame, StreamFrame } from "../shared/stream/types.ts";
-import { chatCompletionsErrorPayloadMessage } from "../../../lib/chat-completions-errors.ts";
+import { chatCompletionsErrorPayloadMessage } from "../shared/protocol/chat-completions-errors.ts";
 
 type TerminalKind = "success" | "failure";
 
@@ -23,12 +22,12 @@ export function withUpstreamTelemetry<T>(
       if (recorded || !input.apiKeyId) return;
       recorded = true;
       const context = upstreamContext(input, targetApi);
-      scheduleBackground(
-        input.scheduleBackground,
-        kind === "success"
-          ? recordPerformanceLatency(context, "upstream_success", durationMs)
-          : recordPerformanceError(context, "upstream_success"),
-      );
+      const promise = kind === "success"
+        ? recordPerformanceLatency(context, "upstream_success", durationMs)
+        : recordPerformanceError(context, "upstream_success");
+      input.scheduleBackground
+        ? input.scheduleBackground(promise)
+        : void promise;
     };
 
     // Track whether the upstream iterator itself reached an end state (EOF or
@@ -79,13 +78,11 @@ export function recordUpstreamHttpFailure(
   targetApi: PerformanceApiName,
 ): void {
   if (!input.apiKeyId) return;
-  scheduleBackground(
-    input.scheduleBackground,
-    recordPerformanceError(
-      upstreamContext(input, targetApi),
-      "upstream_success",
-    ),
+  const promise = recordPerformanceError(
+    upstreamContext(input, targetApi),
+    "upstream_success",
   );
+  input.scheduleBackground ? input.scheduleBackground(promise) : void promise;
 }
 
 function classifyTerminalFrame(

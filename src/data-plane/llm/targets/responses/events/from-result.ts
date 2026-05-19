@@ -5,7 +5,7 @@ import type {
   ResponseOutputReasoning,
   ResponsesResult,
   ResponseStreamEvent,
-} from "../../../../../lib/responses-types.ts";
+} from "../../../shared/protocol/responses.ts";
 import { type EventFrame, eventFrame } from "../../../shared/stream/types.ts";
 
 export type SequencedResponseStreamEvent = ResponseStreamEvent & {

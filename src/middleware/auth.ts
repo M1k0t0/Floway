@@ -1,6 +1,6 @@
 import type { Context, Next } from "hono";
-import { getEnv } from "../lib/env.ts";
-import { validateApiKey } from "../lib/api-keys.ts";
+import { getRepo } from "../repo/index.ts";
+import { getEnv } from "../runtime/env.ts";
 
 const PUBLIC_PATHS = new Set(["/", "/dashboard", "/favicon.ico"]);
 const AUTH_VALIDATE_PATHS = new Set(["/auth/login"]);
@@ -51,22 +51,15 @@ export const authMiddleware = async (c: Context, next: Next) => {
   }
 
   // API key — full access
-  const result = await validateApiKey(key);
-  if (result) {
+  const apiKey = await getRepo().apiKeys.findByRawKey(key);
+  if (apiKey) {
     c.set("authKey", key);
     c.set("isAdmin", false);
-    c.set("apiKeyId", result.id);
+    c.set("apiKeyId", apiKey.id);
     return next();
   }
 
   return c.json({ error: "Unauthorized" }, 401);
-};
-
-export const adminOnlyMiddleware = async (c: Context, next: Next) => {
-  if (!c.get("isAdmin")) {
-    return c.json({ error: "Dashboard key required" }, 403);
-  }
-  await next();
 };
 
 function extractKey(c: Context): string | null {

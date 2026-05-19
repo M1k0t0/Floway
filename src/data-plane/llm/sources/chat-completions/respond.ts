@@ -3,24 +3,24 @@ import {
   type InternalDebugError,
   toInternalDebugError,
 } from "../../shared/errors/internal-debug-error.ts";
-import type { ChatCompletionChunk } from "../../../../lib/chat-completions-types.ts";
-import { chatCompletionsErrorPayloadMessage } from "../../../../lib/chat-completions-errors.ts";
-import { collectChatProtocolEventsToCompletion } from "./events/to-response.ts";
+import type { ChatCompletionChunk } from "../../shared/protocol/chat-completions.ts";
+import { chatCompletionsErrorPayloadMessage } from "../../shared/protocol/chat-completions-errors.ts";
+import { collectChatProtocolEventsToCompletion } from "./events/reassemble.ts";
 import { chatProtocolEventsToSSEFrames } from "./events/to-sse.ts";
 import type { StreamExecuteResult } from "../../shared/errors/result.ts";
 import { upstreamErrorToResponse } from "../../shared/errors/upstream-error.ts";
 import { proxySSE } from "../../shared/stream/proxy-sse.ts";
-import { downstreamSSECommentKeepAliveFrame } from "../../shared/stream/keep-alive.ts";
-import { type ProtocolFrame, sseFrame } from "../../shared/stream/types.ts";
+import {
+  type ProtocolFrame,
+  sseCommentFrame,
+  sseFrame,
+} from "../../shared/stream/types.ts";
 import {
   type HiddenChatStreamUsageCapture,
   type PerformanceFailureCapture,
-  withUsageResponseMetadata,
+  setUsageResponseMetadata,
 } from "../../../../middleware/usage-response-metadata.ts";
-import {
-  markPerformanceFailure,
-  trackPerformanceOutcome,
-} from "../performance.ts";
+import { trackPerformanceOutcome } from "../performance.ts";
 
 const internalChatErrorPayload = (error: InternalDebugError) => ({
   error: {
@@ -33,6 +33,8 @@ const internalChatErrorPayload = (error: InternalDebugError) => ({
     target_api: error.target_api,
   },
 });
+
+const downstreamSSECommentKeepAliveFrame = sseCommentFrame("keepalive");
 
 const internalChatErrorResponse = (
   status: number,
@@ -62,16 +64,16 @@ export const respondChatCompletions = async (
   downstreamAbortController?: AbortController,
 ): Promise<Response> => {
   if (result.type === "upstream-error") {
-    return withUsageResponseMetadata(c, upstreamErrorToResponse(result), {
+    const response = upstreamErrorToResponse(result);
+    setUsageResponseMetadata(c, {
       performance: result.performance,
     });
+    return response;
   }
   if (result.type === "internal-error") {
-    return withUsageResponseMetadata(
-      c,
-      internalChatErrorResponse(result.status, result.error),
-      { performance: result.performance },
-    );
+    const response = internalChatErrorResponse(result.status, result.error);
+    setUsageResponseMetadata(c, { performance: result.performance });
+    return response;
   }
 
   if (!wantsStream) {
@@ -81,67 +83,60 @@ export const respondChatCompletions = async (
         result.events,
       );
 
-      return withUsageResponseMetadata(
-        c,
-        Response.json(response),
-        {
-          usageModel: result.usageModel,
-          performance: result.performance,
-          performanceFailureCapture,
-        },
-      );
+      setUsageResponseMetadata(c, {
+        usageModel: result.usageModel,
+        performance: result.performance,
+        performanceFailureCapture,
+      });
+      return Response.json(response);
     } catch (error) {
-      markPerformanceFailure(performanceFailureCapture);
+      performanceFailureCapture.failed = true;
 
-      return withUsageResponseMetadata(
-        c,
-        internalChatErrorResponse(
-          502,
-          toInternalDebugError(error, "chat-completions"),
-        ),
-        {
-          performance: result.performance,
-          performanceFailureCapture,
-        },
+      const response = internalChatErrorResponse(
+        502,
+        toInternalDebugError(error, "chat-completions"),
       );
+      setUsageResponseMetadata(c, {
+        performance: result.performance,
+        performanceFailureCapture,
+      });
+      return response;
     }
   }
 
   const hiddenUsageCapture: HiddenChatStreamUsageCapture = {};
   const performanceFailureCapture: PerformanceFailureCapture = {};
 
-  return withUsageResponseMetadata(
+  const response = proxySSE(
     c,
-    proxySSE(
-      c,
-      chatProtocolEventsToSSEFrames(
-        trackPerformanceOutcome(
-          result.events,
-          performanceFailureCapture,
-          isChatCompletionFailureEvent,
-          isChatCompletionCompletionFrame,
-        ),
-        {
-          includeUsageChunk,
-          onUsageChunk: (usage) => {
-            hiddenUsageCapture.usage = usage;
-          },
-        },
+    chatProtocolEventsToSSEFrames(
+      trackPerformanceOutcome(
+        result.events,
+        performanceFailureCapture,
+        isChatCompletionFailureEvent,
+        isChatCompletionCompletionFrame,
       ),
       {
-        keepAlive: { frame: downstreamSSECommentKeepAliveFrame },
-        downstreamAbortController,
-        onError: (error) => {
-          markPerformanceFailure(performanceFailureCapture);
-          return internalChatStreamErrorFrame(error);
+        includeUsageChunk,
+        onUsageChunk: (usage) => {
+          hiddenUsageCapture.usage = usage;
         },
       },
     ),
     {
-      hiddenChatStreamUsageCapture: hiddenUsageCapture,
-      usageModel: result.usageModel,
-      performance: result.performance,
-      performanceFailureCapture,
+      keepAlive: { frame: downstreamSSECommentKeepAliveFrame },
+      downstreamAbortController,
+      onError: (error) => {
+        performanceFailureCapture.failed = true;
+        return internalChatStreamErrorFrame(error);
+      },
     },
   );
+  setUsageResponseMetadata(c, {
+    hiddenChatStreamUsageCapture: hiddenUsageCapture,
+    usageModel: result.usageModel,
+    performance: result.performance,
+    performanceFailureCapture,
+  });
+  return response;
 };

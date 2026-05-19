@@ -1,12 +1,11 @@
 import { assertEquals } from "@std/assert";
 import { Hono } from "hono";
 import {
-  getPerformanceResponseMetadata,
   getUsageResponseMetadata,
-  withUsageResponseMetadata,
+  setUsageResponseMetadata,
 } from "./usage-response-metadata.ts";
 import type { UsageResponseMetadata } from "./usage-response-metadata.ts";
-import type { PerformanceTelemetryContext } from "../lib/performance-telemetry.ts";
+import type { PerformanceTelemetryContext } from "../data-plane/shared/performance/telemetry.ts";
 
 const performance = {
   keyId: "key_a",
@@ -25,14 +24,16 @@ Deno.test("usage response metadata uses Context state without mutating response 
   app.use("*", async (c, next) => {
     await next();
     usageMetadata = getUsageResponseMetadata(c);
-    performanceMetadata = getPerformanceResponseMetadata(c);
+    performanceMetadata = usageMetadata?.performance;
   });
 
-  app.get("/", (c) =>
-    withUsageResponseMetadata(c, new Response("ok"), {
+  app.get("/", (c) => {
+    setUsageResponseMetadata(c, {
       usageModel: "claude-opus-4.7",
       performance,
-    }));
+    });
+    return new Response("ok");
+  });
 
   const response = await app.request("/");
 

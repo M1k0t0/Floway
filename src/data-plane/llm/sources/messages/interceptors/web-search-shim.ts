@@ -1,7 +1,6 @@
 import {
   MESSAGES_WEB_SEARCH_ERROR_CODES,
-} from "../../../../../lib/messages-types.ts";
-import { isRecord } from "../../../../../lib/type-guards.ts";
+} from "../../../shared/protocol/messages.ts";
 import type {
   MessagesAssistantContentBlock,
   MessagesClientTool,
@@ -19,7 +18,7 @@ import type {
   MessagesWebSearchErrorCode,
   MessagesWebSearchResultBlock,
   MessagesWebSearchToolResultError,
-} from "../../../../../lib/messages-types.ts";
+} from "../../../shared/protocol/messages.ts";
 import { collectMessagesProtocolEventsToResponse } from "../events/to-response.ts";
 import { messagesResultToEvents } from "../events/from-result.ts";
 import { internalErrorResult } from "../../../shared/errors/result.ts";
@@ -40,11 +39,14 @@ import type {
   WebSearchProviderResult,
 } from "../../../../tools/web-search/types.ts";
 import type { SourceInterceptor } from "../../run-interceptors.ts";
-import type { MessagesSourceContext } from "./types.ts";
+import type { MessagesSourceContext } from "./index.ts";
 
 const MAX_QUERY_LENGTH = 1000;
 const WEB_SEARCH_TOOL_NAME = "web_search";
 const PAYLOAD_PREFIX = "cgws1";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 type SearchResultOwnership = "owned" | "foreign";
 

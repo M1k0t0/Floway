@@ -1,7 +1,7 @@
 import { app } from "./app.ts";
-import { clearCopilotTokenCache } from "./lib/copilot.ts";
-import { initEnv } from "./lib/env.ts";
-import { clearModelsCache } from "./lib/models-cache.ts";
+import { clearModelsCache } from "./data-plane/models/cache.ts";
+import { clearCopilotTokenCache } from "./shared/copilot.ts";
+import { initEnv } from "./runtime/env.ts";
 import type { SearchConfig } from "./data-plane/tools/web-search/types.ts";
 import { InMemoryRepo } from "./repo/memory.ts";
 import { initRepo } from "./repo/index.ts";

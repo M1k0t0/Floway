@@ -9,21 +9,17 @@ import type {
   MessagesToolResultBlock,
   MessagesToolResultContentBlock,
   MessagesUserContentBlock,
-} from "../../../../../lib/messages-types.ts";
+} from "../../../shared/protocol/messages.ts";
 import {
   collectMessagesProtocolEventsToResponse,
 } from "../events/to-response.ts";
-import {
-  messagesProtocolEventsToSSEFrames,
-} from "../events/to-sse.ts";
+import { messagesProtocolEventsToSSEFrames } from "../events/to-sse.ts";
 import { type WebSearchProvider } from "../../../../tools/web-search/provider.ts";
 import { DEFAULT_SEARCH_CONFIG } from "../../../../tools/web-search/search-config.ts";
 import type { WebSearchProviderResult } from "../../../../tools/web-search/types.ts";
 import { InMemoryRepo } from "../../../../../repo/memory.ts";
 import { initRepo } from "../../../../../repo/index.ts";
-import {
-  type ProtocolFrame,
-} from "../../../shared/stream/types.ts";
+import { type ProtocolFrame } from "../../../shared/stream/types.ts";
 import { messagesResultToEvents } from "../events/from-result.ts";
 import {
   collectAndRewriteMessagesWebSearchEventsToNative,
@@ -899,32 +895,35 @@ Deno.test("withMessagesWebSearchShim allows replay-only history when the search 
 
   const { tools: _tools, ...payload } = makeNativeReplayPayload();
 
-  const result = await withMessagesWebSearchShim({ payload }, () =>
-    Promise.resolve({
-      type: "events",
-      events: toAsyncIterable(messagesResponseToProtocolFrames({
-        id: "msg_replay_only",
-        type: "message",
-        role: "assistant",
-        model: "claude-test",
-        stop_reason: "end_turn",
-        stop_sequence: null,
-        usage: { input_tokens: 10, output_tokens: 1 },
-        content: [{
-          type: "text",
-          text: "Use the docs.",
-          citations: [{
-            type: "search_result_location",
-            url: "https://react.dev",
-            title: "React",
-            search_result_index: 0,
-            start_block_index: 0,
-            end_block_index: 0,
-            cited_text: "Official React documentation",
+  const result = await withMessagesWebSearchShim(
+    { payload },
+    () =>
+      Promise.resolve({
+        type: "events",
+        events: toAsyncIterable(messagesResponseToProtocolFrames({
+          id: "msg_replay_only",
+          type: "message",
+          role: "assistant",
+          model: "claude-test",
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: { input_tokens: 10, output_tokens: 1 },
+          content: [{
+            type: "text",
+            text: "Use the docs.",
+            citations: [{
+              type: "search_result_location",
+              url: "https://react.dev",
+              title: "React",
+              search_result_index: 0,
+              start_block_index: 0,
+              end_block_index: 0,
+              cited_text: "Official React documentation",
+            }],
           }],
-        }],
-      })),
-    }));
+        })),
+      }),
+  );
 
   assertEquals(result.type, "events");
   if (result.type !== "events") throw new Error("expected events result");
@@ -943,37 +942,42 @@ Deno.test("withMessagesWebSearchShim emits native-like citation deltas for repla
 
   const { tools: _tools, ...payload } = makeNativeReplayPayload();
 
-  const result = await withMessagesWebSearchShim({ payload }, () =>
-    Promise.resolve({
-      type: "events",
-      events: toAsyncIterable(messagesResponseToProtocolFrames({
-        id: "msg_replay_only_stream",
-        type: "message",
-        role: "assistant",
-        model: "claude-test",
-        stop_reason: "end_turn",
-        stop_sequence: null,
-        usage: { input_tokens: 10, output_tokens: 1 },
-        content: [{
-          type: "text",
-          text: "Use the docs.",
-          citations: [{
-            type: "search_result_location",
-            url: "https://react.dev",
-            title: "React",
-            search_result_index: 0,
-            start_block_index: 0,
-            end_block_index: 0,
-            cited_text: "Official React documentation",
+  const result = await withMessagesWebSearchShim(
+    { payload },
+    () =>
+      Promise.resolve({
+        type: "events",
+        events: toAsyncIterable(messagesResponseToProtocolFrames({
+          id: "msg_replay_only_stream",
+          type: "message",
+          role: "assistant",
+          model: "claude-test",
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: { input_tokens: 10, output_tokens: 1 },
+          content: [{
+            type: "text",
+            text: "Use the docs.",
+            citations: [{
+              type: "search_result_location",
+              url: "https://react.dev",
+              title: "React",
+              search_result_index: 0,
+              start_block_index: 0,
+              end_block_index: 0,
+              cited_text: "Official React documentation",
+            }],
           }],
-        }],
-      })),
-    }));
+        })),
+      }),
+  );
 
   assertEquals(result.type, "events");
   if (result.type !== "events") throw new Error("expected events result");
 
-  const frames = await collect(messagesProtocolEventsToSSEFrames(result.events));
+  const frames = await collect(
+    messagesProtocolEventsToSSEFrames(result.events),
+  );
   const citationFrame = frames.find((frame) => {
     if (frame.type !== "sse" || frame.event !== "content_block_delta") {
       return false;

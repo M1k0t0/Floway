@@ -2,8 +2,8 @@ import type {
   ChatCompletionChunk,
   ChatCompletionResponse,
   ChatReasoningItem,
-} from "../../../../lib/chat-completions-types.ts";
-import { makeResponsesReasoningId } from "../../../../lib/reasoning.ts";
+} from "../../shared/protocol/chat-completions.ts";
+import { makeResponsesReasoningId } from "../shared/reasoning.ts";
 import type {
   ResponseOutputFunctionCall,
   ResponseOutputItem,
@@ -11,14 +11,19 @@ import type {
   ResponseOutputReasoning,
   ResponsesResult,
   ResponseStreamEvent,
-} from "../../../../lib/responses-types.ts";
+} from "../../shared/protocol/responses.ts";
 import { toResponseReasoningItem } from "../shared/chat-responses-reasoning.ts";
 import { checkWhitespaceOverflow } from "../shared/tool-arguments.ts";
 import { mapChatCompletionsUsageToResponsesUsage } from "./result.ts";
 import { protocolEventsUntilTerminal } from "../../shared/stream/protocol-algebra.ts";
 import { eventFrame, type ProtocolFrame } from "../../shared/stream/types.ts";
 import type { SourceResponseStreamEvent } from "../../sources/responses/events/protocol.ts";
-import { upstreamChatCompletionStreamAlgebra } from "../upstream-protocol.ts";
+
+const upstreamChatCompletionStreamAlgebra = {
+  doneTerminates: true as const,
+  missingTerminalMessage:
+    "Upstream Chat Completions stream ended without a DONE sentinel.",
+};
 
 interface PendingScalarReasoningItem {
   text: string;

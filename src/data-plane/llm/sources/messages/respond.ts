@@ -3,24 +3,20 @@ import {
   type InternalDebugError,
   toInternalDebugError,
 } from "../../shared/errors/internal-debug-error.ts";
-import type { MessagesStreamEventData } from "../../../../lib/messages-types.ts";
+import type { MessagesStreamEventData } from "../../shared/protocol/messages.ts";
 import {
   collectMessagesProtocolEventsToResponse,
 } from "./events/to-response.ts";
 import { messagesProtocolEventsToSSEFrames } from "./events/to-sse.ts";
 import { proxySSE } from "../../shared/stream/proxy-sse.ts";
-import { downstreamMessagesPingKeepAliveFrame } from "../../shared/stream/keep-alive.ts";
 import type { StreamExecuteResult } from "../../shared/errors/result.ts";
 import { upstreamErrorToResponse } from "../../shared/errors/upstream-error.ts";
 import { type ProtocolFrame, sseFrame } from "../../shared/stream/types.ts";
 import {
   type PerformanceFailureCapture,
-  withUsageResponseMetadata,
+  setUsageResponseMetadata,
 } from "../../../../middleware/usage-response-metadata.ts";
-import {
-  markPerformanceFailure,
-  trackPerformanceOutcome,
-} from "../performance.ts";
+import { trackPerformanceOutcome } from "../performance.ts";
 
 const internalMessagesErrorPayload = (error: InternalDebugError) => ({
   type: "error",
@@ -34,6 +30,11 @@ const internalMessagesErrorPayload = (error: InternalDebugError) => ({
     target_api: error.target_api,
   },
 });
+
+const downstreamMessagesPingKeepAliveFrame = sseFrame(
+  JSON.stringify({ type: "ping" }),
+  "ping",
+);
 
 const internalMessagesErrorResponse = (
   status: number,
@@ -62,17 +63,17 @@ export const respondMessages = async (
   downstreamAbortController?: AbortController,
 ): Promise<Response> => {
   if (result.type === "upstream-error") {
-    return withUsageResponseMetadata(c, upstreamErrorToResponse(result), {
+    const response = upstreamErrorToResponse(result);
+    setUsageResponseMetadata(c, {
       performance: result.performance,
     });
+    return response;
   }
 
   if (result.type === "internal-error") {
-    return withUsageResponseMetadata(
-      c,
-      internalMessagesErrorResponse(result.status, result.error),
-      { performance: result.performance },
-    );
+    const response = internalMessagesErrorResponse(result.status, result.error);
+    setUsageResponseMetadata(c, { performance: result.performance });
+    return response;
   }
 
   if (!wantsStream) {
@@ -82,29 +83,24 @@ export const respondMessages = async (
         result.events,
       );
 
-      return withUsageResponseMetadata(
-        c,
-        Response.json(response),
-        {
-          usageModel: result.usageModel,
-          performance: result.performance,
-          performanceFailureCapture,
-        },
-      );
+      setUsageResponseMetadata(c, {
+        usageModel: result.usageModel,
+        performance: result.performance,
+        performanceFailureCapture,
+      });
+      return Response.json(response);
     } catch (error) {
-      markPerformanceFailure(performanceFailureCapture);
+      performanceFailureCapture.failed = true;
 
-      return withUsageResponseMetadata(
-        c,
-        internalMessagesErrorResponse(
-          502,
-          toInternalDebugError(error, "messages"),
-        ),
-        {
-          performance: result.performance,
-          performanceFailureCapture,
-        },
+      const response = internalMessagesErrorResponse(
+        502,
+        toInternalDebugError(error, "messages"),
       );
+      setUsageResponseMetadata(c, {
+        performance: result.performance,
+        performanceFailureCapture,
+      });
+      return response;
     }
   }
 
@@ -123,15 +119,16 @@ export const respondMessages = async (
       keepAlive: { frame: downstreamMessagesPingKeepAliveFrame },
       downstreamAbortController,
       onError: (error) => {
-        markPerformanceFailure(performanceFailureCapture);
+        performanceFailureCapture.failed = true;
         return internalMessagesStreamErrorFrame(error);
       },
     },
   );
 
-  return withUsageResponseMetadata(c, response, {
+  setUsageResponseMetadata(c, {
     usageModel: result.usageModel,
     performance: result.performance,
     performanceFailureCapture,
   });
+  return response;
 };

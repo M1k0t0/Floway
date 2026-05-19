@@ -11,7 +11,7 @@ import {
   withMockedFetch,
 } from "../test-helpers.ts";
 import { usageMiddleware } from "./usage.ts";
-import { withUsageResponseMetadata } from "./usage-response-metadata.ts";
+import { setUsageResponseMetadata } from "./usage-response-metadata.ts";
 
 const requestUsageMiddlewareOnly = async (
   keyId: string,
@@ -41,7 +41,10 @@ const requestUsageMiddlewareGemini = async (
   app.use("*", usageMiddleware);
   app.post(
     "/v1beta/models/:modelAction",
-    (c) => withUsageResponseMetadata(c, response, { usageModel }),
+    (c) => {
+      setUsageResponseMetadata(c, { usageModel });
+      return response;
+    },
   );
 
   return await app.request(

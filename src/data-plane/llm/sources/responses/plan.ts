@@ -1,6 +1,11 @@
-import type { ResponsesPayload } from "../../../../lib/responses-types.ts";
+import type { ResponsesPayload } from "../../shared/protocol/responses.ts";
 import type { ModelCapabilities } from "../../shared/models/get-model-capabilities.ts";
-import type { ResponsesPlan } from "../../shared/types/plan.ts";
+import type { CopilotFetchOptions } from "../../../../shared/copilot.ts";
+
+export type ResponsesPlan =
+  | { target: "responses"; fetchOptions: CopilotFetchOptions }
+  | { target: "messages"; fetchOptions: CopilotFetchOptions }
+  | { target: "chat-completions"; fetchOptions: CopilotFetchOptions };
 
 const hasVision = (payload: ResponsesPayload): boolean => {
   if (!Array.isArray(payload.input)) return false;
@@ -26,7 +31,6 @@ export const planResponsesRequest = (
   payload: ResponsesPayload,
   capabilities: ModelCapabilities,
 ): ResponsesPlan | null => {
-  const wantsStream = payload.stream === true;
   const fetchOptions = {
     vision: hasVision(payload),
     initiator: getInitiator(payload),
@@ -36,27 +40,21 @@ export const planResponsesRequest = (
   // behavior here, not an accidental route-order default.
   if (capabilities.supportsResponses) {
     return {
-      source: "responses",
       target: "responses",
-      wantsStream,
       fetchOptions,
     };
   }
 
   if (capabilities.supportsMessages) {
     return {
-      source: "responses",
       target: "messages",
-      wantsStream,
       fetchOptions,
     };
   }
 
   if (capabilities.supportsChatCompletions) {
     return {
-      source: "responses",
       target: "chat-completions",
-      wantsStream,
       fetchOptions,
     };
   }

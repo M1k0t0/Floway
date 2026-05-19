@@ -1,4 +1,4 @@
-import type { ChatCompletionChunk } from "../../../../../lib/chat-completions-types.ts";
+import type { ChatCompletionChunk } from "../../../shared/protocol/chat-completions.ts";
 import {
   type ProtocolFrame,
   type SseFrame,

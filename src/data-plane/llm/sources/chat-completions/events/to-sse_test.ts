@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
-import type { ChatCompletionChunk } from "../../../../../lib/chat-completions-types.ts";
+import type { ChatCompletionChunk } from "../../../shared/protocol/chat-completions.ts";
 import { doneFrame, eventFrame } from "../../../shared/stream/types.ts";
 import { chatProtocolEventsToSSEFrames } from "./to-sse.ts";
 

@@ -31,10 +31,9 @@ the request or response at that boundary.
 
 ## Quick Start
 
-> **Tip**: This project ships with a detailed `AGENTS.md` that describes the
-> full architecture, API routes, translation layer, and workarounds. Point your
-> coding agent at it (Claude Code and Codex CLI will read it automatically) and
-> ask it to explore.
+> **Tip**: This project ships with a concise `AGENTS.md` that records the main
+> architecture and workflow rules for coding agents. Claude Code and Codex CLI
+> will read it automatically.
 
 ### Prerequisites
 
@@ -94,7 +93,9 @@ wrangler deploy
 ### Optional Native Messages Web Search
 
 Anthropic-native-looking web search is available only on `/v1/messages` and
-`/messages` when the request stays on the native Messages target.
+`/messages` when a search provider is enabled. The Messages source shim runs
+before route planning, so native Messages and translated Messages routing paths
+see the same gateway-executed search behavior.
 
 Configure it in the dashboard under **Upstream -> Search**.
 

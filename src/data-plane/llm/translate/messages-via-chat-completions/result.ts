@@ -1,14 +1,14 @@
 import type {
   ChatCompletionResponse,
-} from "../../../../lib/chat-completions-types.ts";
+} from "../../shared/protocol/chat-completions.ts";
 import type {
   MessagesRedactedThinkingBlock,
   MessagesResponse,
   MessagesTextBlock,
   MessagesThinkingBlock,
   MessagesToolUseBlock,
-} from "../../../../lib/messages-types.ts";
-import { safeJsonParse } from "../shared/json.ts";
+} from "../../shared/protocol/messages.ts";
+import { parseToolArgumentsObject } from "../shared/tool-arguments.ts";
 
 export const toMessagesId = (id: string): string =>
   id.startsWith("msg_") ? id : `msg_${id.replace(/^chatcmpl-/, "")}`;
@@ -104,7 +104,7 @@ export const translateChatCompletionsToMessagesResponse = (
         type: "tool_use",
         id: toolCall.id,
         name: toolCall.function.name,
-        input: safeJsonParse(toolCall.function.arguments),
+        input: parseToolArgumentsObject(toolCall.function.arguments),
       });
     }
 

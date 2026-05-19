@@ -1,14 +1,14 @@
 import type {
   MessagesAssistantContentBlock,
   MessagesResponse,
-} from "../../../../lib/messages-types.ts";
+} from "../../shared/protocol/messages.ts";
 import type {
   ResponseOutputContentBlock,
   ResponseOutputItem,
   ResponsesResult,
-} from "../../../../lib/responses-types.ts";
+} from "../../shared/protocol/responses.ts";
 import { packReasoningSignature } from "../shared/messages-responses-signature.ts";
-import { safeJsonParse } from "../shared/json.ts";
+import { parseToolArgumentsObject } from "../shared/tool-arguments.ts";
 
 const combineMessageTextContent = (
   content: ResponseOutputContentBlock[] | undefined,
@@ -79,7 +79,7 @@ const mapOutputToMessagesContent = (
             type: "tool_use",
             id: item.call_id,
             name: item.name,
-            input: safeJsonParse(item.arguments),
+            input: parseToolArgumentsObject(item.arguments),
           });
         }
         break;

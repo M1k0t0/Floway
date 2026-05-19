@@ -3,27 +3,23 @@
 // No sessions, no cookies. All auth via key in every request.
 
 import type { Context } from "hono";
-import {
-  addGithubAccount,
-  type GitHubUser,
-  listGithubAccounts,
-  removeGithubAccount,
-  setGithubAccountOrder,
-} from "../../lib/github.ts";
-import { clearCopilotTokenCache } from "../../lib/copilot.ts";
-import { getEnv } from "../../lib/env.ts";
-import { validateApiKey } from "../../lib/api-keys.ts";
-import { clearModelsCache } from "../../lib/models-cache.ts";
+import { getRepo } from "../../repo/index.ts";
+import type { GitHubAccount } from "../../repo/types.ts";
+import { clearCopilotTokenCache } from "../../shared/copilot.ts";
+import { getEnv } from "../../runtime/env.ts";
+import { clearModelsCache } from "../../data-plane/models/cache.ts";
 import {
   clearAccountModelBackoffs,
   listAccountModelBackoffs,
-} from "../../lib/account-model-backoffs.ts";
+} from "../../data-plane/shared/account-pool/backoffs.ts";
 import {
   detectAccountType,
   fetchGitHubUser,
   pollGitHubDeviceFlow,
   startGitHubDeviceFlow,
 } from "./github-device-flow.ts";
+
+type GitHubUser = GitHubAccount["user"];
 
 /** POST /auth/login — validate ADMIN_KEY or API key */
 export const authLogin = async (c: Context) => {
@@ -37,13 +33,13 @@ export const authLogin = async (c: Context) => {
     }
 
     // API key login
-    const result = await validateApiKey(body.key);
-    if (result) {
+    const key = await getRepo().apiKeys.findByRawKey(body.key);
+    if (key) {
       return c.json({
         ok: true,
         isAdmin: false,
-        keyId: result.id,
-        keyName: result.name,
+        keyId: key.id,
+        keyName: key.name,
         keyHint: body.key.slice(-4),
       });
     }
@@ -100,7 +96,11 @@ export const authGithubPoll = async (c: Context) => {
 
       // Store account; request priority is controlled only by account order.
       const accountType = await detectAccountType(data.access_token);
-      await addGithubAccount(data.access_token, user, accountType);
+      await getRepo().github.saveAccount(user.id, {
+        token: data.access_token,
+        accountType,
+        user,
+      });
       await clearCopilotTokenCache();
       clearModelsCache();
       return c.json({ status: "complete", user });
@@ -115,7 +115,7 @@ export const authGithubPoll = async (c: Context) => {
 
 /** GET /auth/me — get all GitHub accounts in priority order */
 export const authMe = async (c: Context) => {
-  const accounts = await listGithubAccounts();
+  const accounts = await getRepo().github.listAccounts();
   const unavailableStatuses = await listAccountModelBackoffs(
     accounts.map((account) => account.user.id),
   );
@@ -138,7 +138,11 @@ export const authMe = async (c: Context) => {
       });
       if (!userResp.ok) return account;
       const user = (await userResp.json()) as GitHubUser;
-      await addGithubAccount(account.token, user, account.accountType);
+      await getRepo().github.saveAccount(user.id, {
+        token: account.token,
+        accountType: account.accountType,
+        user,
+      });
       return { ...account, user };
     } catch {
       // Ignore — user just stays as-is.
@@ -172,7 +176,7 @@ export const authGithubDisconnect = async (c: Context) => {
   if (!userId || isNaN(userId)) {
     return c.json({ error: "Invalid user ID" }, 400);
   }
-  await removeGithubAccount(userId);
+  await getRepo().github.deleteAccount(userId);
   await clearAccountModelBackoffs(userId);
   await clearCopilotTokenCache();
   clearModelsCache();
@@ -186,11 +190,19 @@ export const authGithubOrder = async (c: Context) => {
     return c.json({ error: "user_ids is required" }, 400);
   }
 
-  const ok = await setGithubAccountOrder(body.user_ids);
-  if (!ok) {
+  const repo = getRepo().github;
+  const accounts = await repo.listAccounts();
+  const accountIds = new Set(accounts.map((account) => account.user.id));
+  const requestedIds = new Set(body.user_ids);
+  if (
+    body.user_ids.length !== accounts.length ||
+    requestedIds.size !== body.user_ids.length ||
+    body.user_ids.some((id) => !accountIds.has(id))
+  ) {
     return c.json({ error: "Invalid GitHub account order" }, 400);
   }
 
+  await repo.setOrder(body.user_ids);
   clearModelsCache();
   return c.json({ ok: true });
 };

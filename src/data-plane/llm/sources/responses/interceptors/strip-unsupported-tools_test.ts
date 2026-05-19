@@ -1,5 +1,5 @@
 import { assertEquals, assertFalse } from "@std/assert";
-import type { ResponsesPayload } from "../../../../../lib/responses-types.ts";
+import type { ResponsesPayload } from "../../../shared/protocol/responses.ts";
 import { stripUnsupportedToolsFromPayload } from "./strip-unsupported-tools.ts";
 
 Deno.test("stripUnsupportedToolsFromPayload removes image_generation tools", () => {

@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { latencyBucketForMs } from "../../lib/performance-histogram.ts";
+import { latencyBucketForMs } from "../../shared/performance-histogram.ts";
 import { requestApp, setupAppTest } from "../../test-helpers.ts";
 
 Deno.test("/api/performance returns backend-aggregated base-model percentiles", async () => {

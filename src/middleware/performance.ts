@@ -1,20 +1,16 @@
 import type { Context, Next } from "hono";
 import {
-  type BackgroundScheduler,
-  backgroundSchedulerFromContext,
-  scheduleBackground,
-} from "../lib/background.ts";
-import {
   type PerformanceTelemetryContext,
   recordPerformanceError,
   recordPerformanceLatency,
   runtimeLocationFromRequest,
-} from "../lib/performance-telemetry.ts";
-import {
-  getPerformanceFailureCapture,
-  getPerformanceResponseMetadata,
-} from "./usage-response-metadata.ts";
+} from "../data-plane/shared/performance/telemetry.ts";
+import { getUsageResponseMetadata } from "./usage-response-metadata.ts";
 import type { PerformanceApiName } from "../repo/types.ts";
+import {
+  type BackgroundScheduler,
+  backgroundSchedulerFromContext,
+} from "../runtime/background.ts";
 
 const SOURCE_API_BY_PATH: Record<string, PerformanceApiName> = {
   "/messages": "messages",
@@ -45,8 +41,9 @@ export const performanceMiddleware = async (c: Context, next: Next) => {
   if (!keyId) return;
   const scheduler = backgroundSchedulerFromContext(c);
 
-  const metadata = getPerformanceResponseMetadata(c);
-  const failureCapture = getPerformanceFailureCapture(c);
+  const usageMetadata = getUsageResponseMetadata(c);
+  const metadata = usageMetadata?.performance;
+  const failureCapture = usageMetadata?.performanceFailureCapture;
   const context = metadata ?? fallbackContext(c, keyId, sourceApi);
   const state: RequestPerformanceState = {
     failed: c.res.status < 200 || c.res.status >= 300 ||
@@ -99,12 +96,10 @@ function recordRequestTotal(
   state: RequestPerformanceState,
   durationMs: number,
 ): void {
-  scheduleBackground(
-    scheduler,
-    state.failed
-      ? recordPerformanceError(context, "request_total")
-      : recordPerformanceLatency(context, "request_total", durationMs),
-  );
+  const promise = state.failed
+    ? recordPerformanceError(context, "request_total")
+    : recordPerformanceLatency(context, "request_total", durationMs);
+  scheduler ? scheduler(promise) : void promise;
 }
 
 function recordFailedRequestTotal(
@@ -117,7 +112,8 @@ function recordFailedRequestTotal(
 
   recordRequestTotal(
     backgroundSchedulerFromContext(c),
-    getPerformanceResponseMetadata(c) ?? fallbackContext(c, keyId, sourceApi),
+    getUsageResponseMetadata(c)?.performance ??
+      fallbackContext(c, keyId, sourceApi),
     { failed: true },
     durationMs,
   );

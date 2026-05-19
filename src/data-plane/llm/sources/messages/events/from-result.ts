@@ -2,7 +2,7 @@ import type {
   MessagesResponse,
   MessagesStreamEventData,
   MessagesTextCitation,
-} from "../../../../../lib/messages-types.ts";
+} from "../../../shared/protocol/messages.ts";
 import { type EventFrame, eventFrame } from "../../../shared/stream/types.ts";
 
 const citationToSsePayload = (citation: MessagesTextCitation) =>

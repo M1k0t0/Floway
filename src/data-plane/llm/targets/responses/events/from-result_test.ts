@@ -1,5 +1,5 @@
 import { assertEquals, assertFalse } from "@std/assert";
-import type { ResponsesResult } from "../../../../../lib/responses-types.ts";
+import type { ResponsesResult } from "../../../shared/protocol/responses.ts";
 import { responsesResultToEvents } from "./from-result.ts";
 
 const completedResponse: ResponsesResult = {

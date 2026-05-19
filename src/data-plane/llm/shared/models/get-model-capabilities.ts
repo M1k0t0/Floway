@@ -1,21 +1,10 @@
-import { findModel, type ModelInfo } from "../../../../lib/models-cache.ts";
-
-interface ModelCapabilitiesModel {
-  id: string;
-  supported_endpoints?: string[];
-  capabilities?: {
-    type?: string;
-    limits?: {
-      max_output_tokens?: number;
-    };
-    supports?: {
-      adaptive_thinking?: boolean;
-    };
-  };
-}
+import {
+  findModelInModels,
+  loadModels,
+  type ModelInfo,
+} from "../../../models/cache.ts";
 
 export interface ModelCapabilities {
-  model?: ModelCapabilitiesModel;
   maxOutputTokens?: number;
   supportsMessages: boolean;
   supportsResponses: boolean;
@@ -46,7 +35,6 @@ export const modelCapabilitiesFromModel = (
   const supportedEndpoints = model?.supported_endpoints ?? [];
 
   return {
-    model,
     maxOutputTokens: model?.capabilities?.limits?.max_output_tokens,
     supportsMessages: supportedEndpoints.includes("/v1/messages"),
     supportsResponses: supportedEndpoints.includes("/responses"),
@@ -62,6 +50,9 @@ export const getModelCapabilities = async (
   githubToken: string,
   accountType: string,
 ): Promise<ModelCapabilities> => {
-  const model = await findModel(modelId, githubToken, accountType);
+  const result = await loadModels(githubToken, accountType);
+  if (result.type === "error") throw result.error;
+
+  const model = findModelInModels(result.data, modelId);
   return modelCapabilitiesFromModel(model);
 };

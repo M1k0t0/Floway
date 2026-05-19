@@ -39,7 +39,9 @@ Deno.test("/auth/github/order updates GitHub account priority order", async () =
     [SECOND_ACCOUNT.user.id, githubAccount.user.id],
   );
   assertEquals(
-    body.accounts.some((account: Record<string, unknown>) => "active" in account),
+    body.accounts.some((account: Record<string, unknown>) =>
+      "active" in account
+    ),
     false,
   );
 });

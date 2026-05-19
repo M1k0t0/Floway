@@ -1,8 +1,8 @@
 // GET /api/copilot-quota — fetch Copilot usage/quota info from GitHub API
 
 import type { Context } from "hono";
-import { githubHeaders } from "../../lib/copilot.ts";
-import { getGithubCredentials } from "../../lib/github.ts";
+import { githubHeaders } from "../../shared/copilot.ts";
+import { getRepo } from "../../repo/index.ts";
 
 interface QuotaDetail {
   entitlement: number;
@@ -40,11 +40,21 @@ export const copilotQuota = async (c: Context) => {
       return c.json({ error: "Invalid GitHub account ID" }, 400);
     }
 
-    const { token: githubToken } = await getGithubCredentials(userId);
+    const githubRepo = getRepo().github;
+    const account = userId === undefined
+      ? (await githubRepo.listAccounts())[0] ?? null
+      : await githubRepo.getAccount(userId);
+    if (!account) {
+      throw new Error(
+        userId === undefined
+          ? "No GitHub account connected — add one via the dashboard"
+          : "GitHub account not found",
+      );
+    }
 
     const resp = await fetch(
       "https://api.github.com/copilot_internal/user",
-      { headers: await githubHeaders(githubToken) },
+      { headers: await githubHeaders(account.token) },
     );
 
     if (!resp.ok) {

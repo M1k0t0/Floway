@@ -91,6 +91,57 @@ Deno.test("/v1beta/models/:model:generateContent routes Gemini through native ch
   assertEquals(upstreamBody.model, "gpt-chat-native");
 });
 
+Deno.test("/v1beta/models/models/:model:generateContent accepts Gemini resource model names", async () => {
+  const { apiKey } = await setupAppTest();
+  let upstreamBody: Record<string, unknown> | undefined;
+
+  await withMockedFetch(async (request) => {
+    const mocked = mockTokenAndModels(request, [{
+      id: "gpt-chat-resource",
+      supported_endpoints: ["/chat/completions"],
+    }]);
+    if (mocked) return mocked;
+
+    const url = new URL(request.url);
+    upstreamBody = JSON.parse(await request.text()) as Record<string, unknown>;
+
+    if (url.pathname === "/chat/completions") {
+      return jsonResponse({
+        id: "chatcmpl_gemini_resource",
+        object: "chat.completion",
+        created: 1,
+        model: "gpt-chat-resource",
+        choices: [{
+          index: 0,
+          message: { role: "assistant", content: "resource ok" },
+          finish_reason: "stop",
+        }],
+      });
+    }
+
+    throw new Error(`Unhandled fetch ${request.url}`);
+  }, async () => {
+    const response = await requestApp(
+      "/v1beta/models/models/gpt-chat-resource:generateContent",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": apiKey.key,
+        },
+        body: JSON.stringify(geminiRequest("gpt-chat-resource")),
+      },
+    );
+
+    assertEquals(response.status, 200);
+    const body = await response.json();
+    assertEquals(body.candidates[0].content.parts, [{ text: "resource ok" }]);
+  });
+
+  assertExists(upstreamBody);
+  assertEquals(upstreamBody.model, "gpt-chat-resource");
+});
+
 Deno.test("/v1beta/models/:model:generateContent prefers messages over other Gemini targets", async () => {
   const { apiKey } = await setupAppTest();
   let upstreamPath = "";
@@ -474,6 +525,41 @@ Deno.test("/v1beta/models/:model:generateContent malformed JSON returns Google R
   assertEquals(body.error.name, "SyntaxError");
   assertEquals(body.error.source_api, "gemini");
   assertExists(body.error.stack);
+});
+
+Deno.test("/v1beta/models/:modelAction returns Google RPC 404 for malformed actions", async () => {
+  const { apiKey } = await setupAppTest();
+  const headers = {
+    "content-type": "application/json",
+    "x-api-key": apiKey.key,
+  };
+
+  const missingAction = await requestApp("/v1beta/models/gpt-chat-native:", {
+    method: "POST",
+    headers,
+    body: "{}",
+  });
+  assertEquals(missingAction.status, 404);
+  assertEquals(await missingAction.json(), {
+    error: {
+      code: 404,
+      message: "Unknown Gemini model action: gpt-chat-native:",
+      status: "NOT_FOUND",
+    },
+  });
+
+  const unknownAction = await requestApp(
+    "/v1beta/models/gpt-chat-native:unknownAction",
+    { method: "POST", headers, body: "{}" },
+  );
+  assertEquals(unknownAction.status, 404);
+  assertEquals(await unknownAction.json(), {
+    error: {
+      code: 404,
+      message: "Unknown Gemini model action: unknownAction",
+      status: "NOT_FOUND",
+    },
+  });
 });
 
 Deno.test("/v1beta/models/:model:generateContent accepts x-goog-api-key", async () => {

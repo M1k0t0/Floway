@@ -2,10 +2,10 @@ import type {
   ResponseFunctionTool,
   ResponsesPayload,
   ResponseTool,
-} from "../../../../../lib/responses-types.ts";
+} from "../../../shared/protocol/responses.ts";
 import type { SourceInterceptor } from "../../run-interceptors.ts";
 import type { SourceResponseStreamEvent } from "../events/protocol.ts";
-import type { ResponsesSourceContext } from "./types.ts";
+import type { ResponsesSourceContext } from "./index.ts";
 
 const APPLY_PATCH_FUNCTION_TOOL: ResponseFunctionTool = {
   type: "function",

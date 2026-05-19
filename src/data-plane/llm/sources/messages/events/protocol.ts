@@ -1,6 +1,9 @@
-import type { MessagesStreamEventData } from "../../../../../lib/messages-types.ts";
+import type { MessagesStreamEventData } from "../../../shared/protocol/messages.ts";
 import type { ProtocolTerminalAlgebra } from "../../../shared/stream/protocol-algebra.ts";
-import { isMessagesTerminalEvent } from "../../../shared/stream/terminal-events.ts";
+
+const isMessagesTerminalEvent = (
+  event: Pick<MessagesStreamEventData, "type">,
+): boolean => event.type === "message_stop" || event.type === "error";
 
 export const messagesSourceStreamAlgebra = {
   isTerminalEvent: isMessagesTerminalEvent,

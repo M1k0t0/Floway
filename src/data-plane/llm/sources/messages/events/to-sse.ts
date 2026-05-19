@@ -1,4 +1,4 @@
-import type { MessagesStreamEventData } from "../../../../../lib/messages-types.ts";
+import type { MessagesStreamEventData } from "../../../shared/protocol/messages.ts";
 import {
   type ProtocolFrame,
   type SseFrame,

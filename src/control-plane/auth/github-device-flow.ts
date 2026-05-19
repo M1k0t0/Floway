@@ -1,5 +1,7 @@
-import { githubHeaders } from "../../lib/copilot.ts";
-import type { GitHubUser } from "../../lib/github.ts";
+import { githubHeaders } from "../../shared/copilot.ts";
+import type { GitHubAccount } from "../../repo/types.ts";
+
+type GitHubUser = GitHubAccount["user"];
 
 const GITHUB_CLIENT_ID = "Iv1.b507a08c87ecfe98";
 const GITHUB_SCOPES = "read:user";

@@ -2,8 +2,7 @@
 // without modifying route handlers
 
 import type { Context, Next } from "hono";
-import { recordUsage } from "../lib/usage-tracker.ts";
-import { touchApiKeyLastUsed } from "../lib/api-keys.ts";
+import { getRepo } from "../repo/index.ts";
 import {
   getUsageResponseMetadata,
   type UsageResponseMetadata,
@@ -15,6 +14,8 @@ const PROXY_SUFFIXES = [
   "/responses",
   "/embeddings",
 ];
+
+const currentHour = (): string => new Date().toISOString().slice(0, 13);
 
 function isProxyPath(path: string): boolean {
   if (PROXY_SUFFIXES.some((s) => path === s || path === `/v1${s}`)) {
@@ -167,16 +168,26 @@ const persistUsage = async (
   model: string,
   usage: UsageInfo,
 ): Promise<void> => {
+  const repo = getRepo();
   await Promise.all([
-    recordUsage(
+    repo.usage.record(
       keyId,
       model,
+      currentHour(),
+      1,
       usage.input,
       usage.output,
       usage.cacheRead,
       usage.cacheCreation,
     ),
-    touchApiKeyLastUsed(keyId),
+    (async () => {
+      const key = await repo.apiKeys.getById(keyId);
+      if (!key) return;
+      await repo.apiKeys.save({
+        ...key,
+        lastUsedAt: new Date().toISOString(),
+      });
+    })(),
   ]);
 };
 

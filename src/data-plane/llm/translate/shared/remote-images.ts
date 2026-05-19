@@ -1,4 +1,4 @@
-import type { MessagesImageBlock } from "../../../../lib/messages-types.ts";
+import type { MessagesImageBlock } from "../../shared/protocol/messages.ts";
 
 const ALLOWED_IMAGE_TYPES = new Set([
   "image/jpeg",

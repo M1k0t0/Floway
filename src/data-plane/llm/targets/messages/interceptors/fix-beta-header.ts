@@ -1,4 +1,4 @@
-import type { MessagesResponse } from "../../../../../lib/messages-types.ts";
+import type { MessagesResponse } from "../../../shared/protocol/messages.ts";
 import type { TargetInterceptor } from "../../run-interceptors.ts";
 import type { EmitToMessagesInput } from "../emit.ts";
 

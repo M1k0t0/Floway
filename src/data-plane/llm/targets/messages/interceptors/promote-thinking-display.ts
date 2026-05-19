@@ -1,9 +1,8 @@
 import type {
   MessagesResponse,
   MessagesThinkingDisplay,
-} from "../../../../../lib/messages-types.ts";
-import { normalizeModelName } from "../../../../../lib/model-name.ts";
-import { mapEventResult } from "../../../shared/errors/result.ts";
+} from "../../../shared/protocol/messages.ts";
+import { normalizeModelName } from "../../../../../shared/model-name.ts";
 import type { StreamFrame } from "../../../shared/stream/types.ts";
 import type { TargetInterceptor } from "../../run-interceptors.ts";
 import type { EmitToMessagesInput } from "../emit.ts";
@@ -164,7 +163,6 @@ export const withThinkingDisplayPromoted: TargetInterceptor<
 
   const result = await run();
 
-  return shouldExposeOmitted
-    ? mapEventResult(result, omitThinkingTextFromStreamFrames)
-    : result;
+  if (!shouldExposeOmitted || result.type !== "events") return result;
+  return { ...result, events: omitThinkingTextFromStreamFrames(result.events) };
 };

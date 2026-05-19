@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
-import type { MessagesStreamEventData } from "../../../../../lib/messages-types.ts";
+import type { MessagesStreamEventData } from "../../../shared/protocol/messages.ts";
 import { eventFrame } from "../../../shared/stream/types.ts";
 import { messagesProtocolEventsToSSEFrames } from "./to-sse.ts";
 

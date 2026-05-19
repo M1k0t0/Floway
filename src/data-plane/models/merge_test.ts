@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { mergeClaudeVariants } from "./merge.ts";
-import type { ModelInfo, ModelsResponse } from "../../lib/models-cache.ts";
+import type { ModelInfo, ModelsResponse } from "./types.ts";
 
 const assertSameSet = <T>(actual: readonly T[] | undefined, expected: T[]) => {
   // Union order in merge.ts follows the input variant order, which is an

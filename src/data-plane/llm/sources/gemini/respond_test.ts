@@ -1,6 +1,6 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { Hono } from "hono";
-import type { GeminiErrorResponse } from "../../../../lib/gemini-types.ts";
+import type { GeminiErrorResponse } from "../../shared/protocol/gemini.ts";
 import type { InternalDebugError } from "../../shared/errors/internal-debug-error.ts";
 import type { StreamExecuteResult } from "../../shared/errors/result.ts";
 import { eventFrame } from "../../shared/stream/types.ts";

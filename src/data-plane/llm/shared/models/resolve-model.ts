@@ -1,13 +1,12 @@
-import type { ChatCompletionsPayload } from "../../../../lib/chat-completions-types.ts";
-import type { MessagesPayload } from "../../../../lib/messages-types.ts";
-import type {
-  ModelInfo,
-  ModelsResponse,
-} from "../../../../lib/models-cache.ts";
-import { loadModelsForAccount } from "../../../../lib/models-cache.ts";
-import { normalizeModelName } from "../../../../lib/model-name.ts";
-import { getMessagesRequestedReasoningEffort } from "../../../../lib/reasoning.ts";
-import type { ResponsesPayload } from "../../../../lib/responses-types.ts";
+import type { ChatCompletionsPayload } from "../protocol/chat-completions.ts";
+import {
+  getMessagesRequestedReasoningEffort,
+  type MessagesPayload,
+} from "../protocol/messages.ts";
+import type { ModelInfo, ModelsResponse } from "../../../models/types.ts";
+import { loadModels } from "../../../models/cache.ts";
+import { normalizeModelName } from "../../../../shared/model-name.ts";
+import type { ResponsesPayload } from "../protocol/responses.ts";
 import { getRepo } from "../../../../repo/index.ts";
 
 const CONTEXT_1M_BETA = "context-1m-2025-08-07";
@@ -167,7 +166,7 @@ export const resolveModelForRequest = async (
   const byId = new Map<string, ModelInfo>();
 
   for (const account of accounts) {
-    const result = await loadModelsForAccount(account);
+    const result = await loadModels(account.token, account.accountType);
     if (result.type !== "models") continue;
 
     for (const model of result.data.data) {

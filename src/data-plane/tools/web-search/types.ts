@@ -1,7 +1,7 @@
-import type { MessagesWebSearchErrorCode } from "../../../lib/messages-types.ts";
-import type { WebSearchProviderName } from "../../../lib/web-search-types.ts";
+import type { MessagesWebSearchErrorCode } from "../../llm/shared/protocol/messages.ts";
+import type { WebSearchProviderName } from "../../../shared/web-search-providers.ts";
 
-export type { WebSearchProviderName } from "../../../lib/web-search-types.ts";
+export type { WebSearchProviderName } from "../../../shared/web-search-providers.ts";
 
 export interface SearchConfig {
   provider: "disabled" | WebSearchProviderName;

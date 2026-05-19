@@ -4,7 +4,7 @@ import {
   assertFalse,
   assertStringIncludes,
 } from "@std/assert";
-import type { ResponsesResult } from "../../../../lib/responses-types.ts";
+import type { ResponsesResult } from "../../shared/protocol/responses.ts";
 import type { SearchConfig } from "../../../tools/web-search/types.ts";
 import {
   copilotModels,
@@ -320,6 +320,50 @@ Deno.test("/v1/messages malformed JSON returns structured internal debug error",
   assertEquals(body.error.name, "SyntaxError");
   assertEquals(body.error.source_api, "messages");
   assertExists(body.error.stack);
+});
+
+Deno.test("/v1/messages preserves upstream model-list failures", async () => {
+  const { apiKey } = await setupAppTest();
+
+  await withMockedFetch(async (request) => {
+    const url = new URL(request.url);
+
+    if (url.hostname === "update.code.visualstudio.com") {
+      return jsonResponse(["1.110.1"]);
+    }
+    if (url.pathname === "/copilot_internal/v2/token") {
+      return jsonResponse({
+        token: "copilot-access-token",
+        expires_at: 4102444800,
+        refresh_in: 3600,
+      });
+    }
+    if (url.pathname === "/models") {
+      return new Response("models unavailable", {
+        status: 503,
+        headers: { "x-copilot-models-error": "1" },
+      });
+    }
+
+    throw new Error(`Unhandled fetch ${request.url}`);
+  }, async () => {
+    const response = await requestApp("/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": apiKey.key,
+      },
+      body: JSON.stringify({
+        model: "claude-models-down",
+        max_tokens: 10,
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    });
+
+    assertEquals(response.status, 503);
+    assertEquals(response.headers.get("x-copilot-models-error"), "1");
+    assertEquals(await response.text(), "models unavailable");
+  });
 });
 
 Deno.test("/v1/messages rewrites upstream context-window errors to Messages compact form", async () => {

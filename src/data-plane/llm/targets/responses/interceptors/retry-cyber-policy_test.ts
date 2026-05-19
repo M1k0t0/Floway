@@ -2,7 +2,7 @@ import { assertEquals } from "@std/assert";
 import type {
   ResponsesPayload,
   ResponsesResult,
-} from "../../../../../lib/responses-types.ts";
+} from "../../../shared/protocol/responses.ts";
 import type { EmitInput } from "../../emit-types.ts";
 import { eventResult } from "../../../shared/errors/result.ts";
 import { jsonFrame, sseFrame } from "../../../shared/stream/types.ts";

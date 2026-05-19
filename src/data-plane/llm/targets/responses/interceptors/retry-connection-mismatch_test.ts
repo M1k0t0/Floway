@@ -2,7 +2,7 @@ import { assertEquals, assertStringIncludes } from "@std/assert";
 import type {
   ResponsesPayload,
   ResponsesResult,
-} from "../../../../../lib/responses-types.ts";
+} from "../../../shared/protocol/responses.ts";
 import { initRepo } from "../../../../../repo/index.ts";
 import { InMemoryRepo } from "../../../../../repo/memory.ts";
 import { eventResult } from "../../../shared/errors/result.ts";

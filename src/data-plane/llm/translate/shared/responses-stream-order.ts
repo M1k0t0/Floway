@@ -1,7 +1,7 @@
 import type {
   ResponseOutputItem,
   ResponseStreamEvent,
-} from "../../../../lib/responses-types.ts";
+} from "../../shared/protocol/responses.ts";
 
 export interface ResponsesOutputOrderState {
   pendingOutputIndexes: Set<number>;
@@ -76,21 +76,4 @@ export const recordResponseOutputOrderEvent = (
   if (isOutputItemDoneEvent(event)) {
     state.pendingOutputIndexes.delete(event.output_index);
   }
-};
-
-export const responsePartKey = (
-  outputIndex: number,
-  partIndex: number,
-): string => `${outputIndex}:${partIndex}`;
-
-export const hasResponsePartForOutput = (
-  keys: Set<string>,
-  outputIndex: number,
-): boolean => {
-  const prefix = `${outputIndex}:`;
-  for (const key of keys) {
-    if (key.startsWith(prefix)) return true;
-  }
-
-  return false;
 };

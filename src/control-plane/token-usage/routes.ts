@@ -5,8 +5,7 @@
 // usage records for all keys. API keys themselves are only readable by their owner.
 
 import type { Context } from "hono";
-import { queryUsage } from "../../lib/usage-tracker.ts";
-import { listApiKeys } from "../../lib/api-keys.ts";
+import { getRepo } from "../../repo/index.ts";
 import { USAGE_KEY_COLOR_ORDER } from "../usage-key-colors.ts";
 import { aggregateUsageForDisplay } from "./aggregate.ts";
 
@@ -22,9 +21,10 @@ export const tokenUsage = async (c: Context) => {
     }, 400);
   }
 
+  const repo = getRepo();
   const [rawRecords, keys] = await Promise.all([
-    queryUsage({ keyId, start, end }),
-    listApiKeys(),
+    repo.usage.query({ keyId, start, end }),
+    repo.apiKeys.list(),
   ]);
   const records = aggregateUsageForDisplay(rawRecords);
 

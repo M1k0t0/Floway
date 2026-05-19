@@ -1,16 +1,14 @@
-import type { MessagesResponse } from "../../../../../lib/messages-types.ts";
+import type { MessagesResponse } from "../../../shared/protocol/messages.ts";
 import type { TargetInterceptor } from "../../run-interceptors.ts";
 import type { EmitToMessagesInput } from "../emit.ts";
 import { withBetaHeaderFixed } from "./fix-beta-header.ts";
 import { withThinkingDisplayPromoted } from "./promote-thinking-display.ts";
-import { withDoneSentinelStripped } from "./strip-done-sentinel.ts";
 import { withEagerInputStreamingStripped } from "./strip-eager-input-streaming.ts";
 
 export const messagesTargetInterceptors = [
   withThinkingDisplayPromoted,
   withBetaHeaderFixed,
   withEagerInputStreamingStripped,
-  withDoneSentinelStripped,
 ] satisfies readonly TargetInterceptor<
   EmitToMessagesInput,
   MessagesResponse

@@ -1,9 +1,9 @@
 import { assertEquals, assertRejects } from "@std/assert";
-import type { ResponsesResult } from "../../../../../lib/responses-types.ts";
+import type { ResponsesResult } from "../../../shared/protocol/responses.ts";
 import { eventFrame } from "../../../shared/stream/types.ts";
 import { responsesResultToEvents } from "../../../targets/responses/events/from-result.ts";
 import type { SourceResponseStreamEvent } from "./protocol.ts";
-import { collectResponsesProtocolEventsToResult } from "./to-response.ts";
+import { collectResponsesProtocolEventsToResult } from "./reassemble.ts";
 
 Deno.test("collectResponsesProtocolEventsToResult reassembles synthetic Responses events", async () => {
   const expected: ResponsesResult = {

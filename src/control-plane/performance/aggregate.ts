@@ -1,8 +1,8 @@
 import {
   type HistogramBucket,
   percentileFromHistogramBuckets,
-} from "../../lib/performance-histogram.ts";
-import { displayModelName } from "../../lib/model-name.ts";
+} from "../../shared/performance-histogram.ts";
+import { displayModelName } from "../../shared/model-name.ts";
 import type { PerformanceTelemetryRecord } from "../../repo/types.ts";
 
 export type PerformanceBucketGranularity = "hour" | "4h" | "8h" | "day" | "all";

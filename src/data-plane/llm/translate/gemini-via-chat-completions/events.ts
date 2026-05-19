@@ -1,19 +1,24 @@
-import { chatCompletionsErrorPayloadMessage } from "../../../../lib/chat-completions-errors.ts";
+import { chatCompletionsErrorPayloadMessage } from "../../shared/protocol/chat-completions-errors.ts";
 import type {
   ChatCompletionChunk,
   Delta,
-} from "../../../../lib/chat-completions-types.ts";
+} from "../../shared/protocol/chat-completions.ts";
 import type {
   GeminiCandidate,
   GeminiGenerateContentResponse,
   GeminiPart,
   GeminiStreamEvent,
   GeminiUsageMetadata,
-} from "../../../../lib/gemini-types.ts";
+} from "../../shared/protocol/gemini.ts";
 import { protocolEventsUntilTerminal } from "../../shared/stream/protocol-algebra.ts";
 import { eventFrame, type ProtocolFrame } from "../../shared/stream/types.ts";
-import { upstreamChatCompletionStreamAlgebra } from "../upstream-protocol.ts";
 import { mapFinishReason, mapUsage } from "./result.ts";
+
+const upstreamChatCompletionStreamAlgebra = {
+  doneTerminates: true as const,
+  missingTerminalMessage:
+    "Upstream Chat Completions stream ended without a DONE sentinel.",
+};
 
 type ChatStreamChoice = ChatCompletionChunk["choices"][0];
 type ChatToolCallDelta = NonNullable<Delta["tool_calls"]>[0];

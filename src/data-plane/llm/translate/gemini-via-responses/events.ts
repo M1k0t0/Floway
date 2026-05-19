@@ -1,17 +1,26 @@
 import type {
   GeminiPart,
   GeminiStreamEvent,
-} from "../../../../lib/gemini-types.ts";
+} from "../../shared/protocol/gemini.ts";
 import type {
   ResponseOutputFunctionCall,
   ResponseOutputReasoning,
   ResponsesResult,
   ResponseStreamEvent,
-} from "../../../../lib/responses-types.ts";
+} from "../../shared/protocol/responses.ts";
 import { protocolEventsUntilTerminal } from "../../shared/stream/protocol-algebra.ts";
 import { eventFrame, type ProtocolFrame } from "../../shared/stream/types.ts";
-import { upstreamResponsesStreamAlgebra } from "../upstream-protocol.ts";
 import { geminiResponse, mapTerminalFinishReason, mapUsage } from "./result.ts";
+
+const upstreamResponsesStreamAlgebra = {
+  isTerminalEvent: (event: Pick<ResponseStreamEvent, "type">): boolean =>
+    event.type === "response.completed" ||
+    event.type === "response.incomplete" ||
+    event.type === "response.failed" ||
+    event.type === "error",
+  missingTerminalMessage:
+    "Upstream Responses stream ended without a terminal event.",
+};
 
 type ResponseReasoningTextDeltaEvent = Extract<
   ResponseStreamEvent,

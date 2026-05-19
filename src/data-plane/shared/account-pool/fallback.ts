@@ -3,18 +3,18 @@ import type { GitHubAccount } from "../../../repo/types.ts";
 import {
   isAccountSwitchableStatus,
   isCopilotTokenFetchError,
-} from "../../../lib/copilot.ts";
+} from "../../../shared/copilot.ts";
 import {
   clearModelBackoffs,
   isAccountModelBackedOff,
   markAccountModelBackoff,
-} from "../../../lib/account-model-backoffs.ts";
+} from "./backoffs.ts";
 import {
   findModelInModels,
   isSwitchableModelsLoadError,
   loadModelsForAccount,
   ModelsFetchError,
-} from "../../../lib/models-cache.ts";
+} from "../../models/cache.ts";
 
 export interface AccountPoolAttemptContext {
   account: GitHubAccount;

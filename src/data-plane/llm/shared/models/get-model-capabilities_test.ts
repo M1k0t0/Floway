@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { modelCapabilitiesFromModel } from "./get-model-capabilities.ts";
-import type { ModelInfo } from "../../../../lib/models-cache.ts";
+import type { ModelInfo } from "../../../models/types.ts";
 
 const baseModel = (overrides: Partial<ModelInfo> = {}): ModelInfo => ({
   id: "test-model",

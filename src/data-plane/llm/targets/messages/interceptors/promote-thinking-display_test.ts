@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import type { MessagesResponse } from "../../../../../lib/messages-types.ts";
+import type { MessagesResponse } from "../../../shared/protocol/messages.ts";
 import { jsonFrame, sseFrame } from "../../../shared/stream/types.ts";
 import type { EmitToMessagesInput } from "../emit.ts";
 import {

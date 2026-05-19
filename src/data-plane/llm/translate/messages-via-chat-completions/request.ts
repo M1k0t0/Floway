@@ -4,23 +4,22 @@ import type {
   Message,
   Tool,
   ToolCall,
-} from "../../../../lib/chat-completions-types.ts";
-import type {
-  MessagesAssistantContentBlock,
-  MessagesAssistantMessage,
-  MessagesClientTool,
-  MessagesMessage,
-  MessagesPayload,
-  MessagesServerToolUseBlock,
-  MessagesTextBlock,
-  MessagesToolResultBlock,
-  MessagesToolUseBlock,
-  MessagesUserContentBlock,
-  MessagesUserMessage,
-  MessagesWebSearchToolResultBlock,
-} from "../../../../lib/messages-types.ts";
-
-import { getMessagesRequestedReasoningEffort } from "../../../../lib/reasoning.ts";
+} from "../../shared/protocol/chat-completions.ts";
+import {
+  getMessagesRequestedReasoningEffort,
+  type MessagesAssistantContentBlock,
+  type MessagesAssistantMessage,
+  type MessagesClientTool,
+  type MessagesMessage,
+  type MessagesPayload,
+  type MessagesServerToolUseBlock,
+  type MessagesTextBlock,
+  type MessagesToolResultBlock,
+  type MessagesToolUseBlock,
+  type MessagesUserContentBlock,
+  type MessagesUserMessage,
+  type MessagesWebSearchToolResultBlock,
+} from "../../shared/protocol/messages.ts";
 
 const toChatCompletionsContent = (
   content:

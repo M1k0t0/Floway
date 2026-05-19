@@ -1,7 +1,7 @@
 import type {
   ChatCompletionChunk,
   ChatCompletionResponse,
-} from "../../../../../lib/chat-completions-types.ts";
+} from "../../../shared/protocol/chat-completions.ts";
 import {
   type DoneFrame,
   doneFrame,

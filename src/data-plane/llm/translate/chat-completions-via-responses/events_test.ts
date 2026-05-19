@@ -2,12 +2,15 @@ import { assertEquals, assertRejects } from "@std/assert";
 import type {
   ResponsesResult,
   ResponseStreamEvent,
-} from "../../../../lib/responses-types.ts";
+} from "../../shared/protocol/responses.ts";
 import { chatProtocolEventsToSSEFrames } from "../../sources/chat-completions/events/to-sse.ts";
 import { eventFrame, type ProtocolFrame } from "../../shared/stream/types.ts";
 import { responsesResultToEvents } from "../../targets/responses/events/from-result.ts";
-import type { UpstreamResponseStreamEvent } from "../upstream-protocol.ts";
 import { translateToSourceEvents } from "./events.ts";
+
+type UpstreamResponseStreamEvent = ResponseStreamEvent & {
+  sequence_number?: number;
+};
 
 const makeResponse = (status: ResponsesResult["status"]): ResponsesResult => ({
   id: "resp_123",

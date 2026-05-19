@@ -7,8 +7,8 @@
 //
 // Storage and export/import remain raw-model — see /api/data-transfer.
 
-import { displayModelName } from "../../lib/model-name.ts";
-import { recordCostUsd } from "../../lib/model-pricing.ts";
+import { displayModelName } from "../../shared/model-name.ts";
+import { recordCostUsd } from "./pricing.ts";
 import type { UsageRecord } from "../../repo/types.ts";
 
 export interface DisplayUsageRecord extends UsageRecord {

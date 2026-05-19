@@ -1,6 +1,6 @@
 import { assertEquals, assertRejects } from "@std/assert";
-import type { ChatCompletionChunk } from "../../../../lib/chat-completions-types.ts";
-import type { GeminiStreamEvent } from "../../../../lib/gemini-types.ts";
+import type { ChatCompletionChunk } from "../../shared/protocol/chat-completions.ts";
+import type { GeminiStreamEvent } from "../../shared/protocol/gemini.ts";
 import {
   doneFrame,
   eventFrame,

@@ -2,16 +2,15 @@ import type {
   ChatCompletionChunk,
   ChatReasoningItem,
   Delta,
-} from "../../../../lib/chat-completions-types.ts";
+} from "../../shared/protocol/chat-completions.ts";
 import type {
   ResponseOutputItem,
   ResponsesResult,
   ResponseStreamEvent,
-} from "../../../../lib/responses-types.ts";
+} from "../../shared/protocol/responses.ts";
 import {
   createResponsesOutputOrderState,
   recordResponseOutputOrderEvent,
-  responsePartKey,
   type ResponsesOutputOrderState,
   shouldDeferForEarlierResponseOutput,
 } from "../shared/responses-stream-order.ts";
@@ -28,10 +27,23 @@ import {
   type ProtocolFrame,
 } from "../../shared/stream/types.ts";
 import { chatCompletionResultToEvents } from "../../targets/chat-completions/events/from-result.ts";
-import {
-  upstreamResponsesStreamAlgebra,
-  type UpstreamResponseStreamEvent,
-} from "../upstream-protocol.ts";
+
+type UpstreamResponseStreamEvent = ResponseStreamEvent & {
+  sequence_number?: number;
+};
+
+const upstreamResponsesStreamAlgebra = {
+  isTerminalEvent: (event: Pick<ResponseStreamEvent, "type">): boolean =>
+    event.type === "response.completed" ||
+    event.type === "response.incomplete" ||
+    event.type === "response.failed" ||
+    event.type === "error",
+  missingTerminalMessage:
+    "Upstream Responses stream ended without a terminal event.",
+};
+
+const responsePartKey = (outputIndex: number, partIndex: number): string =>
+  `${outputIndex}:${partIndex}`;
 
 interface ResponsesToChatCompletionsStreamState {
   messageId: string;

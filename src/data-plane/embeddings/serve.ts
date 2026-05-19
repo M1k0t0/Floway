@@ -1,14 +1,12 @@
 // POST /v1/embeddings — forward embedding requests to Copilot
 
 import type { Context } from "hono";
-import { copilotFetch, isCopilotTokenFetchError } from "../../lib/copilot.ts";
-import { withAccountFallback } from "../shared/account-pool/fallback.ts";
-import { withUsageResponseMetadata } from "../../middleware/usage-response-metadata.ts";
 import {
-  apiErrorResponse,
-  getErrorMessage,
-  proxyJsonResponse,
-} from "../shared/http/proxy-response.ts";
+  copilotFetch,
+  isCopilotTokenFetchError,
+} from "../../shared/copilot.ts";
+import { withAccountFallback } from "../shared/account-pool/fallback.ts";
+import { setUsageResponseMetadata } from "../../middleware/usage-response-metadata.ts";
 
 interface EmbeddingsRequestBody {
   model?: unknown;
@@ -68,9 +66,16 @@ export const embeddings = async (c: Context) => {
         ),
     );
 
-    return withUsageResponseMetadata(c, proxyJsonResponse(resp), {
+    const response = new Response(resp.body, {
+      status: resp.status,
+      headers: {
+        "content-type": resp.headers.get("content-type") ?? "application/json",
+      },
+    });
+    setUsageResponseMetadata(c, {
       usageModel: request.usageModel,
     });
+    return response;
   } catch (e: unknown) {
     if (isCopilotTokenFetchError(e)) {
       return new Response(e.body, {
@@ -79,6 +84,7 @@ export const embeddings = async (c: Context) => {
       });
     }
 
-    return apiErrorResponse(c, getErrorMessage(e), 502);
+    const message = e instanceof Error ? e.message : String(e);
+    return c.json({ error: { message, type: "api_error" } }, 502);
   }
 };

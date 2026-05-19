@@ -2,12 +2,18 @@ import type {
   GeminiPart,
   GeminiStreamEvent,
   GeminiUsageMetadata,
-} from "../../../../lib/gemini-types.ts";
-import type { MessagesStreamEventData } from "../../../../lib/messages-types.ts";
+} from "../../shared/protocol/gemini.ts";
+import type { MessagesStreamEventData } from "../../shared/protocol/messages.ts";
 import { protocolEventsUntilTerminal } from "../../shared/stream/protocol-algebra.ts";
 import { eventFrame, type ProtocolFrame } from "../../shared/stream/types.ts";
-import { upstreamMessagesStreamAlgebra } from "../upstream-protocol.ts";
 import { geminiResponse, messagesStopReasonToGemini } from "./result.ts";
+
+const upstreamMessagesStreamAlgebra = {
+  isTerminalEvent: (event: Pick<MessagesStreamEventData, "type">): boolean =>
+    event.type === "message_stop" || event.type === "error",
+  missingTerminalMessage:
+    "Upstream Messages stream ended without a message_stop event.",
+};
 
 interface ToolUseState {
   id: string;

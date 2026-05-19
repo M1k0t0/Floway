@@ -1,7 +1,7 @@
-import type { ResponsesPayload } from "../../../../../lib/responses-types.ts";
+import type { ResponsesPayload } from "../../../shared/protocol/responses.ts";
 import type { SourceInterceptor } from "../../run-interceptors.ts";
 import type { SourceResponseStreamEvent } from "../events/protocol.ts";
-import type { ResponsesSourceContext } from "./types.ts";
+import type { ResponsesSourceContext } from "./index.ts";
 
 // Hosted Responses tool entries Copilot upstream cannot serve and Freeform
 // `custom` tools the gateway has no shim for. Codex emits `web_search`,

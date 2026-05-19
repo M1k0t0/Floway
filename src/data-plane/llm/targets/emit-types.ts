@@ -1,8 +1,8 @@
-import type { CopilotFetchOptions } from "../../../lib/copilot.ts";
-import type { BackgroundScheduler } from "../../../lib/background.ts";
+import type { CopilotFetchOptions } from "../../../shared/copilot.ts";
 import type { ExecuteResult } from "../shared/errors/result.ts";
 import type { ProtocolFrame, StreamFrame } from "../shared/stream/types.ts";
-import type { SourceApi } from "../shared/types/source-api.ts";
+
+type SourceApi = "messages" | "responses" | "chat-completions" | "gemini";
 
 export interface EmitInput<TPayload extends { model: string }> {
   sourceApi: SourceApi;
@@ -12,7 +12,7 @@ export interface EmitInput<TPayload extends { model: string }> {
   apiKeyId?: string;
   clientStream?: boolean;
   runtimeLocation?: string;
-  scheduleBackground?: BackgroundScheduler;
+  scheduleBackground?: (promise: Promise<unknown>) => void;
   fetchOptions?: CopilotFetchOptions;
   downstreamAbortSignal?: AbortSignal;
 }

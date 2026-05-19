@@ -1,6 +1,6 @@
-import type { MessagesStreamEventData } from "../../../../../lib/messages-types.ts";
+import type { MessagesStreamEventData } from "../../../shared/protocol/messages.ts";
 import type { SourceInterceptor } from "../../run-interceptors.ts";
-import type { MessagesSourceContext } from "./types.ts";
+import type { MessagesSourceContext } from "./index.ts";
 
 /**
  * Claude Code's prompt-caching-scope beta adds `cache_control.scope`, but

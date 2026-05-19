@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import type { GeminiStreamEvent } from "../../../../../lib/gemini-types.ts";
+import type { GeminiStreamEvent } from "../../../shared/protocol/gemini.ts";
 import { doneFrame, eventFrame } from "../../../shared/stream/types.ts";
 import { geminiProtocolEventsToSSEFrames } from "./to-sse.ts";
 

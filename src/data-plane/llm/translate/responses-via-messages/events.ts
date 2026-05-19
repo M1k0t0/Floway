@@ -6,8 +6,8 @@ import type {
   MessagesMessageDeltaEvent,
   MessagesMessageStartEvent,
   MessagesStreamEventData,
-} from "../../../../lib/messages-types.ts";
-import { makeResponsesReasoningId } from "../../../../lib/reasoning.ts";
+} from "../../shared/protocol/messages.ts";
+import { makeResponsesReasoningId } from "../shared/reasoning.ts";
 import { unpackReasoningSignature } from "../shared/messages-responses-signature.ts";
 import type {
   ResponseOutputFunctionCall,
@@ -16,11 +16,17 @@ import type {
   ResponseOutputReasoning,
   ResponsesResult,
   ResponseStreamEvent,
-} from "../../../../lib/responses-types.ts";
+} from "../../shared/protocol/responses.ts";
 import { protocolEventsUntilTerminal } from "../../shared/stream/protocol-algebra.ts";
 import { eventFrame, type ProtocolFrame } from "../../shared/stream/types.ts";
 import type { SourceResponseStreamEvent } from "../../sources/responses/events/protocol.ts";
-import { upstreamMessagesStreamAlgebra } from "../upstream-protocol.ts";
+
+const upstreamMessagesStreamAlgebra = {
+  isTerminalEvent: (event: Pick<MessagesStreamEventData, "type">): boolean =>
+    event.type === "message_stop" || event.type === "error",
+  missingTerminalMessage:
+    "Upstream Messages stream ended without a message_stop event.",
+};
 
 type OutputBlockInfo =
   | {

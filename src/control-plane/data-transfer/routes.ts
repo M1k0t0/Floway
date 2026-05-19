@@ -2,7 +2,8 @@
 
 import type { Context } from "hono";
 import { normalizeSearchConfig } from "../../data-plane/tools/web-search/search-config.ts";
-import { isWebSearchProviderName } from "../../lib/web-search-types.ts";
+import type { SearchConfig } from "../../data-plane/tools/web-search/types.ts";
+import { isWebSearchProviderName } from "../../shared/web-search-providers.ts";
 import { getRepo } from "../../repo/index.ts";
 import type {
   ApiKey,
@@ -13,7 +14,20 @@ import type {
   SearchUsageRecord,
   UsageRecord,
 } from "../../repo/types.ts";
-import type { ExportPayload } from "./types.ts";
+
+interface ExportPayload {
+  version: 1;
+  exportedAt: string;
+  data: {
+    apiKeys: ApiKey[];
+    githubAccounts: GitHubAccount[];
+    usage: UsageRecord[];
+    searchUsage: SearchUsageRecord[];
+    performance?: PerformanceTelemetryRecord[];
+    performanceIncluded?: boolean;
+    searchConfig: SearchConfig;
+  };
+}
 
 const SEARCH_USAGE_HOUR_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}$/;
 const PERFORMANCE_METRIC_SCOPES = new Set<PerformanceMetricScope>([

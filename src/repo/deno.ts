@@ -19,8 +19,8 @@ import type {
   UsageRecord,
   UsageRepo,
 } from "./types.ts";
-import { assertWebSearchProviderName } from "../lib/web-search-types.ts";
-import { latencyBucketForMs } from "../lib/performance-histogram.ts";
+import { assertWebSearchProviderName } from "../shared/web-search-providers.ts";
+import { latencyBucketForMs } from "../shared/performance-histogram.ts";
 
 const SEARCH_CONFIG_KEY: Deno.KvKey = ["config", "search_config"];
 const GITHUB_ACCOUNT_ORDER_KEY: Deno.KvKey = ["config", "github_account_order"];

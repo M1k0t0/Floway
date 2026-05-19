@@ -1,15 +1,13 @@
-import type { MessagesStreamEventData } from "../../../../lib/messages-types.ts";
+import type { MessagesStreamEventData } from "../../shared/protocol/messages.ts";
 import { packReasoningSignature } from "../shared/messages-responses-signature.ts";
 import type {
   ResponseOutputItem,
   ResponsesResult,
   ResponseStreamEvent,
-} from "../../../../lib/responses-types.ts";
+} from "../../shared/protocol/responses.ts";
 import {
   createResponsesOutputOrderState,
-  hasResponsePartForOutput,
   recordResponseOutputOrderEvent,
-  responsePartKey,
   type ResponsesOutputOrderState,
   shouldDeferForEarlierResponseOutput,
 } from "../shared/responses-stream-order.ts";
@@ -22,10 +20,34 @@ import {
   type ProtocolFrame,
 } from "../../shared/stream/types.ts";
 import { messagesResultToEvents } from "../../sources/messages/events/from-result.ts";
-import {
-  upstreamResponsesStreamAlgebra,
-  type UpstreamResponseStreamEvent,
-} from "../upstream-protocol.ts";
+
+type UpstreamResponseStreamEvent = ResponseStreamEvent & {
+  sequence_number?: number;
+};
+
+const upstreamResponsesStreamAlgebra = {
+  isTerminalEvent: (event: Pick<ResponseStreamEvent, "type">): boolean =>
+    event.type === "response.completed" ||
+    event.type === "response.incomplete" ||
+    event.type === "response.failed" ||
+    event.type === "error",
+  missingTerminalMessage:
+    "Upstream Responses stream ended without a terminal event.",
+};
+
+const responsePartKey = (outputIndex: number, partIndex: number): string =>
+  `${outputIndex}:${partIndex}`;
+
+const hasResponsePartForOutput = (
+  keys: Set<string>,
+  outputIndex: number,
+): boolean => {
+  const prefix = `${outputIndex}:`;
+  for (const key of keys) {
+    if (key.startsWith(prefix)) return true;
+  }
+  return false;
+};
 
 type ResponseCreatedEvent = Extract<
   ResponseStreamEvent,

@@ -1,8 +1,5 @@
 import { assertEquals } from "@std/assert";
-import type {
-  ModelInfo,
-  ModelsResponse,
-} from "../../../../lib/models-cache.ts";
+import type { ModelInfo, ModelsResponse } from "../../../models/types.ts";
 import { fallbackModelId, resolveModelInModels } from "./resolve-model.ts";
 
 const model = (

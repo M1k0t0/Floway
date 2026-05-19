@@ -6,11 +6,11 @@
 import type { Context } from "hono";
 import { loadSearchConfig } from "../../data-plane/tools/web-search/search-config.ts";
 import { queryWebSearchUsage } from "../../data-plane/tools/web-search/usage.ts";
-import { listApiKeys } from "../../lib/api-keys.ts";
+import { getRepo } from "../../repo/index.ts";
 import {
   isWebSearchProviderName,
   type WebSearchProviderName,
-} from "../../lib/web-search-types.ts";
+} from "../../shared/web-search-providers.ts";
 import { USAGE_KEY_COLOR_ORDER } from "../usage-key-colors.ts";
 
 const parseProvider = (provider: string | undefined):
@@ -49,7 +49,7 @@ export const searchUsage = async (c: Context) => {
       start,
       end,
     }),
-    listApiKeys(),
+    getRepo().apiKeys.list(),
   ]);
 
   const keyMap = new Map(keys.map((k) => [k.id, k]));

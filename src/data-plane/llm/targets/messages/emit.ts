@@ -1,12 +1,12 @@
 import {
   copilotFetch,
   isCopilotTokenFetchError,
-} from "../../../../lib/copilot.ts";
+} from "../../../../shared/copilot.ts";
 import type {
   MessagesPayload,
   MessagesResponse,
   MessagesStreamEventData,
-} from "../../../../lib/messages-types.ts";
+} from "../../shared/protocol/messages.ts";
 import { readUpstreamError } from "../../shared/errors/upstream-error.ts";
 import {
   eventResult,
@@ -14,10 +14,9 @@ import {
 } from "../../shared/errors/result.ts";
 import { toInternalDebugError } from "../../shared/errors/internal-debug-error.ts";
 import { parseSSEStream } from "../../shared/stream/parse-sse.ts";
-import { isSSEResponse } from "../../shared/stream/is-sse-response.ts";
 import { jsonFrame } from "../../shared/stream/types.ts";
 import { runTargetInterceptors } from "../run-interceptors.ts";
-import type { EmitInput, EmitResult, RawEmitResult } from "../emit-types.ts";
+import type { EmitInput, EmitResult } from "../emit-types.ts";
 import {
   recordUpstreamHttpFailure,
   withUpstreamTelemetry,
@@ -29,12 +28,8 @@ export interface EmitToMessagesInput extends EmitInput<MessagesPayload> {
   rawBeta?: string;
 }
 
-const messagesRawResultToProtocolResult = (
-  result: RawEmitResult<MessagesResponse>,
-): EmitResult<MessagesStreamEventData> =>
-  result.type === "events"
-    ? eventResult(messagesStreamFramesToEvents(result.events))
-    : result;
+const isSSEResponse = (response: Response): boolean =>
+  (response.headers.get("content-type") ?? "").includes("text/event-stream");
 
 export const emitToMessages = async (
   input: EmitToMessagesInput,
@@ -99,7 +94,9 @@ export const emitToMessages = async (
       },
     );
 
-    return messagesRawResultToProtocolResult(result);
+    return result.type === "events"
+      ? eventResult(messagesStreamFramesToEvents(result.events))
+      : result;
   } catch (error) {
     if (isCopilotTokenFetchError(error)) {
       return {

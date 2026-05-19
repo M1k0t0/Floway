@@ -1,6 +1,6 @@
-import type { GeminiStreamEvent } from "../../../../../lib/gemini-types.ts";
+import type { GeminiStreamEvent } from "../../../shared/protocol/gemini.ts";
 import type { SourceInterceptor } from "../../run-interceptors.ts";
-import type { GeminiSourceContext } from "./types.ts";
+import type { GeminiSourceContext } from "./index.ts";
 
 /**
  * Gemini safety controls are source-specific and have no matching upstream

@@ -1,14 +1,14 @@
 import type {
   ChatCompletionResponse,
-} from "../../../../lib/chat-completions-types.ts";
-import { makeResponsesReasoningId } from "../../../../lib/reasoning.ts";
+} from "../../shared/protocol/chat-completions.ts";
+import { makeResponsesReasoningId } from "../shared/reasoning.ts";
 import type {
   ResponseOutputFunctionCall,
   ResponseOutputItem,
   ResponseOutputMessage,
   ResponseOutputReasoning,
   ResponsesResult,
-} from "../../../../lib/responses-types.ts";
+} from "../../shared/protocol/responses.ts";
 import {
   scalarToResponseReasoningItem,
   translateChatReasoningItems,

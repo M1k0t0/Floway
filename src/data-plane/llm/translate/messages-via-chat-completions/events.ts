@@ -1,5 +1,5 @@
-import type { ChatCompletionChunk } from "../../../../lib/chat-completions-types.ts";
-import type { MessagesStreamEventData } from "../../../../lib/messages-types.ts";
+import type { ChatCompletionChunk } from "../../shared/protocol/chat-completions.ts";
+import type { MessagesStreamEventData } from "../../shared/protocol/messages.ts";
 import {
   mapChatCompletionsFinishReasonToMessagesStopReason,
   mapChatCompletionsUsageToMessagesUsage,
@@ -8,7 +8,12 @@ import {
 import { checkWhitespaceOverflow } from "../shared/tool-arguments.ts";
 import { protocolEventsUntilTerminal } from "../../shared/stream/protocol-algebra.ts";
 import { eventFrame, type ProtocolFrame } from "../../shared/stream/types.ts";
-import { upstreamChatCompletionStreamAlgebra } from "../upstream-protocol.ts";
+
+const upstreamChatCompletionStreamAlgebra = {
+  doneTerminates: true as const,
+  missingTerminalMessage:
+    "Upstream Chat Completions stream ended without a DONE sentinel.",
+};
 
 type ChatStreamDelta = ChatCompletionChunk["choices"][0]["delta"];
 type ChatStreamToolCalls = NonNullable<ChatStreamDelta["tool_calls"]>;

@@ -1,4 +1,5 @@
 import {
+  getMessagesRequestedReasoningEffort,
   type MessagesAssistantMessage,
   type MessagesClientTool,
   type MessagesMessage,
@@ -10,11 +11,8 @@ import {
   type MessagesUserContentBlock,
   type MessagesUserMessage,
   type MessagesWebSearchToolResultBlock,
-} from "../../../../lib/messages-types.ts";
-import {
-  getMessagesRequestedReasoningEffort,
-  makeResponsesReasoningId,
-} from "../../../../lib/reasoning.ts";
+} from "../../shared/protocol/messages.ts";
+import { makeResponsesReasoningId } from "../shared/reasoning.ts";
 import { unpackReasoningSignature } from "../shared/messages-responses-signature.ts";
 import type {
   ResponseInputContent,
@@ -22,7 +20,7 @@ import type {
   ResponsesPayload,
   ResponseTool,
   ResponseToolChoice,
-} from "../../../../lib/responses-types.ts";
+} from "../../shared/protocol/responses.ts";
 
 const flushPendingContent = (
   pending: ResponseInputContent[],

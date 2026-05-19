@@ -1,12 +1,12 @@
-import type { MessagesResponse } from "../../../../lib/messages-types.ts";
-import { makeResponsesReasoningId } from "../../../../lib/reasoning.ts";
+import type { MessagesResponse } from "../../shared/protocol/messages.ts";
+import { makeResponsesReasoningId } from "../shared/reasoning.ts";
 import type {
   ResponseOutputFunctionCall,
   ResponseOutputItem,
   ResponseOutputMessage,
   ResponseOutputReasoning,
   ResponsesResult,
-} from "../../../../lib/responses-types.ts";
+} from "../../shared/protocol/responses.ts";
 import { unpackReasoningSignature } from "../shared/messages-responses-signature.ts";
 
 const mapMessagesStatusToResponsesStatus = (

@@ -4,7 +4,7 @@ import { translateResponsesToChatCompletion } from "../chat-completions-via-resp
 import type {
   ResponseTool,
   ResponseToolChoice,
-} from "../../../../lib/responses-types.ts";
+} from "../../shared/protocol/responses.ts";
 import {
   createResponsesToChatCompletionsStreamState,
   translateResponsesEventToChatCompletionsChunks,

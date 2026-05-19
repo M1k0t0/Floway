@@ -1,4 +1,51 @@
 import type { UpstreamErrorResult } from "./result.ts";
+import { ModelsFetchError } from "../../../models/cache.ts";
+import { isCopilotTokenFetchError } from "../../../../shared/copilot.ts";
+import type { PerformanceTelemetryContext } from "../../../shared/performance/telemetry.ts";
+
+interface ThrownUpstreamError {
+  status: number;
+  headers: Headers;
+  body: string;
+}
+
+export const thrownUpstreamError = (
+  error: unknown,
+): ThrownUpstreamError | null => {
+  if (error instanceof ModelsFetchError) {
+    return {
+      status: error.status,
+      headers: new Headers(error.headers),
+      body: error.body,
+    };
+  }
+
+  if (isCopilotTokenFetchError(error)) {
+    return {
+      status: error.status,
+      headers: new Headers(error.headers),
+      body: error.body,
+    };
+  }
+
+  return null;
+};
+
+export const thrownUpstreamErrorResult = (
+  error: unknown,
+  performance?: PerformanceTelemetryContext,
+): UpstreamErrorResult | null => {
+  const upstreamError = thrownUpstreamError(error);
+  if (!upstreamError) return null;
+
+  return {
+    type: "upstream-error",
+    status: upstreamError.status,
+    headers: upstreamError.headers,
+    body: new TextEncoder().encode(upstreamError.body),
+    ...(performance ? { performance } : {}),
+  };
+};
 
 export const readUpstreamError = async (
   response: Response,

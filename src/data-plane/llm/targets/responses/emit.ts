@@ -1,11 +1,11 @@
 import {
   copilotFetch,
   isCopilotTokenFetchError,
-} from "../../../../lib/copilot.ts";
+} from "../../../../shared/copilot.ts";
 import type {
   ResponsesPayload,
   ResponsesResult,
-} from "../../../../lib/responses-types.ts";
+} from "../../shared/protocol/responses.ts";
 import { readUpstreamError } from "../../shared/errors/upstream-error.ts";
 import {
   eventResult,
@@ -13,10 +13,9 @@ import {
 } from "../../shared/errors/result.ts";
 import { toInternalDebugError } from "../../shared/errors/internal-debug-error.ts";
 import { parseSSEStream } from "../../shared/stream/parse-sse.ts";
-import { isSSEResponse } from "../../shared/stream/is-sse-response.ts";
 import { jsonFrame } from "../../shared/stream/types.ts";
 import { runTargetInterceptors } from "../run-interceptors.ts";
-import type { EmitInput, EmitResult, RawEmitResult } from "../emit-types.ts";
+import type { EmitInput, EmitResult } from "../emit-types.ts";
 import {
   recordUpstreamHttpFailure,
   withUpstreamTelemetry,
@@ -25,12 +24,8 @@ import { type SequencedResponseStreamEvent } from "./events/from-result.ts";
 import { responsesStreamFramesToEvents } from "./events/from-stream.ts";
 import { responsesTargetInterceptors } from "./interceptors/index.ts";
 
-const responsesRawResultToProtocolResult = (
-  result: RawEmitResult<ResponsesResult>,
-): EmitResult<SequencedResponseStreamEvent> =>
-  result.type === "events"
-    ? eventResult(responsesStreamFramesToEvents(result.events))
-    : result;
+const isSSEResponse = (response: Response): boolean =>
+  (response.headers.get("content-type") ?? "").includes("text/event-stream");
 
 export const emitToResponses = async (
   input: EmitInput<ResponsesPayload>,
@@ -95,7 +90,9 @@ export const emitToResponses = async (
       },
     );
 
-    return responsesRawResultToProtocolResult(result);
+    return result.type === "events"
+      ? eventResult(responsesStreamFramesToEvents(result.events))
+      : result;
   } catch (error) {
     if (isCopilotTokenFetchError(error)) {
       return {

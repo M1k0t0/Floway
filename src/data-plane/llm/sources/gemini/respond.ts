@@ -2,11 +2,11 @@ import type { Context } from "hono";
 import type {
   GeminiErrorResponse,
   GeminiStreamEvent,
-} from "../../../../lib/gemini-types.ts";
+} from "../../shared/protocol/gemini.ts";
 import type { InternalDebugError } from "../../shared/errors/internal-debug-error.ts";
 import {
   type PerformanceFailureCapture,
-  withUsageResponseMetadata,
+  setUsageResponseMetadata,
 } from "../../../../middleware/usage-response-metadata.ts";
 import type {
   StreamExecuteResult,
@@ -14,12 +14,12 @@ import type {
 } from "../../shared/errors/result.ts";
 import { decodeUpstreamErrorBody } from "../../shared/errors/upstream-error.ts";
 import { proxySSE } from "../../shared/stream/proxy-sse.ts";
-import { downstreamSSECommentKeepAliveFrame } from "../../shared/stream/keep-alive.ts";
-import { type ProtocolFrame, sseFrame } from "../../shared/stream/types.ts";
 import {
-  markPerformanceFailure,
-  trackPerformanceOutcome,
-} from "../performance.ts";
+  type ProtocolFrame,
+  sseCommentFrame,
+  sseFrame,
+} from "../../shared/stream/types.ts";
+import { trackPerformanceOutcome } from "../performance.ts";
 import {
   isGeminiErrorEvent,
   isGeminiFinishedEvent,
@@ -48,6 +48,8 @@ const geminiStatusForHttpStatus = (status: number): string => {
       return "INTERNAL";
   }
 };
+
+const downstreamSSECommentKeepAliveFrame = sseCommentFrame("keepalive");
 
 type GeminiErrorDebugFields =
   & Partial<
@@ -198,24 +200,20 @@ export const respondGemini = async (
 ): Promise<Response> => {
   if (result.type === "upstream-error") {
     const googleRpcResponse = upstreamGoogleRpcErrorResponse(result);
-    return withUsageResponseMetadata(
-      c,
-      googleRpcResponse ??
-        geminiErrorResponse(result.status, upstreamErrorMessage(result)),
-      { performance: result.performance },
-    );
+    const response = googleRpcResponse ??
+      geminiErrorResponse(result.status, upstreamErrorMessage(result));
+    setUsageResponseMetadata(c, { performance: result.performance });
+    return response;
   }
 
   if (result.type === "internal-error") {
-    return withUsageResponseMetadata(
-      c,
-      geminiErrorResponse(
-        result.status,
-        result.error.message,
-        internalDebugFields(result.error),
-      ),
-      { performance: result.performance },
+    const response = geminiErrorResponse(
+      result.status,
+      result.error.message,
+      internalDebugFields(result.error),
     );
+    setUsageResponseMetadata(c, { performance: result.performance });
+    return response;
   }
 
   const performanceFailureCapture: PerformanceFailureCapture = {};
@@ -229,13 +227,14 @@ export const respondGemini = async (
   if (!wantsStream) {
     try {
       const response = await collectGeminiProtocolEventsToResponse(events);
-      return withUsageResponseMetadata(c, Response.json(response), {
+      setUsageResponseMetadata(c, {
         usageModel: result.usageModel,
         performance: result.performance,
         performanceFailureCapture,
       });
+      return Response.json(response);
     } catch (error) {
-      markPerformanceFailure(performanceFailureCapture);
+      performanceFailureCapture.failed = true;
       const geminiError = caughtGeminiErrorEvent(error);
       const response = geminiError
         ? geminiErrorEventResponse(geminiError)
@@ -245,11 +244,12 @@ export const respondGemini = async (
           unknownInternalDebugFields(error),
         );
 
-      return withUsageResponseMetadata(c, response, {
+      setUsageResponseMetadata(c, {
         usageModel: result.usageModel,
         performance: result.performance,
         performanceFailureCapture,
       });
+      return response;
     }
   }
 
@@ -260,7 +260,7 @@ export const respondGemini = async (
       keepAlive: { frame: downstreamSSECommentKeepAliveFrame },
       downstreamAbortController,
       onError: (error) => {
-        markPerformanceFailure(performanceFailureCapture);
+        performanceFailureCapture.failed = true;
         return geminiErrorEventFrame(
           caughtGeminiErrorEvent(error) ??
             geminiErrorPayload(
@@ -273,9 +273,10 @@ export const respondGemini = async (
     },
   );
 
-  return withUsageResponseMetadata(c, response, {
+  setUsageResponseMetadata(c, {
     usageModel: result.usageModel,
     performance: result.performance,
     performanceFailureCapture,
   });
+  return response;
 };

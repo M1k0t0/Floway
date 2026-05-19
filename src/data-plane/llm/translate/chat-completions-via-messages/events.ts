@@ -1,8 +1,8 @@
 import type {
   ChatCompletionChunk,
   Delta,
-} from "../../../../lib/chat-completions-types.ts";
-import type { MessagesStreamEventData } from "../../../../lib/messages-types.ts";
+} from "../../shared/protocol/chat-completions.ts";
+import type { MessagesStreamEventData } from "../../shared/protocol/messages.ts";
 import { mapMessagesStopReasonToChatCompletionsFinishReason } from "./result.ts";
 import { protocolEventsUntilTerminal } from "../../shared/stream/protocol-algebra.ts";
 import {
@@ -10,7 +10,13 @@ import {
   eventFrame,
   type ProtocolFrame,
 } from "../../shared/stream/types.ts";
-import { upstreamMessagesStreamAlgebra } from "../upstream-protocol.ts";
+
+const upstreamMessagesStreamAlgebra = {
+  isTerminalEvent: (event: Pick<MessagesStreamEventData, "type">): boolean =>
+    event.type === "message_stop" || event.type === "error",
+  missingTerminalMessage:
+    "Upstream Messages stream ended without a message_stop event.",
+};
 
 interface MessagesToChatCompletionsStreamState {
   messageId: string;

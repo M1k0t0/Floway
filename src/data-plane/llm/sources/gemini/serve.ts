@@ -2,12 +2,11 @@ import type { Context } from "hono";
 import type {
   GeminiGenerateContentRequest,
   GeminiStreamEvent,
-} from "../../../../lib/gemini-types.ts";
-import { backgroundSchedulerFromContext } from "../../../../lib/background.ts";
+} from "../../shared/protocol/gemini.ts";
 import {
   type PerformanceTelemetryContext,
   runtimeLocationFromRequest,
-} from "../../../../lib/performance-telemetry.ts";
+} from "../../../shared/performance/telemetry.ts";
 import {
   type GeminiSourceContext,
   geminiSourceInterceptors,
@@ -32,8 +31,9 @@ import {
   type StreamExecuteResult,
 } from "../../shared/errors/result.ts";
 import { toInternalDebugError } from "../../shared/errors/internal-debug-error.ts";
+import { thrownUpstreamErrorResult } from "../../shared/errors/upstream-error.ts";
 import type { ProtocolFrame } from "../../shared/stream/types.ts";
-import { countGeminiTokens } from "../../../gemini/count-tokens.ts";
+import { backgroundSchedulerFromContext } from "../../../../runtime/background.ts";
 
 const withTranslatedEvents = <T>(
   result: StreamExecuteResult<T>,
@@ -104,7 +104,6 @@ export const serveGemini = async (
             attemptPayload,
             modelId,
             capabilities,
-            wantsStream,
           );
 
           if (plan.target === "messages") {
@@ -209,6 +208,16 @@ export const serveGemini = async (
       downstreamAbortController,
     );
   } catch (error) {
+    const upstreamError = thrownUpstreamErrorResult(error, lastPerformance);
+    if (upstreamError) {
+      return await respondGemini(
+        c,
+        upstreamError,
+        false,
+        downstreamAbortController,
+      );
+    }
+
     return await respondGemini(
       c,
       internalErrorResult(
@@ -219,46 +228,5 @@ export const serveGemini = async (
       false,
       downstreamAbortController,
     );
-  }
-};
-
-const geminiRpcError = (
-  code: number,
-  status: string,
-  message: string,
-): Response =>
-  Response.json({ error: { code, message, status } }, { status: code });
-
-export const serveGeminiPost = async (c: Context): Promise<Response> => {
-  const modelAction = c.req.param("modelAction");
-  if (!modelAction) {
-    return geminiRpcError(404, "NOT_FOUND", "Missing Gemini model action.");
-  }
-
-  const separator = modelAction.lastIndexOf(":");
-  if (separator <= 0 || separator === modelAction.length - 1) {
-    return geminiRpcError(
-      404,
-      "NOT_FOUND",
-      `Unknown Gemini model action: ${modelAction}`,
-    );
-  }
-
-  const model = modelAction.slice(0, separator);
-  const action = modelAction.slice(separator + 1);
-
-  switch (action) {
-    case "generateContent":
-      return await serveGemini(c, model, false);
-    case "streamGenerateContent":
-      return await serveGemini(c, model, true);
-    case "countTokens":
-      return await countGeminiTokens(c, model);
-    default:
-      return geminiRpcError(
-        404,
-        "NOT_FOUND",
-        `Unknown Gemini model action: ${action}`,
-      );
   }
 };

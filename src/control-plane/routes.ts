@@ -1,5 +1,4 @@
-import { Hono } from "hono";
-import { adminOnlyMiddleware } from "../middleware/auth.ts";
+import { type Context, Hono, type Next } from "hono";
 import {
   createKey,
   deleteKey,
@@ -18,7 +17,6 @@ import {
 } from "./auth/routes.ts";
 import { copilotQuota } from "./copilot-quota/routes.ts";
 import { exportData, importData } from "./data-transfer/routes.ts";
-import { mountPageRoutes } from "./pages/routes.ts";
 import {
   getSearchConfigRoute,
   putSearchConfigRoute,
@@ -31,9 +29,26 @@ import {
   performanceTelemetry,
 } from "./performance/routes.ts";
 import { models } from "../data-plane/models/serve.ts";
+import { DashboardPage } from "../ui/dashboard.tsx";
+import { LoginPage } from "../ui/login.tsx";
+
+const adminOnlyMiddleware = async (c: Context, next: Next) => {
+  if (!c.get("isAdmin")) {
+    return c.json({ error: "Dashboard key required" }, 403);
+  }
+  await next();
+};
 
 export const mountControlPlane = (app: Hono) => {
-  mountPageRoutes(app);
+  app.get("/", (c) => {
+    const accept = c.req.header("accept") ?? "";
+    if (accept.includes("application/json") && !accept.includes("text/html")) {
+      return c.json({ status: "ok", service: "copilot-deno" });
+    }
+    return c.html(LoginPage());
+  });
+  app.get("/dashboard", (c) => c.html(DashboardPage()));
+  app.get("/favicon.ico", () => new Response(null, { status: 204 }));
 
   app.post("/auth/login", authLogin);
   app.post("/auth/logout", authLogout);

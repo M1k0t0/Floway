@@ -1,9 +1,9 @@
 import { assertEquals, assertRejects } from "@std/assert";
-import type { GeminiStreamEvent } from "../../../../lib/gemini-types.ts";
+import type { GeminiStreamEvent } from "../../shared/protocol/gemini.ts";
 import type {
   ResponsesResult,
   ResponseStreamEvent,
-} from "../../../../lib/responses-types.ts";
+} from "../../shared/protocol/responses.ts";
 import {
   doneFrame,
   eventFrame,

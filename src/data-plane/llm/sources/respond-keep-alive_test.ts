@@ -1,9 +1,9 @@
 import { assertEquals } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { type Context, Hono } from "hono";
-import type { ChatCompletionChunk } from "../../../lib/chat-completions-types.ts";
-import type { GeminiStreamEvent } from "../../../lib/gemini-types.ts";
-import type { MessagesStreamEventData } from "../../../lib/messages-types.ts";
+import type { ChatCompletionChunk } from "../shared/protocol/chat-completions.ts";
+import type { GeminiStreamEvent } from "../shared/protocol/gemini.ts";
+import type { MessagesStreamEventData } from "../shared/protocol/messages.ts";
 import type { SourceResponseStreamEvent } from "./responses/events/protocol.ts";
 import { respondChatCompletions } from "./chat-completions/respond.ts";
 import { respondGemini } from "./gemini/respond.ts";

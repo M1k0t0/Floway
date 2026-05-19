@@ -3,7 +3,6 @@ import {
   type WebSearchProviderRequest,
   type WebSearchProviderResult,
 } from "../types.ts";
-import { isRecord } from "../../../../lib/type-guards.ts";
 import {
   extractWebSearchProviderErrorMessage,
   toWebSearchTextBlocks,
@@ -19,6 +18,9 @@ const MICROSOFT_GROUNDING_429_RETRY_DELAYS_MS = [
 ] as const;
 const DOMAIN_PATTERN =
   /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))+$/i;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const sleep = (delayMs: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, delayMs));

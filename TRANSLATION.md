@@ -59,9 +59,10 @@ models use the Chat Completions target.
   `parallel_tool_calls: true`, or `reasoning.summary: "detailed"`.
 - Fields with no natural target-side meaning are omitted instead of encoded into
   private bridges.
-- Copilot target quirks such as unsupported `service_tier`, token floors,
-  connection-bound IDs, and malformed upstream stream shapes are handled at the
-  target boundary.
+- Copilot target quirks such as unsupported Responses `service_tier`,
+  connection-bound IDs, policy retry failures, Messages thinking-display idle
+  gaps, unsupported Messages `eager_input_streaming`, and malformed upstream
+  stream shapes are handled at the target boundary.
 - Streaming results are source-shaped event streams after upstream emission.
   Source responders decide final HTTP/SSE shaping.
 
@@ -71,7 +72,10 @@ Messages source boundary:
 
 - strips reserved `x-anthropic-billing-header` prompt attribution
 - strips unsupported `cache_control.scope`
-- removes unsupported `web_search` tools before planning/emission
+- rewrites native Anthropic `web_search_*` server tools into a gateway-executed
+  client-tool shim before planning/emission, decodes shim-owned replay history
+  back into upstream `search_result` blocks, and rewrites shim-owned search
+  results/citations back to native Messages shape
 - rewrites upstream context-window errors into the compact Messages error shape
 
 Responses source boundary:
@@ -97,24 +101,24 @@ Gemini source boundary:
 
 Native Messages target:
 
-- strips unsupported `service_tier`
+- promotes upstream `thinking.display` during active thinking to avoid Copilot
+  Messages idle gaps, then preserves downstream omitted-thinking semantics
 - whitelists supported `anthropic-beta` values
 - auto-adds `interleaved-thinking-2025-05-14` when budget thinking requires it
-- rewrites native `web_search` tools through the gateway shim
+- strips unsupported per-tool `eager_input_streaming`
 - strips stray `[DONE]` sentinels from Anthropic-shaped streams
 
 Native Responses target:
 
 - strips unsupported `service_tier`
-- raises too-small `max_output_tokens` when the Copilot target requires it
 - retries expired connection-bound input IDs once with deterministic rewrites
 - synchronizes mismatched stream output item IDs
+- retries intermittent upstream `cyber_policy` failures before the failed
+  attempt reaches the source pipeline
 
 Native Chat Completions target:
 
-- strips unsupported `service_tier`
 - forces upstream streaming usage when needed for gateway accounting
-- normalizes Claude split choice shapes and streaming choice indices
 
 The Chat source still only exposes final usage-only SSE chunks to clients when
 the caller requested `stream_options.include_usage: true`. Hidden upstream usage

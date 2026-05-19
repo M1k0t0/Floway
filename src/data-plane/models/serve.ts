@@ -1,18 +1,12 @@
 // GET /v1/models, /api/models — proxy to Copilot models endpoint
 
 import type { Context } from "hono";
-import { isCopilotTokenFetchError } from "../../lib/copilot.ts";
-import {
-  loadModelsForAccount,
-  ModelsFetchError,
-  type ModelsResponse,
-} from "../../lib/models-cache.ts";
-import { getRepo } from "../../repo/index.ts";
-import {
-  apiErrorResponse,
-  getErrorMessage,
-} from "../shared/http/proxy-response.ts";
-import { mergeClaudeVariants } from "./merge.ts";
+import { isCopilotTokenFetchError } from "../../shared/copilot.ts";
+import { ModelsFetchError } from "./cache.ts";
+import { loadMergedModels } from "./load.ts";
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
 
 const errorResponse = (error: unknown): Response | null => {
   if (error instanceof ModelsFetchError) {
@@ -34,41 +28,14 @@ const errorResponse = (error: unknown): Response | null => {
 
 export const models = async (c: Context) => {
   try {
-    const accounts = await getRepo().github.listAccounts();
-    const byId = new Map<string, ModelsResponse["data"][number]>();
-    let lastError: unknown = null;
-    let sawSuccess = false;
-
-    for (const account of accounts) {
-      const result = await loadModelsForAccount(account);
-      if (result.type === "error") {
-        lastError = result.error;
-        continue;
-      }
-
-      sawSuccess = true;
-      for (const model of result.data.data) {
-        if (!byId.has(model.id)) byId.set(model.id, model);
-      }
-    }
-
-    if (sawSuccess) {
-      const merged = mergeClaudeVariants({
-        object: "list",
-        data: [...byId.values()],
-      });
-      return Response.json(merged);
-    }
-
-    const upstreamErrorResponse = errorResponse(lastError);
+    return Response.json(await loadMergedModels());
+  } catch (e: unknown) {
+    const upstreamErrorResponse = errorResponse(e);
     if (upstreamErrorResponse) return upstreamErrorResponse;
-    if (lastError) return apiErrorResponse(c, getErrorMessage(lastError), 502);
-    return apiErrorResponse(
-      c,
-      "No GitHub account connected — add one via the dashboard",
+
+    return c.json(
+      { error: { message: errorMessage(e), type: "api_error" } },
       502,
     );
-  } catch (e: unknown) {
-    return apiErrorResponse(c, getErrorMessage(e), 502);
   }
 };

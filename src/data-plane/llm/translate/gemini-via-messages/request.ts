@@ -5,7 +5,7 @@ import type {
   GeminiGenerationConfig,
   GeminiPart,
   GeminiThinkingConfig,
-} from "../../../../lib/gemini-types.ts";
+} from "../../shared/protocol/gemini.ts";
 import {
   MESSAGES_FALLBACK_MAX_TOKENS,
   type MessagesAssistantContentBlock,
@@ -14,7 +14,7 @@ import {
   type MessagesTool,
   type MessagesToolResultBlock,
   type MessagesUserContentBlock,
-} from "../../../../lib/messages-types.ts";
+} from "../../shared/protocol/messages.ts";
 import type { ModelCapabilities } from "../../shared/models/get-model-capabilities.ts";
 
 type UnmatchedToolCallIds = Record<string, string[]>;

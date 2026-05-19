@@ -1,7 +1,7 @@
 import type {
   ChatCompletionResponse,
   ChatCompletionsPayload,
-} from "../../../../../lib/chat-completions-types.ts";
+} from "../../../shared/protocol/chat-completions.ts";
 import type { TargetInterceptor } from "../../run-interceptors.ts";
 
 /**

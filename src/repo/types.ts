@@ -1,5 +1,5 @@
-import type { WebSearchProviderName } from "../lib/web-search-types.ts";
-import type { HistogramBucket } from "../lib/performance-histogram.ts";
+import type { WebSearchProviderName } from "../shared/web-search-providers.ts";
+import type { HistogramBucket } from "../shared/performance-histogram.ts";
 
 export interface ApiKey {
   id: string;

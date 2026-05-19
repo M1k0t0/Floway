@@ -19,8 +19,8 @@ import type {
   UsageRecord,
   UsageRepo,
 } from "./types.ts";
-import { assertWebSearchProviderName } from "../lib/web-search-types.ts";
-import { latencyBucketForMs } from "../lib/performance-histogram.ts";
+import { assertWebSearchProviderName } from "../shared/web-search-providers.ts";
+import { latencyBucketForMs } from "../shared/performance-histogram.ts";
 
 // Minimal D1 type definitions (subset of @cloudflare/workers-types)
 interface D1Result<T = Record<string, unknown>> {

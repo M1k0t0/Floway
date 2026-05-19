@@ -3,7 +3,6 @@
 // view shared usage/performance records for dashboard observability.
 
 import type { Context } from "hono";
-import { listApiKeys } from "../../lib/api-keys.ts";
 import { getRepo } from "../../repo/index.ts";
 import type { PerformanceMetricScope } from "../../repo/types.ts";
 import { USAGE_KEY_COLOR_ORDER } from "../usage-key-colors.ts";
@@ -56,7 +55,7 @@ export const performanceTelemetry = async (c: Context) => {
 
   if (!includeKeyMetadata) return c.json({ records });
 
-  const keys = await listApiKeys();
+  const keys = await getRepo().apiKeys.list();
   const keyMetadata = keys
     .map((k) => ({ id: k.id, name: k.name, createdAt: k.createdAt }))
     .sort((a, b) =>

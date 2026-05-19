@@ -1,10 +1,17 @@
-import type { ResponseStreamEvent } from "../../../../../lib/responses-types.ts";
+import type { ResponseStreamEvent } from "../../../shared/protocol/responses.ts";
 import type { ProtocolTerminalAlgebra } from "../../../shared/stream/protocol-algebra.ts";
-import { isResponsesTerminalEvent } from "../../../shared/stream/terminal-events.ts";
 
 export type SourceResponseStreamEvent = ResponseStreamEvent & {
   sequence_number?: number;
 };
+
+const isResponsesTerminalEvent = (
+  event: Pick<ResponseStreamEvent, "type">,
+): boolean =>
+  event.type === "response.completed" ||
+  event.type === "response.incomplete" ||
+  event.type === "response.failed" ||
+  event.type === "error";
 
 export const responsesSourceStreamAlgebra = {
   isTerminalEvent: isResponsesTerminalEvent,

@@ -447,7 +447,7 @@ Deno.test("DashboardPage renders helper functions inside script without HTML ent
 Deno.test("DashboardPage no longer ships pricing regexes to the client", () => {
   const html = DashboardPage().toString();
 
-  // Pricing now lives in src/lib/model-pricing.ts and is applied server-side
+  // Pricing lives in control-plane token-usage code and is applied server-side.
   // before /api/token-usage returns records, so no MODEL_PRICING table or
   // model-name regex should appear in the rendered dashboard script.
   assertFalse(html.includes("MODEL_PRICING"));

@@ -3,7 +3,6 @@ import {
   type WebSearchProviderRequest,
   type WebSearchProviderResult,
 } from "../types.ts";
-import { isRecord } from "../../../../lib/type-guards.ts";
 import {
   extractWebSearchProviderErrorMessage,
   toWebSearchTextBlocks,
@@ -11,6 +10,9 @@ import {
 } from "./shared.ts";
 
 const TAVILY_SEARCH_URL = "https://api.tavily.com/search";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const normalizeDomains = (domains?: string[]): string[] | undefined => {
   const normalized = domains?.map((domain) => domain.trim()).filter(Boolean);

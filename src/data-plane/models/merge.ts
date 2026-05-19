@@ -21,8 +21,8 @@
 // questions. restricted_to is a union for the same reason: a permissive view
 // for clients that do happen to read it; upstream still enforces real access.
 
-import type { ModelInfo, ModelsResponse } from "../../lib/models-cache.ts";
-import { displayModelName } from "../../lib/model-name.ts";
+import { displayModelName } from "../../shared/model-name.ts";
+import type { ModelInfo, ModelsResponse } from "./types.ts";
 
 const isClaudeModel = (model: ModelInfo): boolean =>
   model.id.startsWith("claude-");
@@ -73,7 +73,9 @@ const mergeVariantGroup = (variants: ModelInfo[]): ModelInfo => {
       limits: {
         ...limits,
         max_context_window_tokens: maxOf(
-          ...variants.map((v) => v.capabilities?.limits?.max_context_window_tokens),
+          ...variants.map((v) =>
+            v.capabilities?.limits?.max_context_window_tokens
+          ),
         ),
         max_prompt_tokens: maxOf(
           ...variants.map((v) => v.capabilities?.limits?.max_prompt_tokens),

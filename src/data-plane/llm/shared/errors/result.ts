@@ -1,6 +1,6 @@
 import type { InternalDebugError } from "./internal-debug-error.ts";
 import type { ProtocolFrame } from "../stream/types.ts";
-import type { PerformanceTelemetryContext } from "../../../../lib/performance-telemetry.ts";
+import type { PerformanceTelemetryContext } from "../../../shared/performance/telemetry.ts";
 
 export interface EventResult<T> {
   type: "events";
@@ -43,14 +43,6 @@ export const eventResult = <T>(
   }
   return result;
 };
-
-export const mapEventResult = <TEvent, TMappedEvent>(
-  result: ExecuteResult<TEvent>,
-  mapEvents: (events: AsyncIterable<TEvent>) => AsyncIterable<TMappedEvent>,
-): ExecuteResult<TMappedEvent> =>
-  result.type === "events"
-    ? { ...result, events: mapEvents(result.events) }
-    : result;
 
 export const internalErrorResult = (
   status: number,

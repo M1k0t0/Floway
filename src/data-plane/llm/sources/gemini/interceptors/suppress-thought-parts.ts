@@ -1,9 +1,10 @@
-import type {
-  GeminiStreamEvent,
-} from "../../../../../lib/gemini-types.ts";
+import type { GeminiStreamEvent } from "../../../shared/protocol/gemini.ts";
 import type { SourceInterceptor } from "../../run-interceptors.ts";
-import { eventFrame, type ProtocolFrame } from "../../../shared/stream/types.ts";
-import type { GeminiSourceContext } from "./types.ts";
+import {
+  eventFrame,
+  type ProtocolFrame,
+} from "../../../shared/stream/types.ts";
+import type { GeminiSourceContext } from "./index.ts";
 
 const hasEventPayload = (event: GeminiStreamEvent): boolean => {
   if ("error" in event) return true;

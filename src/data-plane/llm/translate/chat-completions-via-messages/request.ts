@@ -3,7 +3,7 @@ import type {
   ContentPart,
   Message,
   Tool,
-} from "../../../../lib/chat-completions-types.ts";
+} from "../../shared/protocol/chat-completions.ts";
 import {
   MESSAGES_FALLBACK_MAX_TOKENS,
   type MessagesAssistantContentBlock,
@@ -13,13 +13,13 @@ import {
   type MessagesThinkingBlock,
   type MessagesToolResultBlock,
   type MessagesUserContentBlock,
-} from "../../../../lib/messages-types.ts";
+} from "../../shared/protocol/messages.ts";
 import {
   fetchRemoteImage,
   type RemoteImageLoader,
   resolveImageUrlToMessagesImage,
 } from "../shared/remote-images.ts";
-import { safeJsonParse } from "../shared/json.ts";
+import { parseToolArgumentsObject } from "../shared/tool-arguments.ts";
 import type { ModelCapabilities } from "../../shared/models/get-model-capabilities.ts";
 
 export type { RemoteImageLoader } from "../shared/remote-images.ts";
@@ -74,7 +74,7 @@ const buildAssistantBlocks = (
       type: "tool_use",
       id: toolCall.id,
       name: toolCall.function.name,
-      input: safeJsonParse(toolCall.function.arguments),
+      input: parseToolArgumentsObject(toolCall.function.arguments),
     });
   }
 

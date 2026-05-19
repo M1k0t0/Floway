@@ -1,6 +1,8 @@
 import { getRepo } from "../../../repo/index.ts";
-import { isRecord } from "../../../lib/type-guards.ts";
 import type { SearchConfig } from "./types.ts";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 export const DEFAULT_SEARCH_CONFIG: SearchConfig = {
   provider: "disabled",

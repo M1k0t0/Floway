@@ -1,4 +1,4 @@
-import type { GeminiStreamEvent } from "../../../../../lib/gemini-types.ts";
+import type { GeminiStreamEvent } from "../../../shared/protocol/gemini.ts";
 import { protocolFramesUntilTerminal } from "../../../shared/stream/protocol-algebra.ts";
 import {
   type ProtocolFrame,

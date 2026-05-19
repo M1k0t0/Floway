@@ -1,7 +1,7 @@
 import type {
   GeminiErrorResponse,
   GeminiStreamEvent,
-} from "../../../../../lib/gemini-types.ts";
+} from "../../../shared/protocol/gemini.ts";
 import type { ProtocolTerminalAlgebra } from "../../../shared/stream/protocol-algebra.ts";
 
 export const isGeminiErrorEvent = (

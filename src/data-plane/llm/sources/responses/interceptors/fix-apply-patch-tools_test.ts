@@ -1,5 +1,5 @@
 import { assertEquals, assertFalse } from "@std/assert";
-import type { ResponsesPayload } from "../../../../../lib/responses-types.ts";
+import type { ResponsesPayload } from "../../../shared/protocol/responses.ts";
 import { fixApplyPatchTools } from "./fix-apply-patch-tools.ts";
 
 const run = async (payload: ResponsesPayload): Promise<ResponsesPayload> => {

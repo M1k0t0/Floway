@@ -1,7 +1,9 @@
-import { isRecord } from "../../../../lib/type-guards.ts";
 import type { WebSearchProviderResult } from "../types.ts";
 
 const MAX_WEB_SEARCH_QUERY_LENGTH = 1000;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 export type ValidatedWebSearchQuery =
   | { type: "ok"; query: string }

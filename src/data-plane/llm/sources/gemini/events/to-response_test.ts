@@ -2,7 +2,7 @@ import { assertEquals, assertRejects } from "@std/assert";
 import type {
   GeminiGenerateContentResponse,
   GeminiStreamEvent,
-} from "../../../../../lib/gemini-types.ts";
+} from "../../../shared/protocol/gemini.ts";
 import { eventFrame } from "../../../shared/stream/types.ts";
 import { collectGeminiProtocolEventsToResponse } from "./to-response.ts";
 

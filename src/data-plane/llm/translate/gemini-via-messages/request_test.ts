@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
-import type { GeminiGenerateContentRequest } from "../../../../lib/gemini-types.ts";
-import { MESSAGES_FALLBACK_MAX_TOKENS } from "../../../../lib/messages-types.ts";
+import type { GeminiGenerateContentRequest } from "../../shared/protocol/gemini.ts";
+import { MESSAGES_FALLBACK_MAX_TOKENS } from "../../shared/protocol/messages.ts";
 import type { ModelCapabilities } from "../../shared/models/get-model-capabilities.ts";
 import { buildTargetRequest } from "./request.ts";
 

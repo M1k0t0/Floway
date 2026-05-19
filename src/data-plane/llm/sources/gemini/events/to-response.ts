@@ -3,7 +3,7 @@ import type {
   GeminiGenerateContentResponse,
   GeminiPart,
   GeminiStreamEvent,
-} from "../../../../../lib/gemini-types.ts";
+} from "../../../shared/protocol/gemini.ts";
 import { protocolEventsUntilTerminal } from "../../../shared/stream/protocol-algebra.ts";
 import type { ProtocolFrame } from "../../../shared/stream/types.ts";
 import { geminiSourceStreamAlgebra, isGeminiErrorEvent } from "./protocol.ts";

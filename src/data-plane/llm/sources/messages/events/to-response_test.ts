@@ -2,7 +2,7 @@ import { assertEquals, assertRejects } from "@std/assert";
 import type {
   MessagesResponse,
   MessagesStreamEventData,
-} from "../../../../../lib/messages-types.ts";
+} from "../../../shared/protocol/messages.ts";
 import { eventFrame } from "../../../shared/stream/types.ts";
 import { messagesResultToEvents } from "./from-result.ts";
 import { collectMessagesProtocolEventsToResponse } from "./to-response.ts";

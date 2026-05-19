@@ -1,8 +1,8 @@
 import type {
   ChatCompletionChunk,
   ChatCompletionResponse,
-} from "../../../../../lib/chat-completions-types.ts";
-import { chatCompletionsErrorPayloadMessage } from "../../../../../lib/chat-completions-errors.ts";
+} from "../../../shared/protocol/chat-completions.ts";
+import { chatCompletionsErrorPayloadMessage } from "../../../shared/protocol/chat-completions-errors.ts";
 import {
   doneFrame,
   eventFrame,

@@ -1,5 +1,5 @@
 import { assertEquals, assertFalse } from "@std/assert";
-import { MESSAGES_FALLBACK_MAX_TOKENS } from "../../../../lib/messages-types.ts";
+import { MESSAGES_FALLBACK_MAX_TOKENS } from "../../shared/protocol/messages.ts";
 import { translateResponsesToMessagesResponse } from "../messages-via-responses/result.ts";
 import { translateResponsesToMessages } from "./request.ts";
 

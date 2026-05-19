@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import type { GeminiGenerateContentRequest } from "../../../../../lib/gemini-types.ts";
+import type { GeminiGenerateContentRequest } from "../../../shared/protocol/gemini.ts";
 import { stripSafetySettings } from "./strip-safety-settings.ts";
 import { stripUnsupportedPartFieldsFromPayload } from "./strip-unsupported-part-fields.ts";
 import { stripUnsupportedToolsFromPayload } from "./strip-unsupported-tools.ts";
