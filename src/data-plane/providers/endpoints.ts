@@ -1,4 +1,5 @@
 import type { ModelEndpoint } from './types.ts';
+import type { EndpointKey } from '../../repo/types.ts';
 
 export type { ModelEndpoint };
 
@@ -14,6 +15,13 @@ export const llmTargetApiToModelEndpoint = (target: LlmTargetApi): ModelEndpoint
     return 'chat_completions';
   }
 };
+
+// Endpoints that the gateway always invokes as Server-Sent Events. The data
+// plane treats SSE as the only upstream transport for these endpoints; providers
+// inject `stream: true` so middle layers never observe a non-streaming variant.
+// `messages_count_tokens` and `embeddings` remain non-streaming JSON.
+export const isStreamingEndpoint = (endpoint: EndpointKey): boolean =>
+  endpoint === 'chat_completions' || endpoint === 'responses' || endpoint === 'messages';
 
 const ENDPOINT_TO_PUBLIC_PATH: Record<ModelEndpoint, string> = {
   chat_completions: '/chat/completions',

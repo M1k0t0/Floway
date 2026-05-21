@@ -9,7 +9,7 @@ import { createCopilotUpstream } from '../../../shared/upstream/copilot.ts';
 import type { ChatCompletionsPayload } from '../../shared/protocol/chat-completions.ts';
 import type { MessagesPayload } from '../../shared/protocol/messages.ts';
 import type { ResponsesPayload } from '../../shared/protocol/responses.ts';
-import { publicPathsToModelEndpoints } from '../endpoints.ts';
+import { isStreamingEndpoint, publicPathsToModelEndpoints } from '../endpoints.ts';
 import type { OptionalFixId } from '../fixes.ts';
 import { withModelInfoDefaults } from '../model-info.ts';
 import type { ModelEndpoint, ModelProvider, ModelProviderInstance, ProviderCallResult, UpstreamModel } from '../types.ts';
@@ -146,11 +146,12 @@ export const createCopilotProvider = async (account: GitHubAccount): Promise<Mod
     initiator?: 'user' | 'agent',
     anthropicBeta?: readonly string[],
   ): Promise<ProviderCallResult> => {
+    const requestBody = isStreamingEndpoint(endpoint) ? { ...body, stream: true, model: rawModel.id } : { ...body, model: rawModel.id };
     const response = await upstream.fetch(
       endpoint,
       {
         method: 'POST',
-        body: JSON.stringify({ ...body, model: rawModel.id }),
+        body: JSON.stringify(requestBody),
         signal,
       },
       {

@@ -2,9 +2,8 @@ import { test } from 'vitest';
 
 import { collectChatProtocolEventsToCompletion } from './reassemble.ts';
 import { assertEquals, assertRejects } from '../../../../../test-assert.ts';
-import type { ChatCompletionResponse } from '../../../../shared/protocol/chat-completions.ts';
-import { eventFrame } from '../../../shared/stream/types.ts';
-import { chatCompletionResultToEvents } from '../../../targets/chat-completions/events/from-result.ts';
+import type { ChatCompletionChunk, ChatCompletionResponse } from '../../../../shared/protocol/chat-completions.ts';
+import { doneFrame, eventFrame } from '../../../shared/stream/types.ts';
 
 test('collectChatProtocolEventsToCompletion reassembles synthetic Chat chunks', async () => {
   const expected: ChatCompletionResponse = {
@@ -26,8 +25,28 @@ test('collectChatProtocolEventsToCompletion reassembles synthetic Chat chunks', 
     usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
   };
 
+  const chunk = (delta: ChatCompletionChunk['choices'][number]['delta'], finish_reason: 'stop' | null = null): ChatCompletionChunk => ({
+    id: expected.id,
+    object: 'chat.completion.chunk',
+    created: expected.created,
+    model: expected.model,
+    choices: [{ index: 0, delta, finish_reason }],
+  });
+
   async function* events() {
-    yield* chatCompletionResultToEvents(expected);
+    yield eventFrame(chunk({ role: 'assistant' }));
+    yield eventFrame(chunk({ reasoning_text: 'think' }));
+    yield eventFrame(chunk({ content: 'Hello' }));
+    yield eventFrame(chunk({}, 'stop'));
+    yield eventFrame({
+      id: expected.id,
+      object: 'chat.completion.chunk' as const,
+      created: expected.created,
+      model: expected.model,
+      choices: [],
+      usage: expected.usage,
+    } as ChatCompletionChunk);
+    yield doneFrame();
   }
 
   assertEquals(await collectChatProtocolEventsToCompletion(events()), expected);

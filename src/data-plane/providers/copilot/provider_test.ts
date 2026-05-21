@@ -234,3 +234,74 @@ test('Copilot provider enables Copilot-owned Messages source interceptors by def
 
   assertEquals(instance.sourceInterceptors?.messages, messagesCopilotSourceInterceptors);
 });
+
+test('Copilot provider forces stream=true for streaming endpoints and leaves count-tokens/embeddings alone', async () => {
+  const { githubAccount } = await setupAppTest();
+  const instance = await createCopilotProvider(githubAccount);
+  const provider = instance.provider;
+  const bodies: Record<string, Record<string, unknown>> = {};
+
+  await withMockedFetch(
+    async request => {
+      const url = new URL(request.url);
+
+      if (url.hostname === 'update.code.visualstudio.com') {
+        return jsonResponse(['1.110.1']);
+      }
+      if (url.pathname === '/copilot_internal/v2/token') {
+        return jsonResponse({
+          token: 'copilot-access-token',
+          expires_at: 4102444800,
+          refresh_in: 3600,
+        });
+      }
+      if (url.pathname === '/models') {
+        return jsonResponse(
+          copilotModels([
+            { id: 'gpt-chat', supported_endpoints: ['/chat/completions'] },
+            { id: 'gpt-resp', supported_endpoints: ['/responses'] },
+            { id: 'claude-msg', supported_endpoints: ['/v1/messages'] },
+            { id: 'emb-mini', supported_endpoints: ['/embeddings'] },
+          ]),
+        );
+      }
+
+      const path = url.pathname;
+      bodies[path] = (await request.json()) as Record<string, unknown>;
+
+      if (path === '/chat/completions') {
+        return jsonResponse({ id: 'cc', object: 'chat.completion', model: 'gpt-chat', choices: [], usage: {} });
+      }
+      if (path === '/responses') {
+        return jsonResponse({ id: 'r', object: 'response', model: 'gpt-resp', output: [], usage: {} });
+      }
+      if (path === '/v1/messages') {
+        return jsonResponse({ id: 'm', type: 'message', role: 'assistant', content: [], model: 'claude-msg', stop_reason: 'end_turn', stop_sequence: null, usage: {} });
+      }
+      if (path === '/v1/messages/count_tokens') {
+        return jsonResponse({ input_tokens: 1 });
+      }
+      if (path === '/embeddings') {
+        return jsonResponse({ object: 'list', data: [], model: 'emb-mini' });
+      }
+
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const models = await provider.getProvidedModels();
+      const byId = new Map(models.map(model => [model.id, model]));
+
+      await provider.callChatCompletions(byId.get('gpt-chat')!, { messages: [{ role: 'user', content: 'hi' }] });
+      await provider.callResponses(byId.get('gpt-resp')!, { input: [] });
+      await provider.callMessages(byId.get('claude-msg')!, { max_tokens: 10, messages: [{ role: 'user', content: 'hi' }] });
+      await provider.callMessagesCountTokens(byId.get('claude-msg')!, { max_tokens: 10, messages: [{ role: 'user', content: 'hi' }] });
+      await provider.callEmbeddings(byId.get('emb-mini')!, { input: 'hi' });
+    },
+  );
+
+  assertEquals(bodies['/chat/completions'].stream, true);
+  assertEquals(bodies['/responses'].stream, true);
+  assertEquals(bodies['/v1/messages'].stream, true);
+  assertEquals('stream' in bodies['/v1/messages/count_tokens'], false);
+  assertEquals('stream' in bodies['/embeddings'], false);
+});

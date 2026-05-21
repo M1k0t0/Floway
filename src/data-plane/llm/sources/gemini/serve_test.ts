@@ -2,7 +2,7 @@ import { test } from 'vitest';
 
 import { clearCopilotTokenCache } from '../../../../shared/copilot.ts';
 import { assertEquals, assertExists, assertFalse, assertStringIncludes } from '../../../../test-assert.ts';
-import { copilotModels, jsonResponse, parseSSEText, requestApp, setupAppTest, sseResponse, withMockedFetch } from '../../../../test-helpers.ts';
+import { copilotModels, jsonResponse, parseSSEText, requestApp, setupAppTest, sseChatCompletionsResponse, sseResponse, withMockedFetch } from '../../../../test-helpers.ts';
 import { clearModelsCache } from '../../../providers/upstream-model-cache.ts';
 
 const mockTokenAndModels = (request: Request, models: Parameters<typeof copilotModels>[0]): Response | null => {
@@ -47,7 +47,7 @@ test('/v1beta/models/:model:generateContent routes Gemini through native chat ta
       upstreamBody = JSON.parse(await request.text()) as Record<string, unknown>;
 
       if (url.pathname === '/chat/completions') {
-        return jsonResponse({
+        return sseChatCompletionsResponse({
           id: 'chatcmpl_gemini',
           object: 'chat.completion',
           created: 1,
@@ -106,7 +106,7 @@ test('/v1beta/models/models/:model:generateContent accepts Gemini resource model
       upstreamBody = JSON.parse(await request.text()) as Record<string, unknown>;
 
       if (url.pathname === '/chat/completions') {
-        return jsonResponse({
+        return sseChatCompletionsResponse({
           id: 'chatcmpl_gemini_resource',
           object: 'chat.completion',
           created: 1,
@@ -599,7 +599,7 @@ test('/v1beta/models/:model:generateContent accepts x-goog-api-key', async () =>
       if (mocked) return mocked;
 
       if (new URL(request.url).pathname === '/chat/completions') {
-        return jsonResponse({
+        return sseChatCompletionsResponse({
           id: 'chatcmpl_google_key',
           object: 'chat.completion',
           created: 1,
@@ -647,7 +647,7 @@ test('/v1beta/models/:model:generateContent accepts admin playground access', as
       if (mocked) return mocked;
 
       if (new URL(request.url).pathname === '/chat/completions') {
-        return jsonResponse({
+        return sseChatCompletionsResponse({
           id: 'chatcmpl_admin',
           object: 'chat.completion',
           created: 1,

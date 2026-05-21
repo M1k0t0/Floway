@@ -116,6 +116,96 @@ export function sseResponse(chunks: SSEChunk[], status = 200): Response {
   });
 }
 
+// Reusable SSE wrappers for upstream test mocks. Provider layer now forces
+// stream=true on every LLM endpoint, so upstreams must reply with SSE — these
+// helpers project a single non-stream JSON shape into the canonical SSE chunks
+// that mirror what a real streaming upstream would emit.
+
+export function sseMessagesResponse(response: Record<string, unknown>): Response {
+  const chunks: SSEChunk[] = [
+    {
+      event: 'message_start',
+      data: {
+        type: 'message_start',
+        message: {
+          id: response.id,
+          type: response.type ?? 'message',
+          role: response.role ?? 'assistant',
+          content: [],
+          model: response.model,
+          stop_reason: null,
+          stop_sequence: null,
+          usage: { ...(response.usage as Record<string, unknown>), output_tokens: 0 },
+        },
+      },
+    },
+  ];
+
+  const blocks = (response.content as Array<Record<string, unknown>>) ?? [];
+  blocks.forEach((block, index) => {
+    if (block.type === 'text') {
+      chunks.push({ event: 'content_block_start', data: { type: 'content_block_start', index, content_block: { type: 'text', text: '' } } });
+      if (block.text) {
+        chunks.push({ event: 'content_block_delta', data: { type: 'content_block_delta', index, delta: { type: 'text_delta', text: block.text } } });
+      }
+      chunks.push({ event: 'content_block_stop', data: { type: 'content_block_stop', index } });
+    }
+  });
+
+  chunks.push({
+    event: 'message_delta',
+    data: {
+      type: 'message_delta',
+      delta: { stop_reason: response.stop_reason ?? 'end_turn', stop_sequence: response.stop_sequence ?? null },
+      usage: { output_tokens: ((response.usage as Record<string, unknown>)?.output_tokens as number) ?? 0 },
+    },
+  });
+  chunks.push({ event: 'message_stop', data: { type: 'message_stop' } });
+
+  return sseResponse(chunks);
+}
+
+export function sseChatCompletionsResponse(response: Record<string, unknown>): Response {
+  const choice = ((response.choices as Array<Record<string, unknown>>) ?? [{}])[0] ?? {};
+  const message = (choice.message as Record<string, unknown>) ?? {};
+  const id = (response.id as string) ?? 'chatcmpl_test';
+  const model = (response.model as string) ?? 'test-model';
+  const created = (response.created as number) ?? 0;
+  const finishReason = (choice.finish_reason as string) ?? 'stop';
+
+  const baseChunk = (delta: Record<string, unknown>, withFinishReason = false) => ({
+    id,
+    object: 'chat.completion.chunk',
+    created,
+    model,
+    choices: [{ index: 0, delta, finish_reason: withFinishReason ? finishReason : null }],
+  });
+
+  const chunks: SSEChunk[] = [{ data: baseChunk({ role: message.role ?? 'assistant' }) }];
+  if (message.content) {
+    chunks.push({ data: baseChunk({ content: message.content }) });
+  }
+  chunks.push({ data: baseChunk({}, true) });
+  if (response.usage) {
+    chunks.push({ data: { id, object: 'chat.completion.chunk', created, model, choices: [], usage: response.usage } });
+  }
+  chunks.push({ data: '[DONE]' });
+
+  return sseResponse(chunks);
+}
+
+export function sseResponsesResponse(response: Record<string, unknown>): Response {
+  // The target boundary expands fast-path (created+in_progress+terminal) into
+  // a full sequence, so emitting only those wrapper events here is sufficient
+  // and exercises the production expansion path.
+  return sseResponse([
+    { event: 'response.created', data: { type: 'response.created', response: { ...response, status: 'in_progress', output: [], output_text: '' }, sequence_number: 0 } },
+    { event: 'response.in_progress', data: { type: 'response.in_progress', response: { ...response, status: 'in_progress', output: [], output_text: '' }, sequence_number: 1 } },
+    { event: 'response.completed', data: { type: 'response.completed', response, sequence_number: 2 } },
+    { data: '[DONE]' },
+  ]);
+}
+
 export async function requestApp(path: string, init: RequestInit): Promise<Response> {
   return await app.request(path, init);
 }

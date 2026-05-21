@@ -1,7 +1,6 @@
-import { chatCompletionResultToEvents } from './from-result.ts';
 import { chatCompletionsErrorPayloadMessage } from '../../../../shared/protocol/chat-completions-errors.ts';
-import type { ChatCompletionChunk, ChatCompletionResponse } from '../../../../shared/protocol/chat-completions.ts';
-import { doneFrame, eventFrame, type ProtocolFrame, type StreamFrame } from '../../../shared/stream/types.ts';
+import type { ChatCompletionChunk } from '../../../../shared/protocol/chat-completions.ts';
+import { doneFrame, eventFrame, type ProtocolFrame, type SseFrame } from '../../../shared/stream/types.ts';
 import { parseTargetStreamFrames } from '../../events/from-stream.ts';
 
 const chatCompletionsSseJsonToEvent = (parsed: unknown): ChatCompletionChunk => {
@@ -13,14 +12,12 @@ const chatCompletionsSseJsonToEvent = (parsed: unknown): ChatCompletionChunk => 
   return parsed as ChatCompletionChunk;
 };
 
-export const chatCompletionsStreamFramesToEvents = (frames: AsyncIterable<StreamFrame<ChatCompletionResponse>>): AsyncGenerator<ProtocolFrame<ChatCompletionChunk>> =>
+export const chatCompletionsStreamFramesToEvents = (frames: AsyncIterable<SseFrame>): AsyncGenerator<ProtocolFrame<ChatCompletionChunk>> =>
   (async function* () {
-    for await (const frame of parseTargetStreamFrames<ChatCompletionResponse>(frames, {
+    for await (const frame of parseTargetStreamFrames(frames, {
       protocol: 'Chat Completions',
     })) {
-      if (frame.type === 'json') {
-        yield* chatCompletionResultToEvents(frame.data);
-      } else if (frame.type === 'done') {
+      if (frame.type === 'done') {
         yield doneFrame();
       } else {
         yield eventFrame(chatCompletionsSseJsonToEvent(frame.data));

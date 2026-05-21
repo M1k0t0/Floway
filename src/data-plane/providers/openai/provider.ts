@@ -1,7 +1,7 @@
 import type { UpstreamConfig, EndpointKey } from '../../../repo/types.ts';
 import { createOpenAiUpstream } from '../../../shared/upstream/openai.ts';
 import { messagesWebSearchShimInterceptors } from '../../llm/sources/messages/interceptors/index.ts';
-import { publicPathsToModelEndpoints } from '../endpoints.ts';
+import { isStreamingEndpoint, publicPathsToModelEndpoints } from '../endpoints.ts';
 import { withModelInfoDefaults } from '../model-info.ts';
 import type { ModelProvider, ModelProviderInstance, ProviderCallResult, UpstreamModel } from '../types.ts';
 import { loadModels } from '../upstream-model-cache.ts';
@@ -17,16 +17,16 @@ export const createOpenAiProvider = (config: UpstreamConfig): ModelProviderInsta
   const configuredEndpoints = publicPathsToModelEndpoints(config.supportedEndpoints);
   const enabledFixes = new Set(config.enabledFixes);
 
-  const call = (endpoint: EndpointKey, model: UpstreamModel, body: Record<string, unknown>, signal?: AbortSignal, extraHeaders?: Record<string, string>): Promise<ProviderCallResult> =>
-    upstream
+  const call = (endpoint: EndpointKey, model: UpstreamModel, body: Record<string, unknown>, signal?: AbortSignal, extraHeaders?: Record<string, string>): Promise<ProviderCallResult> => {
+    const requestBody = isStreamingEndpoint(endpoint)
+      ? { ...body, stream: true, model: providerData(model).rawModelId }
+      : { ...body, model: providerData(model).rawModelId };
+    return upstream
       .fetch(
         endpoint,
         {
           method: 'POST',
-          body: JSON.stringify({
-            ...body,
-            model: providerData(model).rawModelId,
-          }),
+          body: JSON.stringify(requestBody),
           signal,
         },
         extraHeaders ? { extraHeaders } : undefined,
@@ -35,6 +35,7 @@ export const createOpenAiProvider = (config: UpstreamConfig): ModelProviderInsta
         response,
         modelKey: providerData(model).rawModelId,
       }));
+  };
 
   const provider: ModelProvider = {
     async getProvidedModels() {

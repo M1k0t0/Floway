@@ -1,13 +1,13 @@
-import type { EmitInput, RawEmitResult } from './emit-types.ts';
+import type { EmitInput } from './emit-types.ts';
 import { recordUpstreamHttpFailure, targetPerformanceContext, withUpstreamTelemetry } from './telemetry.ts';
 import type { PerformanceApiName, TelemetryModelIdentity } from '../../../repo/types.ts';
 import type { ProviderCallResult } from '../../providers/types.ts';
 import type { LlmExchangeMeta } from '../interceptors.ts';
 import { toInternalDebugError } from '../shared/errors/internal-debug-error.ts';
-import { eventResult, type InternalErrorResult, internalErrorResult } from '../shared/errors/result.ts';
+import { eventResult, type ExecuteResult, type InternalErrorResult, internalErrorResult } from '../shared/errors/result.ts';
 import { readUpstreamError } from '../shared/errors/upstream-error.ts';
 import { parseSSEStream } from '../shared/stream/parse-sse.ts';
-import { jsonFrame, type StreamFrame } from '../shared/stream/types.ts';
+import type { SseFrame } from '../shared/stream/types.ts';
 
 export type TargetEmitPayload = {
   model: string;
@@ -15,8 +15,6 @@ export type TargetEmitPayload = {
 };
 
 export type TargetEmitApiName = Exclude<PerformanceApiName, 'gemini' | 'embeddings'>;
-
-const isSSEResponse = (response: Response): boolean => (response.headers.get('content-type') ?? '').includes('text/event-stream');
 
 export const targetModelIdentity = (input: EmitInput<TargetEmitPayload>, modelKey: string): TelemetryModelIdentity => ({
   model: input.model,
@@ -36,23 +34,13 @@ export const targetExchangeMeta = (input: EmitInput<TargetEmitPayload>): LlmExch
   ...(input.downstreamAbortSignal !== undefined ? { downstreamAbortSignal: input.downstreamAbortSignal } : {}),
 });
 
-const upstreamFrames = <TJson>(response: Response, signal: AbortSignal | undefined): AsyncIterable<StreamFrame<TJson>> => {
-  if (isSSEResponse(response)) {
-    return parseSSEStream(response.body!, { signal });
-  }
-
-  return (async function* () {
-    yield jsonFrame((await response.json()) as TJson);
-  })();
-};
-
-export const targetProviderResultToFrames = async <TJson>(
+export const targetProviderResultToFrames = async (
   input: EmitInput<TargetEmitPayload>,
   targetApi: TargetEmitApiName,
   providerResult: ProviderCallResult,
   modelIdentity: TelemetryModelIdentity,
   upstreamStartedAt: number,
-): Promise<RawEmitResult<TJson>> => {
+): Promise<ExecuteResult<SseFrame>> => {
   const perfContext = targetPerformanceContext(input, targetApi, modelIdentity);
   const { response } = providerResult;
 
@@ -68,7 +56,25 @@ export const targetProviderResultToFrames = async <TJson>(
     return internalErrorResult(502, toInternalDebugError(new Error('No response body from upstream'), input.sourceApi, targetApi), perfContext);
   }
 
-  return eventResult(withUpstreamTelemetry(upstreamFrames<TJson>(response, input.downstreamAbortSignal), input, targetApi, upstreamStartedAt, modelIdentity), modelIdentity, perfContext);
+  // Provider layer forces stream=true on every LLM endpoint, so any non-SSE
+  // 200 response is a provider-contract violation: convert it to a 502 with
+  // diagnostic context rather than silently parsing JSON. See
+  // providers/endpoints.ts::isStreamingEndpoint.
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.includes('text/event-stream')) {
+    recordUpstreamHttpFailure(input, targetApi, modelIdentity);
+    return internalErrorResult(
+      502,
+      toInternalDebugError(
+        new Error(`Upstream returned ${response.status} with content-type "${contentType || 'unknown'}" but stream is required (provider must force stream=true and return text/event-stream when response.ok)`),
+        input.sourceApi,
+        targetApi,
+      ),
+      perfContext,
+    );
+  }
+
+  return eventResult(withUpstreamTelemetry(parseSSEStream(response.body, { signal: input.downstreamAbortSignal }), input, targetApi, upstreamStartedAt, modelIdentity), modelIdentity, perfContext);
 };
 
 export const targetInternalError = (input: EmitInput<TargetEmitPayload>, targetApi: TargetEmitApiName, error: unknown, modelIdentity: TelemetryModelIdentity | undefined): InternalErrorResult =>

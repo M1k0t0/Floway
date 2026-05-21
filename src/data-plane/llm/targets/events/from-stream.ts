@@ -1,19 +1,14 @@
-import type { SseFrame, StreamFrame } from '../../shared/stream/types.ts';
+import type { SseFrame } from '../../shared/stream/types.ts';
 
 export interface ParseTargetStreamFramesOptions {
   protocol: string;
   malformedJsonEventName?: string;
 }
 
-export type ParsedTargetStreamFrame<TJson> = { type: 'json'; data: TJson } | { type: 'done' } | { type: 'sse-json'; data: unknown; frame: SseFrame };
+export type ParsedTargetStreamFrame = { type: 'done' } | { type: 'sse-json'; data: unknown; frame: SseFrame };
 
-export const parseTargetStreamFrames = async function* <TJson>(frames: AsyncIterable<StreamFrame<TJson>>, options: ParseTargetStreamFramesOptions): AsyncGenerator<ParsedTargetStreamFrame<TJson>> {
+export const parseTargetStreamFrames = async function* (frames: AsyncIterable<SseFrame>, options: ParseTargetStreamFramesOptions): AsyncGenerator<ParsedTargetStreamFrame> {
   for await (const frame of frames) {
-    if (frame.type === 'json') {
-      yield { type: 'json', data: frame.data };
-      continue;
-    }
-
     const data = frame.data.trim();
     if (!data) continue;
     if (data === '[DONE]') {

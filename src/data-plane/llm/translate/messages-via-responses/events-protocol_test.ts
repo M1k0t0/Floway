@@ -39,16 +39,15 @@ const drain = async <T>(frames: AsyncIterable<T>): Promise<void> => {
   }
 };
 
-test('translateToSourceEvents does not emit mixed frames for created+completed fallback', async () => {
+test('translateToSourceEvents emits structured Messages events from the target-expanded sequence', async () => {
+  // The target boundary (responsesStreamFramesToEvents) is responsible for
+  // expanding upstream fast-path (created+completed only) into a full
+  // structured event sequence via responsesResultToEvents. Translate now sees
+  // only that expanded sequence and is a pure mapping.
   async function* stream() {
-    yield toProtocolFrame({
-      type: 'response.created',
-      response: makeResponse('in_progress'),
-    });
-    yield toProtocolFrame({
-      type: 'response.completed',
-      response: makeResponse('completed'),
-    });
+    for (const frame of responsesResultToEvents(makeResponse('completed'))) {
+      yield frame;
+    }
   }
 
   const frames = [];
@@ -67,12 +66,13 @@ test('translateToSourceEvents does not emit mixed frames for created+completed f
   );
 });
 
-test('translateToSourceEvents stops after Responses terminal fallback', async () => {
+test('translateToSourceEvents stops after Responses terminal', async () => {
+  // Once the target-expanded sequence ends in response.completed, translate
+  // must stop and ignore any extra upstream frames that arrive afterwards.
   async function* stream() {
-    yield toProtocolFrame({
-      type: 'response.completed',
-      response: makeResponse('completed'),
-    });
+    for (const frame of responsesResultToEvents(makeResponse('completed'))) {
+      yield frame;
+    }
     yield toProtocolFrame({
       type: 'response.output_text.delta',
       item_id: 'msg_1',

@@ -2,7 +2,7 @@ import type { EmitInput } from './emit-types.ts';
 import type { PerformanceApiName, TelemetryModelIdentity } from '../../../repo/types.ts';
 import { chatCompletionsErrorPayloadMessage } from '../../shared/protocol/chat-completions-errors.ts';
 import { type PerformanceTelemetryContext, recordPerformanceError, recordPerformanceLatency } from '../../shared/telemetry/performance.ts';
-import type { SseFrame, StreamFrame } from '../shared/stream/types.ts';
+import type { SseFrame } from '../shared/stream/types.ts';
 
 type TerminalKind = 'success' | 'failure';
 
@@ -76,31 +76,13 @@ export function targetPerformanceContext(
 }
 
 function classifyTerminalFrame(value: unknown, targetApi: PerformanceApiName): TerminalKind | null {
-  if (!isStreamFrame(value)) return null;
-  if (value.type === 'json') {
-    return classifyJsonTerminal(value.data, targetApi);
-  }
+  if (!isSseFrame(value)) return null;
   return classifySseTerminal(value, targetApi);
 }
 
-function classifyJsonTerminal(data: unknown, targetApi: PerformanceApiName): TerminalKind | null {
-  if (targetApi === 'responses') {
-    const status = (data as { status?: unknown }).status;
-    if (status === 'failed') return 'failure';
-    return 'success';
-  }
-  if (targetApi === 'messages') {
-    const type = (data as { type?: unknown }).type;
-    if (type === 'error') return 'failure';
-    return 'success';
-  }
-  return chatCompletionsErrorPayloadMessage(data) ? 'failure' : 'success';
-}
-
-function isStreamFrame(value: unknown): value is StreamFrame<unknown> {
+function isSseFrame(value: unknown): value is SseFrame {
   if (!value || typeof value !== 'object') return false;
   const type = (value as { type?: unknown }).type;
-  if (type === 'json') return true;
   return type === 'sse' && typeof (value as { data?: unknown }).data === 'string';
 }
 

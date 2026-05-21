@@ -1,11 +1,10 @@
-import { mapResponsesFinishReasonToChatCompletionsFinishReason, translateResponsesToChatCompletion } from './result.ts';
+import { mapResponsesFinishReasonToChatCompletionsFinishReason } from './result.ts';
 import type { ChatCompletionChunk, ChatReasoningItem, Delta } from '../../../shared/protocol/chat-completions.ts';
 import type { ResponseOutputItem, ResponsesResult, ResponseStreamEvent } from '../../../shared/protocol/responses.ts';
-import { doneFrame, type EventFrame, eventFrame, type ProtocolFrame } from '../../shared/stream/types.ts';
-import { chatCompletionResultToEvents } from '../../targets/chat-completions/events/from-result.ts';
+import { doneFrame, eventFrame, type ProtocolFrame } from '../../shared/stream/types.ts';
 import { toChatReasoningItem } from '../shared/chat-responses-reasoning.ts';
 import { createResponsesOutputOrderState, recordResponseOutputOrderEvent, type ResponsesOutputOrderState, shouldDeferForEarlierResponseOutput } from '../shared/responses-stream-order.ts';
-import { isResponseCompletionEvent, type ResponseEvent, responsePartKey, type UpstreamResponseStreamEvent } from '../shared/responses-stream.ts';
+import { type ResponseEvent, responsePartKey, type UpstreamResponseStreamEvent } from '../shared/responses-stream.ts';
 
 const UPSTREAM_RESPONSES_MISSING_TERMINAL_MESSAGE = 'Upstream Responses stream ended without a terminal event.';
 
@@ -409,17 +408,8 @@ const chatErrorFrameFromResponsesFatalEvent = (event: ResponseStreamEvent): Prot
   return undefined;
 };
 
-const startsStructuredChatStream = (event: ResponseStreamEvent): boolean =>
-  event.type === 'response.output_item.added' ||
-  event.type === 'response.output_item.done' ||
-  event.type === 'response.reasoning_summary_text.delta' ||
-  event.type === 'response.output_text.delta' ||
-  event.type === 'response.function_call_arguments.delta';
-
 export const translateToSourceEvents = async function* (frames: AsyncIterable<ProtocolFrame<UpstreamResponseStreamEvent>>): AsyncGenerator<ProtocolFrame<ChatCompletionChunk>> {
   const state = createResponsesToChatCompletionsStreamState();
-  let streamingCommitted = false;
-  const pendingFrames: Array<EventFrame<ChatCompletionChunk>> = [];
 
   for await (const event of upstreamResponsesEventsUntilTerminal(frames)) {
     const fatalFrame = chatErrorFrameFromResponsesFatalEvent(event);
@@ -428,29 +418,9 @@ export const translateToSourceEvents = async function* (frames: AsyncIterable<Pr
       return;
     }
 
-    if (!streamingCommitted && startsStructuredChatStream(event)) {
-      streamingCommitted = true;
-      for (const pending of pendingFrames) yield pending;
-      pendingFrames.length = 0;
-    }
-
-    if (!streamingCommitted && isResponseCompletionEvent(event)) {
-      yield* chatCompletionResultToEvents(translateResponsesToChatCompletion(event.response));
-      return;
-    }
-
     for (const translated of translateResponsesEventToChatCompletionsChunks(event, state)) {
-      const translatedFrame = eventFrame(translated);
-      if (streamingCommitted) {
-        yield translatedFrame;
-      } else {
-        pendingFrames.push(translatedFrame);
-      }
+      yield eventFrame(translated);
     }
-  }
-
-  if (!streamingCommitted) {
-    for (const pending of pendingFrames) yield pending;
   }
 
   yield doneFrame();

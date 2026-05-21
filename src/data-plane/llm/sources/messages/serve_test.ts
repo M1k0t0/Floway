@@ -2,7 +2,7 @@ import { test } from 'vitest';
 
 import { clearCopilotTokenCache } from '../../../../shared/copilot.ts';
 import { assertEquals, assertExists, assertFalse, assertStringIncludes } from '../../../../test-assert.ts';
-import { copilotModels, jsonResponse, parseSSEText, requestApp, setupAppTest, sseResponse, withMockedFetch } from '../../../../test-helpers.ts';
+import { copilotModels, jsonResponse, parseSSEText, requestApp, setupAppTest, sseMessagesResponse, sseResponse, withMockedFetch } from '../../../../test-helpers.ts';
 import { clearModelsCache } from '../../../providers/upstream-model-cache.ts';
 import type { ResponsesResult } from '../../../shared/protocol/responses.ts';
 import type { SearchConfig } from '../../../tools/web-search/types.ts';
@@ -1017,7 +1017,7 @@ test('/v1/messages resolves base Claude models to effort variants before plannin
       }
       if (url.pathname === '/v1/messages') {
         upstreamBody = JSON.parse(await request.text()) as Record<string, unknown>;
-        return jsonResponse({
+        return sseMessagesResponse({
           id: 'msg_effort_variant',
           type: 'message',
           role: 'assistant',
@@ -2187,7 +2187,7 @@ test('/v1/messages preserves cache_control.scope for custom Messages providers',
       }
       if (url.hostname === 'messages.example.com' && url.pathname === '/v1/messages') {
         upstreamBody = await request.json();
-        return jsonResponse({
+        return sseMessagesResponse({
           id: 'msg_custom_cache_scope',
           type: 'message',
           role: 'assistant',
@@ -2286,7 +2286,7 @@ test('/v1/messages forwards native web search unchanged to custom Messages provi
       }
       if (url.hostname === 'messages-native-search.example.com' && url.pathname === '/v1/messages') {
         upstreamBody = await request.json();
-        return jsonResponse({
+        return sseMessagesResponse({
           id: 'msg_custom_native_search',
           type: 'message',
           role: 'assistant',
@@ -2366,7 +2366,7 @@ test('/v1/messages applies native web search shim to custom Messages providers w
       }
       if (url.hostname === 'messages-shimmed-search.example.com' && url.pathname === '/v1/messages') {
         upstreamBody = await request.json();
-        return jsonResponse({
+        return sseMessagesResponse({
           id: 'msg_custom_shimmed_search',
           type: 'message',
           role: 'assistant',

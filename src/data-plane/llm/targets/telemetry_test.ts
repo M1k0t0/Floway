@@ -156,46 +156,6 @@ test('withUpstreamTelemetry does not record downstream-signal-aborted streams', 
   assertEquals(await harness.repo.performance.listAll(), []);
 });
 
-test('withUpstreamTelemetry records failed Responses JSON as upstream failure', async () => {
-  const harness = setup();
-
-  const events = withUpstreamTelemetry(
-    (async function* () {
-      yield {
-        type: 'json' as const,
-        data: {
-          id: 'resp_failed',
-          object: 'response',
-          model: 'gpt-failed-json',
-          status: 'failed',
-          output: [],
-          output_text: '',
-          error: { type: 'server_error', message: 'failed' },
-        },
-      };
-    })(),
-    baseInput(harness, {
-      sourceApi: 'responses',
-      model: 'gpt-failed-json',
-      stream: false,
-    }),
-    'responses',
-    performance.now(),
-    testTelemetryModelIdentity,
-  );
-
-  for await (const _event of events) {
-    // Consume every upstream frame.
-  }
-  await Promise.all(harness.background);
-
-  const rows = await harness.repo.performance.listAll();
-  assertEquals(rows.length, 1);
-  assertEquals(rows[0].metricScope, 'upstream_success');
-  assertEquals(rows[0].errors, 1);
-  assertEquals(rows[0].requests, 0);
-});
-
 test('withUpstreamTelemetry records Messages SSE error event as upstream failure', async () => {
   const harness = setup();
 

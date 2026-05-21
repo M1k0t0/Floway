@@ -2,7 +2,7 @@ import { test } from 'vitest';
 
 import { clearCopilotTokenCache } from '../../../../shared/copilot.ts';
 import { assertEquals, assertExists, assertFalse, assertStringIncludes } from '../../../../test-assert.ts';
-import { copilotModels, jsonResponse, parseSSEText, requestApp, setupAppTest, sseResponse, withMockedFetch } from '../../../../test-helpers.ts';
+import { copilotModels, jsonResponse, parseSSEText, requestApp, setupAppTest, sseChatCompletionsResponse, sseResponse, sseResponsesResponse, withMockedFetch } from '../../../../test-helpers.ts';
 import { FakeTime } from '../../../../test-time.ts';
 import { clearModelsCache } from '../../../providers/upstream-model-cache.ts';
 import { DOWNSTREAM_KEEP_ALIVE_INTERVAL_MS } from '../../shared/stream/proxy-sse.ts';
@@ -471,7 +471,12 @@ test('/v1/responses streams malformed upstream Responses SSE as an error event',
   );
 });
 
-test('/v1/responses direct mode synthesizes full Responses SSE when upstream falls back to JSON', async () => {
+test('/v1/responses direct mode expands upstream fast-path (wrapper-only SSE) into the full Responses SSE sequence', async () => {
+  // Upstreams (notably Copilot for short prompts) sometimes only stream the
+  // created/in_progress wrappers and a terminal response.completed without
+  // emitting any structured item/delta frames. The target boundary expands
+  // that fast-path in place via responsesResultToEvents so downstream clients
+  // always observe one canonical full sequence.
   const { apiKey } = await setupAppTest();
 
   await withMockedFetch(
@@ -492,17 +497,17 @@ test('/v1/responses direct mode synthesizes full Responses SSE when upstream fal
         return jsonResponse(
           copilotModels([
             {
-              id: 'gpt-direct-responses-json',
+              id: 'gpt-direct-responses-fastpath',
               supported_endpoints: ['/responses'],
             },
           ]),
         );
       }
       if (url.pathname === '/responses') {
-        return jsonResponse({
-          id: 'resp_json',
+        return sseResponsesResponse({
+          id: 'resp_fastpath',
           object: 'response',
-          model: 'gpt-direct-responses-json',
+          model: 'gpt-direct-responses-fastpath',
           status: 'completed',
           output_text: 'Hello',
           output: [
@@ -526,7 +531,7 @@ test('/v1/responses direct mode synthesizes full Responses SSE when upstream fal
           'x-api-key': apiKey.key,
         },
         body: JSON.stringify({
-          model: 'gpt-direct-responses-json',
+          model: 'gpt-direct-responses-fastpath',
           input: [{ type: 'message', role: 'user', content: 'Hi' }],
           instructions: null,
           temperature: 1,
@@ -619,7 +624,7 @@ test('/v1/responses resolves Claude reasoning variants before planning', async (
       }
       if (url.pathname === '/responses') {
         upstreamBody = JSON.parse(await request.text()) as Record<string, unknown>;
-        return jsonResponse({
+        return sseResponsesResponse({
           id: 'resp_claude_variant',
           object: 'response',
           model: 'claude-opus-4.7-xhigh',
@@ -704,7 +709,7 @@ test('/v1/responses direct mode retries connection-bound input item IDs once wit
               },
               400,
             )
-          : jsonResponse({
+          : sseResponsesResponse({
               id: 'resp_retry',
               object: 'response',
               model: 'gpt-direct-responses-retry',
@@ -819,7 +824,7 @@ test('/v1/responses falls back to chat completions for chat-only models', async 
       }
       if (url.pathname === '/chat/completions') {
         upstreamBody = JSON.parse(await request.text());
-        return jsonResponse({
+        return sseChatCompletionsResponse({
           id: 'chatcmpl_resp_only',
           object: 'chat.completion',
           created: 1,

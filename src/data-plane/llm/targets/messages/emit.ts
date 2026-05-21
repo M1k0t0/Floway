@@ -1,6 +1,6 @@
 import { messagesStreamFramesToEvents } from './events/from-stream.ts';
 import type { TelemetryModelIdentity } from '../../../../repo/types.ts';
-import type { MessagesPayload, MessagesResponse, MessagesStreamEventData } from '../../../shared/protocol/messages.ts';
+import type { MessagesPayload, MessagesStreamEventData } from '../../../shared/protocol/messages.ts';
 import { runInterceptors } from '../../interceptors.ts';
 import { eventResult } from '../../shared/errors/result.ts';
 import type { EmitInput, EmitResult } from '../emit-types.ts';
@@ -18,7 +18,6 @@ export const emitToMessages = async (input: EmitToMessagesInput): Promise<EmitRe
   let modelIdentity: TelemetryModelIdentity | undefined;
 
   try {
-    input.payload.stream = true;
     const ctx = {
       ...targetExchangeMeta(input),
       payload: input.payload,
@@ -30,7 +29,7 @@ export const emitToMessages = async (input: EmitToMessagesInput): Promise<EmitRe
       const providerResult = await input.provider.callMessages(input.upstreamModel, body, ctx.downstreamAbortSignal, ctx.anthropicBeta);
       modelIdentity = targetModelIdentity(input, providerResult.modelKey);
       const telemetryInput = { ...input, payload: ctx.payload };
-      const result = await targetProviderResultToFrames<MessagesResponse>(telemetryInput, targetApi, providerResult, modelIdentity, upstreamStartedAt);
+      const result = await targetProviderResultToFrames(telemetryInput, targetApi, providerResult, modelIdentity, upstreamStartedAt);
 
       return result.type === 'events' ? eventResult(messagesStreamFramesToEvents(result.events), result.modelIdentity, result.performance, result.finalMetadata) : result;
     });

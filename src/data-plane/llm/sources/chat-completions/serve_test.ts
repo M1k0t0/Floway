@@ -2,7 +2,7 @@ import { test } from 'vitest';
 
 import { clearCopilotTokenCache } from '../../../../shared/copilot.ts';
 import { assertEquals, assertExists, assertStringIncludes } from '../../../../test-assert.ts';
-import { copilotModels, jsonResponse, parseSSEText, requestApp, setupAppTest, sseResponse, withMockedFetch } from '../../../../test-helpers.ts';
+import { copilotModels, jsonResponse, parseSSEText, requestApp, setupAppTest, sseChatCompletionsResponse, sseMessagesResponse, sseResponse, withMockedFetch } from '../../../../test-helpers.ts';
 import { clearModelsCache } from '../../../providers/upstream-model-cache.ts';
 
 const getUsageOnlyChatChunks = (events: Array<{ event: string; data: string }>): Array<Record<string, unknown>> =>
@@ -213,7 +213,7 @@ test('/v1/chat/completions uses the native chat path on chat-only models', async
       }
       if (url.pathname === '/chat/completions') {
         upstreamBody = JSON.parse(await request.text()) as Record<string, unknown>;
-        return jsonResponse({
+        return sseChatCompletionsResponse({
           id: 'chatcmpl_dual',
           object: 'chat.completion',
           created: 1,
@@ -758,7 +758,7 @@ test('/v1/chat/completions resolves base Claude models to effort variants before
       }
       if (url.pathname === '/v1/messages') {
         upstreamBody = JSON.parse(await request.text()) as Record<string, unknown>;
-        return jsonResponse({
+        return sseMessagesResponse({
           id: 'msg_effort_variant',
           type: 'message',
           role: 'assistant',

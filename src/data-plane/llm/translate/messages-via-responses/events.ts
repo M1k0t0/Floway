@@ -1,11 +1,10 @@
 import { translateResponsesToMessagesResponse } from './result.ts';
 import type { MessagesStreamEventData } from '../../../shared/protocol/messages.ts';
 import type { ResponsesResult, ResponseStreamEvent } from '../../../shared/protocol/responses.ts';
-import { messagesResultToEvents } from '../../shared/protocol/messages.ts';
-import { type EventFrame, eventFrame, type ProtocolFrame } from '../../shared/stream/types.ts';
+import { eventFrame, type ProtocolFrame } from '../../shared/stream/types.ts';
 import { packReasoningSignature } from '../shared/messages-responses-signature.ts';
 import { createResponsesOutputOrderState, recordResponseOutputOrderEvent, type ResponsesOutputOrderState, shouldDeferForEarlierResponseOutput } from '../shared/responses-stream-order.ts';
-import { isResponseCompletionEvent, type ResponseEvent, responsePartKey, type UpstreamResponseStreamEvent } from '../shared/responses-stream.ts';
+import { type ResponseEvent, responsePartKey, type UpstreamResponseStreamEvent } from '../shared/responses-stream.ts';
 import { checkWhitespaceOverflow } from '../shared/tool-arguments.ts';
 
 const UPSTREAM_RESPONSES_MISSING_TERMINAL_MESSAGE = 'Upstream Responses stream ended without a terminal event.';
@@ -465,44 +464,12 @@ export const translateResponsesStreamEventToMessagesEvents = (event: ResponseStr
   return events;
 };
 
-const startsStructuredMessagesStream = (event: ResponseStreamEvent): boolean =>
-  event.type === 'response.output_item.added' ||
-  event.type === 'response.output_item.done' ||
-  event.type === 'response.reasoning_summary_text.delta' ||
-  event.type === 'response.reasoning_summary_text.done' ||
-  event.type === 'response.output_text.delta' ||
-  event.type === 'response.output_text.done' ||
-  event.type === 'response.function_call_arguments.delta' ||
-  event.type === 'response.function_call_arguments.done';
-
 export const translateToSourceEvents = async function* (frames: AsyncIterable<ProtocolFrame<UpstreamResponseStreamEvent>>): AsyncGenerator<ProtocolFrame<MessagesStreamEventData>> {
   const state = createResponsesToMessagesStreamState();
-  let streamingCommitted = false;
-  const pendingFrames: Array<EventFrame<MessagesStreamEventData>> = [];
 
   for await (const event of upstreamResponsesEventsUntilTerminal(frames)) {
-    if (!streamingCommitted && startsStructuredMessagesStream(event)) {
-      streamingCommitted = true;
-      for (const pending of pendingFrames) yield pending;
-      pendingFrames.length = 0;
-    }
-
-    if (!streamingCommitted && isResponseCompletionEvent(event)) {
-      yield* messagesResultToEvents(translateResponsesToMessagesResponse(event.response));
-      return;
-    }
-
     for (const translated of translateResponsesStreamEventToMessagesEvents(event, state)) {
-      const translatedFrame = eventFrame(translated);
-      if (streamingCommitted) {
-        yield translatedFrame;
-      } else {
-        pendingFrames.push(translatedFrame);
-      }
+      yield eventFrame(translated);
     }
-  }
-
-  if (!streamingCommitted) {
-    for (const pending of pendingFrames) yield pending;
   }
 };

@@ -3,11 +3,10 @@ import { test } from 'vitest';
 import { withDeepseekReasoningDialect } from './normalize-reasoning-dialect.ts';
 import { chatCompletionsExchangeContext, testTelemetryModelIdentity } from './test-helpers.ts';
 import { assertEquals } from '../../../../../test-assert.ts';
-import type { ChatCompletionChunk, ChatCompletionResponse, ChatCompletionsPayload } from '../../../../shared/protocol/chat-completions.ts';
+import type { ChatCompletionChunk, ChatCompletionsPayload } from '../../../../shared/protocol/chat-completions.ts';
 import type { ChatCompletionsExchangeResult } from '../../../interceptors.ts';
 import { eventResult } from '../../../shared/errors/result.ts';
 import { doneFrame, eventFrame, type ProtocolFrame } from '../../../shared/stream/types.ts';
-import { chatCompletionResultToEvents } from '../events/from-result.ts';
 
 type DeepseekReasoningDelta = ChatCompletionChunk['choices'][number]['delta'] & {
   reasoning_content?: string;
@@ -202,30 +201,27 @@ test('withDeepseekReasoningDialect renames inbound protocol reasoning_content de
 
 test('withDeepseekReasoningDialect preserves reasoning_content from non-stream JSON responses', async () => {
   const ctx = exchangeCtx();
-  const upstreamResponse: ChatCompletionResponse = {
-    id: 'chatcmpl_deepseek_json',
-    object: 'chat.completion',
+  const id = 'chatcmpl_deepseek_json';
+  const model = 'deepseek-reasoner';
+  const chunk = (delta: ChatCompletionChunk['choices'][number]['delta'], finish_reason: 'stop' | null = null): ChatCompletionChunk => ({
+    id,
+    object: 'chat.completion.chunk',
     created: 1,
-    model: 'deepseek-reasoner',
-    choices: [
-      {
-        index: 0,
-        message: {
-          role: 'assistant',
-          content: 'answer',
-          reasoning_text: null,
-          reasoning_content: 'json thinking',
-        } as unknown as ChatCompletionResponse['choices'][number]['message'],
-        finish_reason: 'stop',
-      },
-    ],
-  };
+    model,
+    choices: [{ index: 0, delta, finish_reason }],
+  });
 
   const result = await withDeepseekReasoningDialect(ctx, () =>
     Promise.resolve(
       eventResult(
         (async function* () {
-          yield* chatCompletionResultToEvents(upstreamResponse);
+          yield eventFrame(chunk({ role: 'assistant' }));
+          // DeepSeek's legacy non-stream JSON exposes the scalar as reasoning_content.
+          // The dialect interceptor must normalize it to reasoning_text.
+          yield eventFrame(chunk({ reasoning_content: 'json thinking' } as ChatCompletionChunk['choices'][number]['delta']));
+          yield eventFrame(chunk({ content: 'answer' }));
+          yield eventFrame(chunk({}, 'stop'));
+          yield doneFrame();
         })(),
         testTelemetryModelIdentity,
       ),
