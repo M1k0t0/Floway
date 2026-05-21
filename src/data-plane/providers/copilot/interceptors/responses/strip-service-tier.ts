@@ -1,9 +1,4 @@
-import type {
-  ResponsesPayload,
-  ResponsesResult,
-} from "../../../../../shared/protocol/responses.ts";
-import type { TargetInterceptor } from "../../../run-interceptors.ts";
-import type { EmitInput } from "../../../emit-types.ts";
+import type { ResponsesInterceptor } from "../../../../llm/interceptors.ts";
 
 /**
  * Copilot does not expose a compatible `service_tier` control on native or
@@ -15,10 +10,10 @@ import type { EmitInput } from "../../../emit-types.ts";
  * - https://github.com/caozhiyuan/copilot-api/commit/f7835a44f06976cab874700e4d94a5f5c0379369
  * - https://platform.openai.com/docs/api-reference/responses/create
  */
-export const withServiceTierStripped: TargetInterceptor<
-  EmitInput<ResponsesPayload>,
-  ResponsesResult
-> = async (ctx, run) => {
+export const withServiceTierStripped: ResponsesInterceptor = async (
+  ctx,
+  run,
+) => {
   const { service_tier: _, ...payload } = ctx.payload;
   ctx.payload = payload;
 

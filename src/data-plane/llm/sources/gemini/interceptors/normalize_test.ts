@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 import type { GeminiGenerateContentRequest } from "../../../../shared/protocol/gemini.ts";
+import type { GeminiExchangeContext } from "../../../interceptors.ts";
 import { stripSafetySettings } from "./strip-safety-settings.ts";
 import { stripUnsupportedPartFieldsFromPayload } from "./strip-unsupported-part-fields.ts";
 import { stripUnsupportedToolsFromPayload } from "./strip-unsupported-tools.ts";
@@ -10,10 +11,23 @@ const testTelemetryModelIdentity = {
   modelKey: "test-model-key",
 };
 
+const exchangeContext = (
+  payload: GeminiGenerateContentRequest,
+): GeminiExchangeContext => ({
+  sourceApi: "gemini",
+  targetApi: "chat-completions",
+  model: "gemini-test",
+  upstream: "test-upstream",
+  upstreamModel: {} as never,
+  provider: {} as never,
+  enabledFixes: new Set(),
+  payload,
+});
+
 const runStripSafetySettings = async (
   payload: GeminiGenerateContentRequest,
 ): Promise<void> => {
-  await stripSafetySettings({ payload }, () =>
+  await stripSafetySettings(exchangeContext(payload), () =>
     Promise.resolve({
       type: "events" as const,
       events: (async function* () {})(),

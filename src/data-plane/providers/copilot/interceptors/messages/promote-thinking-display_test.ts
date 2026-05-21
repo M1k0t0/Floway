@@ -1,13 +1,17 @@
 import { assertEquals } from "@std/assert";
-import { eventResult } from "../../../../shared/errors/result.ts";
-import type { MessagesResponse } from "../../../../../shared/protocol/messages.ts";
-import { jsonFrame, sseFrame } from "../../../../shared/stream/types.ts";
+import { eventResult } from "../../../../llm/shared/errors/result.ts";
+import type { MessagesStreamEventData } from "../../../../shared/protocol/messages.ts";
 import {
-  stubProvider,
-  stubUpstreamModel,
-  testTelemetryModelIdentity,
-} from "../../../../../../test-helpers.ts";
-import type { EmitToMessagesInput } from "../../emit.ts";
+  doneFrame,
+  eventFrame,
+  type ProtocolFrame,
+} from "../../../../llm/shared/stream/types.ts";
+import type { ModelProvider, UpstreamModel } from "../../../types.ts";
+import type { TelemetryModelIdentity } from "../../../../../repo/types.ts";
+import type {
+  MessagesExchangeContext,
+  MessagesExchangeResult,
+} from "../../../../llm/interceptors.ts";
 import {
   resolveMessagesDownstreamThinkingDisplay,
   withThinkingDisplayPromoted,
@@ -19,14 +23,44 @@ const collect = async <T>(events: AsyncIterable<T>): Promise<T[]> => {
   return collected;
 };
 
+const stubProvider = (): ModelProvider => ({
+  getProvidedModels: () => Promise.resolve([]),
+  callChatCompletions: () => Promise.reject(new Error("unexpected call")),
+  callResponses: () => Promise.reject(new Error("unexpected call")),
+  callMessages: () => Promise.reject(new Error("unexpected call")),
+  callMessagesCountTokens: () => Promise.reject(new Error("unexpected call")),
+  callEmbeddings: () => Promise.reject(new Error("unexpected call")),
+});
+
+const stubUpstreamModel = (): UpstreamModel => ({
+  id: "test-model",
+  name: "test-model",
+  version: "test-model",
+  object: "model",
+  capabilities: {
+    family: "test-model",
+    type: "chat",
+    limits: {},
+    supports: {},
+  },
+  supportedEndpoints: ["messages"],
+});
+
+const testTelemetryModelIdentity: TelemetryModelIdentity = {
+  model: "test-model",
+  upstream: "test-upstream",
+  modelKey: "test-model-key",
+};
+
 const makeCtx = (
-  thinking: EmitToMessagesInput["payload"]["thinking"],
+  thinking: MessagesExchangeContext["payload"]["thinking"],
   overrides: {
     model?: string;
-    sourceApi?: EmitToMessagesInput["sourceApi"];
+    sourceApi?: MessagesExchangeContext["sourceApi"];
   } = {},
-): EmitToMessagesInput => ({
+): MessagesExchangeContext => ({
   sourceApi: overrides.sourceApi ?? "messages",
+  targetApi: "messages",
   model: overrides.model ?? "claude-opus-4.7-1m-internal",
   upstream: "test-upstream",
   payload: {
@@ -38,22 +72,15 @@ const makeCtx = (
   provider: stubProvider(),
   upstreamModel: stubUpstreamModel(),
   enabledFixes: new Set<string>(),
-  clientStream: true,
-  runtimeLocation: "unknown",
 });
 
-const makeMessagesResponse = (
-  content: MessagesResponse["content"],
-): MessagesResponse => ({
-  id: "msg_test",
-  type: "message",
-  role: "assistant",
-  content,
-  model: "claude-opus-4.7-1m-internal",
-  stop_reason: "end_turn",
-  stop_sequence: null,
-  usage: { input_tokens: 1, output_tokens: 1 },
-});
+const okEvents = (): Promise<MessagesExchangeResult> =>
+  Promise.resolve(eventResult(
+    (async function* (): AsyncGenerator<
+      ProtocolFrame<MessagesStreamEventData>
+    > {})(),
+    testTelemetryModelIdentity,
+  ));
 
 Deno.test("resolveMessagesDownstreamThinkingDisplay exposes 4.7+ omitted by default and older Claude as summarized", () => {
   assertEquals(
@@ -144,13 +171,8 @@ Deno.test("withThinkingDisplayPromoted overrides omitted but preserves full", as
   const omittedCtx = makeCtx({ type: "adaptive", display: "omitted" });
   const fullCtx = makeCtx({ type: "adaptive", display: "full" });
 
-  const run = () =>
-    Promise.resolve(
-      eventResult((async function* () {})(), testTelemetryModelIdentity),
-    );
-
-  await withThinkingDisplayPromoted(omittedCtx, run);
-  await withThinkingDisplayPromoted(fullCtx, run);
+  await withThinkingDisplayPromoted(omittedCtx, okEvents);
+  await withThinkingDisplayPromoted(fullCtx, okEvents);
 
   assertEquals(omittedCtx.payload.thinking?.display, "summarized");
   assertEquals(fullCtx.payload.thinking?.display, "full");
@@ -162,18 +184,9 @@ Deno.test("withThinkingDisplayPromoted leaves disabled or absent thinking untouc
 
   await withThinkingDisplayPromoted(
     disabledCtx,
-    () =>
-      Promise.resolve(
-        eventResult((async function* () {})(), testTelemetryModelIdentity),
-      ),
+    okEvents,
   );
-  await withThinkingDisplayPromoted(
-    absentCtx,
-    () =>
-      Promise.resolve(
-        eventResult((async function* () {})(), testTelemetryModelIdentity),
-      ),
-  );
+  await withThinkingDisplayPromoted(absentCtx, okEvents);
 
   assertEquals(disabledCtx.payload.thinking, { type: "disabled" });
   assertEquals(absentCtx.payload.thinking, undefined);
@@ -185,38 +198,42 @@ Deno.test("withThinkingDisplayPromoted leaves unknown display values for upstrea
 
   await withThinkingDisplayPromoted(
     ctx,
-    () =>
-      Promise.resolve(
-        eventResult((async function* () {})(), testTelemetryModelIdentity),
-      ),
+    okEvents,
   );
 
   assertEquals((ctx.payload.thinking as { display?: unknown }).display, "omit");
 });
 
-Deno.test("withThinkingDisplayPromoted simulates omitted display on target SSE results", async () => {
+Deno.test("withThinkingDisplayPromoted simulates omitted display on protocol events", async () => {
   const ctx = makeCtx({ type: "adaptive" }, { sourceApi: "responses" });
 
   const result = await withThinkingDisplayPromoted(
     ctx,
     () =>
       Promise.resolve(eventResult(
-        (async function* () {
-          yield sseFrame(JSON.stringify({
+        (async function* (): AsyncGenerator<
+          ProtocolFrame<MessagesStreamEventData>
+        > {
+          yield eventFrame<MessagesStreamEventData>({
             type: "content_block_start",
             index: 0,
             content_block: { type: "thinking", thinking: "summary prefix" },
-          }));
-          yield sseFrame(JSON.stringify({
+          });
+          yield eventFrame<MessagesStreamEventData>({
             type: "content_block_delta",
             index: 0,
             delta: { type: "thinking_delta", thinking: "summary body" },
-          }));
-          yield sseFrame(JSON.stringify({
+          });
+          yield eventFrame<MessagesStreamEventData>({
             type: "content_block_delta",
             index: 0,
             delta: { type: "signature_delta", signature: "sig_unchanged" },
-          }));
+          });
+          yield eventFrame<MessagesStreamEventData>({
+            type: "content_block_stop",
+            index: 0,
+          });
+          yield doneFrame();
         })(),
         testTelemetryModelIdentity,
       )),
@@ -226,47 +243,20 @@ Deno.test("withThinkingDisplayPromoted simulates omitted display on target SSE r
   if (result.type !== "events") throw new Error("expected events");
 
   assertEquals(await collect(result.events), [
-    sseFrame(JSON.stringify({
+    eventFrame<MessagesStreamEventData>({
       type: "content_block_start",
       index: 0,
       content_block: { type: "thinking", thinking: "" },
-    })),
-    sseFrame(JSON.stringify({
+    }),
+    eventFrame<MessagesStreamEventData>({
       type: "content_block_delta",
       index: 0,
       delta: { type: "signature_delta", signature: "sig_unchanged" },
-    })),
-  ]);
-});
-
-Deno.test("withThinkingDisplayPromoted simulates omitted display on target JSON results", async () => {
-  const ctx = makeCtx({ type: "adaptive" });
-
-  const result = await withThinkingDisplayPromoted(
-    ctx,
-    () =>
-      Promise.resolve(eventResult(
-        (async function* () {
-          yield jsonFrame(makeMessagesResponse([
-            {
-              type: "thinking",
-              thinking: "private summary",
-              signature: "sig_json",
-            },
-            { type: "text", text: "visible" },
-          ]));
-        })(),
-        testTelemetryModelIdentity,
-      )),
-  );
-
-  assertEquals(result.type, "events");
-  if (result.type !== "events") throw new Error("expected events");
-
-  assertEquals(await collect(result.events), [
-    jsonFrame(makeMessagesResponse([
-      { type: "thinking", thinking: "", signature: "sig_json" },
-      { type: "text", text: "visible" },
-    ])),
+    }),
+    eventFrame<MessagesStreamEventData>({
+      type: "content_block_stop",
+      index: 0,
+    }),
+    doneFrame(),
   ]);
 });

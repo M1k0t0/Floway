@@ -5,9 +5,11 @@ import type { ChatCompletionsPayload } from "../../shared/protocol/chat-completi
 import type { MessagesPayload } from "../../shared/protocol/messages.ts";
 import type { ResponsesPayload } from "../../shared/protocol/responses.ts";
 import type { OptionalFixId } from "../fixes.ts";
-import { messagesWebSearchShimInterceptors } from "../../llm/sources/messages/interceptors/index.ts";
-import { messagesCopilotInterceptors } from "../../llm/targets/messages/interceptors/copilot/index.ts";
-import { responsesCopilotInterceptors } from "../../llm/targets/responses/interceptors/copilot/index.ts";
+import {
+  messagesCopilotInterceptors,
+  messagesCopilotSourceInterceptors,
+} from "./interceptors/messages/index.ts";
+import { responsesCopilotInterceptors } from "./interceptors/responses/index.ts";
 import { loadModels } from "../upstream-model-cache.ts";
 import { mergeClaudeVariants } from "./merge-claude-variants.ts";
 import { publicPathsToModelEndpoints } from "../endpoints.ts";
@@ -391,7 +393,7 @@ export const createCopilotProvider = async (
     provider,
     enabledFixes: new Set(COPILOT_DEFAULT_FIXES),
     sourceInterceptors: {
-      messages: messagesWebSearchShimInterceptors,
+      messages: messagesCopilotSourceInterceptors,
     },
     targetInterceptors: {
       messages: messagesCopilotInterceptors,

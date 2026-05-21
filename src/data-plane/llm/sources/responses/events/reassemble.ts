@@ -5,9 +5,9 @@ import type {
 import { protocolEventsUntilTerminal } from "../../../shared/stream/protocol-algebra.ts";
 import { type ProtocolFrame } from "../../../shared/stream/types.ts";
 import {
-  responsesSourceStreamAlgebra,
-  type SourceResponseStreamEvent,
-} from "./protocol.ts";
+  responsesStreamAlgebra,
+  type ResponsesStreamEvent,
+} from "../../../shared/protocol/responses.ts";
 
 type ResponsesReassembleEvent = ResponseStreamEvent | {
   type: "error";
@@ -39,9 +39,9 @@ export async function reassembleResponsesEvents(
 }
 
 export const collectResponsesProtocolEventsToResult = async (
-  frames: AsyncIterable<ProtocolFrame<SourceResponseStreamEvent>>,
+  frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>,
 ): Promise<ResponsesResult> => {
   return await reassembleResponsesEvents(
-    protocolEventsUntilTerminal(frames, responsesSourceStreamAlgebra),
+    protocolEventsUntilTerminal(frames, responsesStreamAlgebra),
   );
 };

@@ -1,20 +1,28 @@
 import { assertEquals } from "@std/assert";
 import type {
+  ChatCompletionChunk,
   ChatCompletionResponse,
   ChatCompletionsPayload,
 } from "../../../../shared/protocol/chat-completions.ts";
-import {
-  stubUpstream,
-  testTelemetryModelIdentity,
-} from "../../../../../test-helpers.ts";
+import type { ChatCompletionsExchangeResult } from "../../../interceptors.ts";
 import { eventResult } from "../../../shared/errors/result.ts";
 import {
-  jsonFrame,
-  sseFrame,
-  type StreamFrame,
+  doneFrame,
+  eventFrame,
+  type ProtocolFrame,
 } from "../../../shared/stream/types.ts";
-import type { RawEmitResult } from "../../emit-types.ts";
+import { chatCompletionResultToEvents } from "../events/from-result.ts";
 import { withDeepseekReasoningDialect } from "./normalize-reasoning-dialect.ts";
+import {
+  chatCompletionsExchangeContext,
+  testTelemetryModelIdentity,
+} from "./test-helpers.ts";
+
+type DeepseekReasoningDelta =
+  & ChatCompletionChunk["choices"][number]["delta"]
+  & {
+    reasoning_content?: string;
+  };
 
 const baseRequest = (): ChatCompletionsPayload => ({
   model: "deepseek-reasoner",
@@ -41,22 +49,25 @@ const baseRequest = (): ChatCompletionsPayload => ({
   ],
 });
 
+const exchangeCtx = (
+  payload: ChatCompletionsPayload = baseRequest(),
+): ReturnType<typeof chatCompletionsExchangeContext> =>
+  chatCompletionsExchangeContext(
+    payload,
+    new Set(["deepseek-reasoning-dialect"]),
+  );
+
 const collectFrames = async (
-  result: RawEmitResult<ChatCompletionResponse>,
-): Promise<StreamFrame<ChatCompletionResponse>[]> => {
+  result: ChatCompletionsExchangeResult,
+): Promise<ProtocolFrame<ChatCompletionChunk>[]> => {
   if (result.type !== "events") throw new Error("expected events result");
-  const out: StreamFrame<ChatCompletionResponse>[] = [];
+  const out: ProtocolFrame<ChatCompletionChunk>[] = [];
   for await (const frame of result.events) out.push(frame);
   return out;
 };
 
 Deno.test("withDeepseekReasoningDialect renames outbound reasoning_text on a deepseek upstream", async () => {
-  const ctx = {
-    payload: baseRequest(),
-    upstream: stubUpstream({
-      enabledFixes: new Set(["deepseek-reasoning-dialect"]),
-    }),
-  };
+  const ctx = exchangeCtx();
 
   let observed: ChatCompletionsPayload | null = null;
   await withDeepseekReasoningDialect(ctx, () => {
@@ -79,36 +90,31 @@ Deno.test("withDeepseekReasoningDialect renames outbound reasoning_text on a dee
 });
 
 Deno.test("withDeepseekReasoningDialect synthesizes reasoning_content from reasoning_items when reasoning_text is absent", async () => {
-  const ctx = {
-    payload: {
-      model: "deepseek-reasoner",
-      messages: [
-        { role: "user" as const, content: "first turn" },
-        {
-          role: "assistant" as const,
-          content: null,
-          reasoning_items: [{
-            type: "reasoning" as const,
-            id: "rs_1",
-            summary: [
-              { type: "summary_text" as const, text: "step one. " },
-              { type: "summary_text" as const, text: "step two." },
-            ],
-            encrypted_content: "opaque-blob",
-          }],
-          tool_calls: [{
-            id: "call_1",
-            type: "function" as const,
-            function: { name: "lookup", arguments: "{}" },
-          }],
-        },
-        { role: "tool" as const, tool_call_id: "call_1", content: "result" },
-      ],
-    } satisfies ChatCompletionsPayload,
-    upstream: stubUpstream({
-      enabledFixes: new Set(["deepseek-reasoning-dialect"]),
-    }),
-  };
+  const ctx = exchangeCtx({
+    model: "deepseek-reasoner",
+    messages: [
+      { role: "user", content: "first turn" },
+      {
+        role: "assistant",
+        content: null,
+        reasoning_items: [{
+          type: "reasoning",
+          id: "rs_1",
+          summary: [
+            { type: "summary_text", text: "step one. " },
+            { type: "summary_text", text: "step two." },
+          ],
+          encrypted_content: "opaque-blob",
+        }],
+        tool_calls: [{
+          id: "call_1",
+          type: "function",
+          function: { name: "lookup", arguments: "{}" },
+        }],
+      },
+      { role: "tool", tool_call_id: "call_1", content: "result" },
+    ],
+  });
 
   let observed: ChatCompletionsPayload | null = null;
   await withDeepseekReasoningDialect(ctx, () => {
@@ -129,26 +135,21 @@ Deno.test("withDeepseekReasoningDialect synthesizes reasoning_content from reaso
 });
 
 Deno.test("withDeepseekReasoningDialect strips reasoning_items even when no summaries are available", async () => {
-  const ctx = {
-    payload: {
-      model: "deepseek-reasoner",
-      messages: [
-        { role: "user" as const, content: "first turn" },
-        {
-          role: "assistant" as const,
-          content: "answer",
-          reasoning_items: [{
-            type: "reasoning" as const,
-            encrypted_content: "opaque-only",
-          }],
-          reasoning_opaque: "opaque-chain",
-        },
-      ],
-    } satisfies ChatCompletionsPayload,
-    upstream: stubUpstream({
-      enabledFixes: new Set(["deepseek-reasoning-dialect"]),
-    }),
-  };
+  const ctx = exchangeCtx({
+    model: "deepseek-reasoner",
+    messages: [
+      { role: "user", content: "first turn" },
+      {
+        role: "assistant",
+        content: "answer",
+        reasoning_items: [{
+          type: "reasoning",
+          encrypted_content: "opaque-only",
+        }],
+        reasoning_opaque: "opaque-chain",
+      },
+    ],
+  });
 
   let observed: ChatCompletionsPayload | null = null;
   await withDeepseekReasoningDialect(ctx, () => {
@@ -168,27 +169,26 @@ Deno.test("withDeepseekReasoningDialect strips reasoning_items even when no summ
   assertEquals(assistant.content, "answer");
 });
 
-Deno.test("withDeepseekReasoningDialect renames inbound SSE reasoning_content to reasoning_text", async () => {
-  const ctx = {
-    payload: baseRequest(),
-    upstream: stubUpstream({
-      enabledFixes: new Set(["deepseek-reasoning-dialect"]),
-    }),
-  };
-  const upstreamChunk = JSON.stringify({
+Deno.test("withDeepseekReasoningDialect renames inbound protocol reasoning_content deltas", async () => {
+  const ctx = exchangeCtx();
+  const upstreamChunk: ChatCompletionChunk = {
     id: "chunk_1",
     object: "chat.completion.chunk",
     created: 1,
     model: "deepseek-reasoner",
-    choices: [{ index: 0, delta: { reasoning_content: "thinking..." } }],
-  });
+    choices: [{
+      index: 0,
+      delta: { reasoning_content: "thinking..." } as DeepseekReasoningDelta,
+      finish_reason: null,
+    }],
+  };
 
   const result = await withDeepseekReasoningDialect(
     ctx,
     () =>
       Promise.resolve(eventResult(
         (async function* () {
-          yield sseFrame(upstreamChunk);
+          yield eventFrame(upstreamChunk);
         })(),
         testTelemetryModelIdentity,
       )),
@@ -197,23 +197,16 @@ Deno.test("withDeepseekReasoningDialect renames inbound SSE reasoning_content to
   const frames = await collectFrames(result);
   assertEquals(frames.length, 1);
   const frame = frames[0];
-  if (frame.type !== "sse") throw new Error("expected SSE frame");
-  const decoded = JSON.parse(frame.data) as Record<string, unknown>;
-  const choice = (decoded.choices as Array<Record<string, unknown>>)[0];
-  const delta = choice.delta as Record<string, unknown>;
+  if (frame.type !== "event") throw new Error("expected event frame");
+  const delta = frame.event.choices[0].delta as Record<string, unknown>;
   assertEquals(delta.reasoning_text, "thinking...");
   assertEquals(delta.reasoning_content, undefined);
 });
 
-Deno.test("withDeepseekReasoningDialect renames inbound non-stream message.reasoning_content", async () => {
-  const ctx = {
-    payload: baseRequest(),
-    upstream: stubUpstream({
-      enabledFixes: new Set(["deepseek-reasoning-dialect"]),
-    }),
-  };
-  const upstreamResponse = {
-    id: "chatcmpl_1",
+Deno.test("withDeepseekReasoningDialect preserves reasoning_content from non-stream JSON responses", async () => {
+  const ctx = exchangeCtx();
+  const upstreamResponse: ChatCompletionResponse = {
+    id: "chatcmpl_deepseek_json",
     object: "chat.completion",
     created: 1,
     model: "deepseek-reasoner",
@@ -221,28 +214,53 @@ Deno.test("withDeepseekReasoningDialect renames inbound non-stream message.reaso
       index: 0,
       message: {
         role: "assistant",
-        content: "ok",
-        reasoning_content: "thought trace",
-      } as unknown,
+        content: "answer",
+        reasoning_text: null,
+        reasoning_content: "json thinking",
+      } as unknown as ChatCompletionResponse["choices"][number]["message"],
       finish_reason: "stop",
     }],
-  } as unknown as ChatCompletionResponse;
+  };
 
   const result = await withDeepseekReasoningDialect(
     ctx,
     () =>
       Promise.resolve(eventResult(
         (async function* () {
-          yield jsonFrame(upstreamResponse);
+          yield* chatCompletionResultToEvents(upstreamResponse);
         })(),
         testTelemetryModelIdentity,
       )),
   );
 
   const frames = await collectFrames(result);
-  const frame = frames[0];
-  if (frame.type !== "json") throw new Error("expected JSON frame");
-  const message = frame.data.choices[0].message as Record<string, unknown>;
-  assertEquals(message.reasoning_text, "thought trace");
-  assertEquals(message.reasoning_content, undefined);
+  const reasoningFrame = frames.find((frame) =>
+    frame.type === "event" &&
+    frame.event.choices[0]?.delta.reasoning_text !== undefined
+  );
+
+  assertEquals(
+    reasoningFrame?.type === "event"
+      ? reasoningFrame.event.choices[0]?.delta.reasoning_text
+      : undefined,
+    "json thinking",
+  );
+});
+
+Deno.test("withDeepseekReasoningDialect leaves protocol done frames untouched", async () => {
+  const ctx = exchangeCtx();
+  const done = doneFrame();
+
+  const result = await withDeepseekReasoningDialect(
+    ctx,
+    () =>
+      Promise.resolve(eventResult(
+        (async function* () {
+          yield done;
+        })(),
+        testTelemetryModelIdentity,
+      )),
+  );
+
+  assertEquals(await collectFrames(result), [done]);
 });

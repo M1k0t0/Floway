@@ -1,10 +1,8 @@
 import type {
   GeminiGenerateContentRequest,
   GeminiPart,
-  GeminiStreamEvent,
 } from "../../../../shared/protocol/gemini.ts";
-import type { SourceInterceptor } from "../../run-interceptors.ts";
-import type { GeminiSourceContext } from "./index.ts";
+import type { GeminiInterceptor } from "../../../interceptors.ts";
 
 /**
  * Gemini file/code parts have no current equivalent in the upstream target
@@ -32,10 +30,7 @@ export const stripUnsupportedPartFieldsFromPayload = (
   }
 };
 
-export const stripUnsupportedPartFields: SourceInterceptor<
-  GeminiSourceContext,
-  GeminiStreamEvent
-> = (ctx, run) => {
+export const stripUnsupportedPartFields: GeminiInterceptor = (ctx, run) => {
   stripUnsupportedPartFieldsFromPayload(ctx.payload);
   return run();
 };

@@ -1,11 +1,11 @@
 import type {
-  ChatCompletionResponse,
+  ChatCompletionChunk,
   ChatCompletionsPayload,
   ChatReasoningItem,
   Message,
 } from "../../../../shared/protocol/chat-completions.ts";
-import { jsonFrame, sseFrame } from "../../../shared/stream/types.ts";
-import type { TargetInterceptor } from "../../run-interceptors.ts";
+import type { ChatCompletionsInterceptor } from "../../../interceptors.ts";
+import { eventFrame } from "../../../shared/stream/types.ts";
 
 /**
  * DeepSeek's reasoner endpoints expose thinking text through the legacy
@@ -21,7 +21,7 @@ import type { TargetInterceptor } from "../../run-interceptors.ts";
  * field is omitted.
  *
  * Gating: bound to the `deepseek-reasoning-dialect` flag (declared in
- * ../../../providers/fixes.ts) and enabled per-upstream via
+ * ../../../../providers/fixes.ts) and enabled per-upstream via
  * `Upstream.enabledFixes`. The assembler in ../index.ts only attaches this
  * interceptor when the upstream opted in, so the body below is unconditional.
  *
@@ -30,7 +30,11 @@ import type { TargetInterceptor } from "../../run-interceptors.ts";
  * - https://api-docs.deepseek.com/quick_start/agent_integrations/oh_my_pi
  */
 
-type AnyRecord = Record<string, unknown>;
+type DeepseekReasoningDelta =
+  & ChatCompletionChunk["choices"][number]["delta"]
+  & {
+    reasoning_content?: unknown;
+  };
 
 // Synthesize a scalar reasoning text from reasoning_items summaries. Used
 // when the client replays the newer OpenAI shape (reasoning_items only,
@@ -70,65 +74,34 @@ const rewriteOutboundPayload = (
   messages: payload.messages.map(rewriteOutboundMessage),
 });
 
-const renameReasoningContentToText = (record: AnyRecord): boolean => {
-  if (typeof record.reasoning_content !== "string") return false;
-  if (record.reasoning_text === undefined) {
-    record.reasoning_text = record.reasoning_content;
-  }
-  delete record.reasoning_content;
-  return true;
-};
-
-const rewriteInboundChunkJson = (data: string): string => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(data);
-  } catch {
-    return data;
-  }
-  if (!parsed || typeof parsed !== "object") return data;
-
-  const root = parsed as AnyRecord;
+const rewriteInboundChunk = (
+  chunk: ChatCompletionChunk,
+): ChatCompletionChunk => {
   let changed = false;
+  const choices = chunk.choices.map((choice) => {
+    const delta = choice.delta as DeepseekReasoningDelta;
+    if (typeof delta.reasoning_content !== "string") return choice;
 
-  const choices = root.choices;
-  if (Array.isArray(choices)) {
-    for (const choice of choices) {
-      if (!choice || typeof choice !== "object") continue;
-      const choiceRecord = choice as AnyRecord;
-      const delta = choiceRecord.delta;
-      if (delta && typeof delta === "object") {
-        if (renameReasoningContentToText(delta as AnyRecord)) changed = true;
-      }
-      const message = choiceRecord.message;
-      if (message && typeof message === "object") {
-        if (renameReasoningContentToText(message as AnyRecord)) changed = true;
-      }
-    }
-  }
-
-  return changed ? JSON.stringify(root) : data;
-};
-
-const rewriteInboundResponse = (
-  response: ChatCompletionResponse,
-): ChatCompletionResponse => {
-  let changed = false;
-  const choices = response.choices.map((choice) => {
-    const message = choice.message as unknown as AnyRecord;
-    if (renameReasoningContentToText(message)) {
-      changed = true;
-      return { ...choice, message: message as typeof choice.message };
-    }
-    return choice;
+    const { reasoning_content, ...rest } = delta;
+    changed = true;
+    return {
+      ...choice,
+      delta: {
+        ...rest,
+        ...(delta.reasoning_text === undefined
+          ? { reasoning_text: reasoning_content }
+          : {}),
+      },
+    };
   });
-  return changed ? { ...response, choices } : response;
+
+  return changed ? { ...chunk, choices } : chunk;
 };
 
-export const withDeepseekReasoningDialect: TargetInterceptor<
-  { payload: ChatCompletionsPayload },
-  ChatCompletionResponse
-> = async (ctx, run) => {
+export const withDeepseekReasoningDialect: ChatCompletionsInterceptor = async (
+  ctx,
+  run,
+) => {
   ctx.payload = rewriteOutboundPayload(ctx.payload);
 
   const result = await run();
@@ -138,11 +111,13 @@ export const withDeepseekReasoningDialect: TargetInterceptor<
     ...result,
     events: (async function* () {
       for await (const frame of result.events) {
-        if (frame.type === "sse") {
-          yield sseFrame(rewriteInboundChunkJson(frame.data), frame.event);
+        if (frame.type !== "event") {
+          yield frame;
           continue;
         }
-        yield jsonFrame(rewriteInboundResponse(frame.data));
+
+        const event = rewriteInboundChunk(frame.event);
+        yield event === frame.event ? frame : eventFrame(event);
       }
     })(),
   };

@@ -2,7 +2,7 @@ import { assertEquals, assertRejects } from "@std/assert";
 import type { ResponsesResult } from "../../../../shared/protocol/responses.ts";
 import { eventFrame } from "../../../shared/stream/types.ts";
 import { responsesResultToEvents } from "../../../targets/responses/events/from-result.ts";
-import type { SourceResponseStreamEvent } from "./protocol.ts";
+import type { ResponsesStreamEvent } from "../../../shared/protocol/responses.ts";
 import { collectResponsesProtocolEventsToResult } from "./reassemble.ts";
 
 Deno.test("collectResponsesProtocolEventsToResult reassembles synthetic Responses events", async () => {
@@ -43,7 +43,7 @@ Deno.test("collectResponsesProtocolEventsToResult rejects streams without termin
           status: "in_progress",
           output: [],
         },
-      } satisfies SourceResponseStreamEvent,
+      } satisfies ResponsesStreamEvent,
     );
   }
 

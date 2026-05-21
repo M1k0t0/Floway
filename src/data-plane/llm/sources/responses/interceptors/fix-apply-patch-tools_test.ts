@@ -1,15 +1,37 @@
 import { assertEquals, assertFalse } from "@std/assert";
 import type { ResponsesPayload } from "../../../../shared/protocol/responses.ts";
+import type { ResponsesExchangeContext } from "../../../interceptors.ts";
+import { eventResult } from "../../../shared/errors/result.ts";
 import { fixApplyPatchTools } from "./fix-apply-patch-tools.ts";
 
+const testTelemetryModelIdentity = {
+  model: "test-model",
+  upstream: "test-upstream",
+  modelKey: "test-model-key",
+};
+
+const exchangeContext = (
+  payload: ResponsesPayload,
+): ResponsesExchangeContext => ({
+  sourceApi: "responses",
+  targetApi: "responses",
+  model: payload.model,
+  upstream: "test-upstream",
+  upstreamModel: {} as never,
+  provider: {} as never,
+  enabledFixes: new Set(),
+  payload,
+});
+
 const run = async (payload: ResponsesPayload): Promise<ResponsesPayload> => {
-  await fixApplyPatchTools({ payload }, () =>
-    Promise.resolve({
-      type: "events",
-      status: 200,
-      headers: new Headers(),
-      events: (async function* () {})(),
-    } as never));
+  await fixApplyPatchTools(
+    exchangeContext(payload),
+    () =>
+      Promise.resolve(eventResult(
+        (async function* () {})(),
+        testTelemetryModelIdentity,
+      )),
+  );
   return payload;
 };
 

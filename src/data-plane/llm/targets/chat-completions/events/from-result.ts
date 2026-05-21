@@ -17,6 +17,10 @@ interface ChatCompletionResultToEventsOptions {
 type ResultChoice = ChatCompletionResponse["choices"][number];
 type ChunkChoice = ChatCompletionChunk["choices"][number];
 type Delta = ChunkChoice["delta"];
+type DeepseekResultMessage = ResultChoice["message"] & {
+  reasoning_content?: unknown;
+};
+type DeepseekReasoningDelta = Delta & { reasoning_content?: string };
 
 const makeChunk = (
   response: ChatCompletionResponse,
@@ -60,6 +64,28 @@ export const chatCompletionResultToEvents = (
       ),
     )),
   ];
+
+  pushDeltaChunk(
+    frames,
+    response,
+    response.choices.flatMap((choice) =>
+      // Preserve the legacy DeepSeek scalar through JSON-to-protocol
+      // projection so the dialect interceptor can normalize it like SSE.
+      (choice.message.reasoning_text === undefined ||
+          choice.message.reasoning_text === null) &&
+        (choice.message as DeepseekResultMessage).reasoning_content !==
+          undefined &&
+        typeof (choice.message as DeepseekResultMessage).reasoning_content ===
+          "string"
+        ? [
+          makeChoice(choice, {
+            reasoning_content: (choice.message as DeepseekResultMessage)
+              .reasoning_content,
+          } as DeepseekReasoningDelta),
+        ]
+        : []
+    ),
+  );
 
   pushDeltaChunk(
     frames,

@@ -1,7 +1,6 @@
 import type {
   MessagesPayload,
   MessagesResponse,
-  MessagesStreamEventData,
 } from "../../../shared/protocol/messages.ts";
 import { readUpstreamError } from "../../shared/errors/upstream-error.ts";
 import {
@@ -10,9 +9,13 @@ import {
 } from "../../shared/errors/result.ts";
 import { toInternalDebugError } from "../../shared/errors/internal-debug-error.ts";
 import { parseSSEStream } from "../../shared/stream/parse-sse.ts";
-import { jsonFrame } from "../../shared/stream/types.ts";
-import { runTargetInterceptors } from "../run-interceptors.ts";
-import type { EmitInput, EmitResult, RawEmitResult } from "../emit-types.ts";
+import { jsonFrame, type StreamFrame } from "../../shared/stream/types.ts";
+import {
+  type MessagesExchangeContext,
+  type MessagesExchangeResult,
+  runInterceptors,
+} from "../../interceptors.ts";
+import type { EmitInput } from "../emit-types.ts";
 import {
   recordUpstreamHttpFailure,
   targetPerformanceContext,
@@ -26,45 +29,54 @@ const isSSEResponse = (response: Response): boolean =>
   (response.headers.get("content-type") ?? "").includes("text/event-stream");
 
 export interface EmitToMessagesInput extends EmitInput<MessagesPayload> {
+  targetApi: "messages";
   anthropicBeta?: readonly string[];
 }
 
-const messagesRawResultToProtocolResult = (
-  result: RawEmitResult<MessagesResponse>,
-): EmitResult<MessagesStreamEventData> =>
-  result.type === "events"
-    ? eventResult(
-      messagesStreamFramesToEvents(result.events),
-      result.modelIdentity,
-      result.performance,
-    )
-    : result;
+const exchangeContextFromInput = (
+  input: EmitToMessagesInput,
+): MessagesExchangeContext => ({
+  sourceApi: input.sourceApi,
+  targetApi: "messages",
+  model: input.model,
+  upstream: input.upstream,
+  upstreamModel: input.upstreamModel,
+  provider: input.provider,
+  enabledFixes: input.enabledFixes,
+  payload: input.payload,
+  ...(input.apiKeyId !== undefined ? { apiKeyId: input.apiKeyId } : {}),
+  ...(input.downstreamAbortSignal !== undefined
+    ? { downstreamAbortSignal: input.downstreamAbortSignal }
+    : {}),
+  ...(input.anthropicBeta !== undefined
+    ? { anthropicBeta: input.anthropicBeta }
+    : {}),
+});
 
 export const emitToMessages = async (
   input: EmitToMessagesInput,
-): Promise<EmitResult<MessagesStreamEventData>> => {
+): Promise<MessagesExchangeResult> => {
   let modelIdentity: TelemetryModelIdentity | undefined;
-  try {
-    input.payload.stream = true;
+  const ctx = exchangeContextFromInput(input);
 
-    const result = await runTargetInterceptors<
-      EmitToMessagesInput,
-      MessagesResponse
-    >(
-      input,
+  try {
+    ctx.payload.stream = true;
+
+    return await runInterceptors(
+      ctx,
       interceptorsForMessages(input),
       async () => {
         const upstreamStartedAt = performance.now();
-        const { model: _model, ...body } = input.payload;
-        const { response, modelKey } = await input.provider.callMessages(
-          input.upstreamModel,
+        const { model: _model, ...body } = ctx.payload;
+        const { response, modelKey } = await ctx.provider.callMessages(
+          ctx.upstreamModel,
           body,
-          input.downstreamAbortSignal,
-          input.anthropicBeta,
+          ctx.downstreamAbortSignal,
+          ctx.anthropicBeta,
         );
         modelIdentity = {
-          model: input.model,
-          upstream: input.upstream,
+          model: ctx.model,
+          upstream: ctx.upstream,
           modelKey,
         };
         const perfContext = targetPerformanceContext(
@@ -85,50 +97,39 @@ export const emitToMessages = async (
             502,
             toInternalDebugError(
               new Error("No response body from upstream"),
-              input.sourceApi,
+              ctx.sourceApi,
               "messages",
             ),
             perfContext,
           );
         }
 
-        if (isSSEResponse(response)) {
-          return eventResult(
-            withUpstreamTelemetry(
-              parseSSEStream(response.body, {
-                signal: input.downstreamAbortSignal,
-              }),
-              input,
-              "messages",
-              upstreamStartedAt,
-              modelIdentity,
-            ),
-            modelIdentity,
-            perfContext,
-          );
-        }
+        const rawEvents: AsyncIterable<StreamFrame<MessagesResponse>> =
+          isSSEResponse(response)
+            ? parseSSEStream(response.body, {
+              signal: ctx.downstreamAbortSignal,
+            })
+            : (async function* () {
+              yield jsonFrame(await response.json() as MessagesResponse);
+            })();
 
         return eventResult(
-          withUpstreamTelemetry(
-            (async function* () {
-              yield jsonFrame(await response.json() as MessagesResponse);
-            })(),
+          messagesStreamFramesToEvents(withUpstreamTelemetry(
+            rawEvents,
             input,
             "messages",
             upstreamStartedAt,
             modelIdentity,
-          ),
+          )),
           modelIdentity,
           perfContext,
         );
       },
     );
-
-    return messagesRawResultToProtocolResult(result);
   } catch (error) {
     return internalErrorResult(
       502,
-      toInternalDebugError(error, input.sourceApi, "messages"),
+      toInternalDebugError(error, ctx.sourceApi, "messages"),
       modelIdentity
         ? targetPerformanceContext(input, "messages", modelIdentity)
         : undefined,

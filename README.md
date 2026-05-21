@@ -26,8 +26,10 @@ The gateway auto-detects each model's supported endpoints (native Messages,
 Responses, or Chat Completions) and picks the best translation path. When
 endpoint metadata says a request can use more than one upstream API, planning
 chooses among those native endpoints directly. Request-shape validation is left
-to the selected upstream endpoint unless a documented workaround needs to patch
-the request or response at that boundary.
+to the selected upstream endpoint unless a documented protocol interceptor needs
+to patch the request or response at that boundary. Interceptors are scoped by
+protocol: a Messages interceptor sees Messages request/result data whether that
+protocol is the client-facing source or the upstream target.
 
 ## Quick Start
 
@@ -92,10 +94,11 @@ wrangler deploy
 
 ### Optional Native Messages Web Search
 
-Anthropic-native-looking web search is available only on `/v1/messages` and
-`/messages` when a search provider is enabled. The Messages source shim runs
-before route planning, so native Messages and translated Messages routing paths
-see the same gateway-executed search behavior.
+Anthropic-native-looking web search is accepted only on `/v1/messages` and
+`/messages`. Native Messages upstreams receive native web-search tools directly
+unless the selected provider opts into gateway execution. When the selected
+target cannot execute Anthropic server tools, the post-plan Messages protocol
+interceptor runs the gateway shim, which requires an enabled search provider.
 
 Configure it in the dashboard under **Upstream -> Search**.
 

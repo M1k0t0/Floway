@@ -1,24 +1,31 @@
 import { assertEquals } from "@std/assert";
 import type { ResponsesPayload } from "../../../../shared/protocol/responses.ts";
+import type { ResponsesExchangeContext } from "../../../interceptors.ts";
 import {
   stubProvider,
   stubUpstreamModel,
   testTelemetryModelIdentity,
 } from "../../../../../test-helpers.ts";
-import type { EmitInput } from "../../emit-types.ts";
 import { eventResult } from "../../../shared/errors/result.ts";
+import { doneFrame } from "../../../shared/stream/types.ts";
 import { withReasoningDisabledOnForcedToolChoice } from "./disable-reasoning-on-forced-tool-choice.ts";
 
 const okEvents = () =>
   Promise.resolve(
-    eventResult((async function* () {})(), testTelemetryModelIdentity),
+    eventResult(
+      (async function* () {
+        yield doneFrame();
+      })(),
+      testTelemetryModelIdentity,
+    ),
   );
 
-const emitInput = (
+const exchangeContext = (
   payload: ResponsesPayload,
   enabledFixes: ReadonlySet<string> = new Set(),
-): EmitInput<ResponsesPayload> => ({
+): ResponsesExchangeContext => ({
   sourceApi: "responses",
+  targetApi: "responses",
   model: payload.model,
   upstream: "test-upstream",
   payload,
@@ -28,7 +35,7 @@ const emitInput = (
 });
 
 Deno.test("responses required tool_choice strips reasoning", async () => {
-  const input = emitInput({
+  const input = exchangeContext({
     model: "m",
     input: "hi",
     reasoning: { effort: "high" },
@@ -44,7 +51,7 @@ Deno.test("responses required tool_choice strips reasoning", async () => {
 });
 
 Deno.test("responses object tool_choice is forced", async () => {
-  const input = emitInput({
+  const input = exchangeContext({
     model: "m",
     input: "hi",
     reasoning: { effort: "high" },
@@ -57,7 +64,7 @@ Deno.test("responses object tool_choice is forced", async () => {
 });
 
 Deno.test("responses vendor flags add explicit disable fields", async () => {
-  const input = emitInput({
+  const input = exchangeContext({
     model: "m",
     input: "hi",
     reasoning: { effort: "high" },
@@ -73,7 +80,7 @@ Deno.test("responses vendor flags add explicit disable fields", async () => {
 
 Deno.test("responses non-forced tool_choice leaves reasoning untouched", async () => {
   for (const tool_choice of ["auto", "none"] as const) {
-    const input = emitInput({
+    const input = exchangeContext({
       model: "m",
       input: "hi",
       reasoning: { effort: "high" },

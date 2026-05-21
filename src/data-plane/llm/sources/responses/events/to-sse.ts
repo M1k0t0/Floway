@@ -5,15 +5,15 @@ import {
 } from "../../../shared/stream/types.ts";
 import { protocolEventsUntilTerminal } from "../../../shared/stream/protocol-algebra.ts";
 import {
-  responsesSourceStreamAlgebra,
-  type SourceResponseStreamEvent,
-} from "./protocol.ts";
+  responsesStreamAlgebra,
+  type ResponsesStreamEvent,
+} from "../../../shared/protocol/responses.ts";
 import type { TokenUsage } from "../../../../../repo/types.ts";
 import { hasTokenUsage } from "../../../../shared/telemetry/usage.ts";
 import { tokenUsageFromResponsesResult } from "../usage.ts";
 
 export const responsesProtocolEventToSSEFrame = (
-  event: SourceResponseStreamEvent,
+  event: ResponsesStreamEvent,
 ): SseFrame => sseFrame(JSON.stringify(event), event.type);
 
 interface ResponsesProtocolEventsToSSEFramesOptions {
@@ -21,9 +21,9 @@ interface ResponsesProtocolEventsToSSEFramesOptions {
 }
 
 const isTerminalResponseEvent = (
-  event: SourceResponseStreamEvent,
+  event: ResponsesStreamEvent,
 ): event is Extract<
-  SourceResponseStreamEvent,
+  ResponsesStreamEvent,
   { type: "response.completed" | "response.incomplete" | "response.failed" }
 > =>
   event.type === "response.completed" ||
@@ -31,13 +31,13 @@ const isTerminalResponseEvent = (
   event.type === "response.failed";
 
 export const responsesProtocolEventsToSSEFrames = async function* (
-  frames: AsyncIterable<ProtocolFrame<SourceResponseStreamEvent>>,
+  frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>,
   options: ResponsesProtocolEventsToSSEFramesOptions,
 ): AsyncGenerator<SseFrame> {
   for await (
     const event of protocolEventsUntilTerminal(
       frames,
-      responsesSourceStreamAlgebra,
+      responsesStreamAlgebra,
     )
   ) {
     if (isTerminalResponseEvent(event)) {

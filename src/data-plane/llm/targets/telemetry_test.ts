@@ -28,6 +28,7 @@ const baseInput = (
   harness: TelemetryHarness,
   overrides: {
     sourceApi?: "messages" | "responses" | "chat-completions";
+    targetApi?: "messages" | "responses" | "chat-completions";
     model?: string;
     stream?: boolean;
     downstreamAbortSignal?: AbortSignal;
@@ -35,6 +36,7 @@ const baseInput = (
 ) =>
   ({
     sourceApi: overrides.sourceApi ?? "messages",
+    targetApi: overrides.targetApi ?? overrides.sourceApi ?? "messages",
     model: overrides.model ?? "claude-test",
     upstream: "copilot:1",
     payload: {
@@ -338,6 +340,7 @@ Deno.test("withUpstreamTelemetry skips recording when apiKeyId is absent", async
     })(),
     {
       sourceApi: "messages",
+      targetApi: "messages",
       model: "claude-anon",
       upstream: "test-upstream",
       payload: { model: "claude-anon", stream: true },

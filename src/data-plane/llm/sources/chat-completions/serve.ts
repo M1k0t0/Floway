@@ -31,6 +31,13 @@ import {
 import { backgroundSchedulerFromContext } from "../../../../runtime/background.ts";
 import type { ProtocolFrame } from "../../shared/stream/types.ts";
 import { recordUsageForApiKey } from "../../../shared/telemetry/usage.ts";
+import {
+  type ChatCompletionsExchangeContext,
+  type ChatCompletionsInterceptor,
+  type LlmTargetApi,
+  runInterceptors,
+} from "../../interceptors.ts";
+import type { ModelProviderBinding } from "../../../providers/types.ts";
 
 const unsupportedChatModelResult = (
   model: string,
@@ -58,6 +65,31 @@ const withTranslatedEvents = <T>(
   result.type === "events"
     ? { ...result, events: translate(result.events) }
     : result;
+
+const chatSourceInterceptorsForProvider = (
+  binding: ModelProviderBinding,
+): readonly ChatCompletionsInterceptor[] =>
+  binding.sourceInterceptors?.chatCompletions ?? [];
+
+const chatExchangeContext = (
+  binding: ModelProviderBinding,
+  targetApi: LlmTargetApi,
+  model: string,
+  payload: ChatCompletionsPayload,
+  apiKeyId: string | undefined,
+  downstreamAbortSignal: AbortSignal | undefined,
+): ChatCompletionsExchangeContext => ({
+  sourceApi: "chat-completions",
+  targetApi,
+  model,
+  upstream: binding.upstream,
+  upstreamModel: binding.upstreamModel,
+  provider: binding.provider,
+  enabledFixes: binding.enabledFixes,
+  payload,
+  ...(apiKeyId !== undefined ? { apiKeyId } : {}),
+  ...(downstreamAbortSignal !== undefined ? { downstreamAbortSignal } : {}),
+});
 
 export const serveChatCompletions = async (
   c: Context,
@@ -122,70 +154,96 @@ export const serveChatCompletions = async (
           ));
         }
 
-        if (plan.target === "messages") {
-          const targetPayload = await buildMessagesTargetRequest(
-            attemptPayload,
-            capabilities,
-          );
-          const result = await emitToMessages({
-            sourceApi: "chat-completions",
-            model: modelId,
-            upstream: binding.upstream,
-            payload: targetPayload,
-            provider: binding.provider,
-            upstreamModel: binding.upstreamModel,
-            enabledFixes: binding.enabledFixes,
-            targetInterceptors: binding.targetInterceptors,
-            apiKeyId,
-            clientStream: wantsStream,
-            runtimeLocation,
-            scheduleBackground,
-            downstreamAbortSignal: downstreamAbortController?.signal,
-          });
-
-          if (result.performance) lastPerformance = result.performance;
-          return withTranslatedEvents(result, translateMessagesToSourceEvents);
-        }
-
-        if (plan.target === "responses") {
-          const targetPayload = buildResponsesTargetRequest(attemptPayload);
-          const result = await emitToResponses({
-            sourceApi: "chat-completions",
-            model: modelId,
-            upstream: binding.upstream,
-            payload: targetPayload,
-            provider: binding.provider,
-            upstreamModel: binding.upstreamModel,
-            enabledFixes: binding.enabledFixes,
-            targetInterceptors: binding.targetInterceptors,
-            apiKeyId,
-            clientStream: wantsStream,
-            runtimeLocation,
-            scheduleBackground,
-            downstreamAbortSignal: downstreamAbortController?.signal,
-          });
-
-          if (result.performance) lastPerformance = result.performance;
-          return withTranslatedEvents(result, translateResponsesToSourceEvents);
-        }
-
-        const result = await emitToChatCompletions({
-          sourceApi: "chat-completions",
-          model: modelId,
-          upstream: binding.upstream,
-          payload: attemptPayload,
-          provider: binding.provider,
-          upstreamModel: binding.upstreamModel,
-          enabledFixes: binding.enabledFixes,
-          targetInterceptors: binding.targetInterceptors,
+        const sourceCtx = chatExchangeContext(
+          binding,
+          plan.target,
+          modelId,
+          attemptPayload,
           apiKeyId,
-          clientStream: wantsStream,
-          runtimeLocation,
-          scheduleBackground,
-          downstreamAbortSignal: downstreamAbortController?.signal,
-        });
-        if (result.performance) lastPerformance = result.performance;
-        return result;
+          downstreamAbortController?.signal,
+        );
+
+        return await runInterceptors(
+          sourceCtx,
+          chatSourceInterceptorsForProvider(binding),
+          async () => {
+            const payload = sourceCtx.payload;
+
+            if (plan.target === "messages") {
+              const targetPayload = await buildMessagesTargetRequest(
+                payload,
+                capabilities,
+              );
+              const result = await emitToMessages({
+                sourceApi: "chat-completions",
+                targetApi: "messages",
+                model: modelId,
+                upstream: binding.upstream,
+                payload: targetPayload,
+                provider: binding.provider,
+                upstreamModel: binding.upstreamModel,
+                enabledFixes: binding.enabledFixes,
+                targetInterceptors: binding.targetInterceptors,
+                apiKeyId,
+                clientStream: wantsStream,
+                runtimeLocation,
+                scheduleBackground,
+                downstreamAbortSignal: downstreamAbortController?.signal,
+              });
+
+              if (result.performance) lastPerformance = result.performance;
+              return withTranslatedEvents(
+                result,
+                translateMessagesToSourceEvents,
+              );
+            }
+
+            if (plan.target === "responses") {
+              const targetPayload = buildResponsesTargetRequest(payload);
+              const result = await emitToResponses({
+                sourceApi: "chat-completions",
+                targetApi: "responses",
+                model: modelId,
+                upstream: binding.upstream,
+                payload: targetPayload,
+                provider: binding.provider,
+                upstreamModel: binding.upstreamModel,
+                enabledFixes: binding.enabledFixes,
+                targetInterceptors: binding.targetInterceptors,
+                apiKeyId,
+                clientStream: wantsStream,
+                runtimeLocation,
+                scheduleBackground,
+                downstreamAbortSignal: downstreamAbortController?.signal,
+              });
+
+              if (result.performance) lastPerformance = result.performance;
+              return withTranslatedEvents(
+                result,
+                translateResponsesToSourceEvents,
+              );
+            }
+
+            const result = await emitToChatCompletions({
+              sourceApi: "chat-completions",
+              targetApi: "chat-completions",
+              model: modelId,
+              upstream: binding.upstream,
+              payload,
+              provider: binding.provider,
+              upstreamModel: binding.upstreamModel,
+              enabledFixes: binding.enabledFixes,
+              targetInterceptors: binding.targetInterceptors,
+              apiKeyId,
+              clientStream: wantsStream,
+              runtimeLocation,
+              scheduleBackground,
+              downstreamAbortSignal: downstreamAbortController?.signal,
+            });
+            if (result.performance) lastPerformance = result.performance;
+            return result;
+          },
+        );
       },
     );
 

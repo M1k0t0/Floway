@@ -1,28 +1,8 @@
 import type {
   MessagesResponse,
   MessagesStreamEventData,
-  MessagesTextCitation,
-} from "../../../../shared/protocol/messages.ts";
-import { type EventFrame, eventFrame } from "../../../shared/stream/types.ts";
-
-const citationToSsePayload = (citation: MessagesTextCitation) =>
-  citation.type === "search_result_location"
-    ? {
-      type: citation.type,
-      source: citation.url,
-      title: citation.title,
-      search_result_index: citation.search_result_index,
-      start_block_index: citation.start_block_index,
-      end_block_index: citation.end_block_index,
-      ...(citation.cited_text ? { cited_text: citation.cited_text } : {}),
-    }
-    : {
-      type: citation.type,
-      url: citation.url,
-      title: citation.title,
-      encrypted_index: citation.encrypted_index,
-      ...(citation.cited_text ? { cited_text: citation.cited_text } : {}),
-    };
+} from "../../../shared/protocol/messages.ts";
+import { type EventFrame, eventFrame } from "../stream/types.ts";
 
 export const messagesResultToEvents = (
   response: MessagesResponse,
@@ -64,7 +44,7 @@ export const messagesResultToEvents = (
           index,
           delta: {
             type: "citations_delta",
-            citation: citationToSsePayload(citation) as MessagesTextCitation,
+            citation,
           },
         }));
       }

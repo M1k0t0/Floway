@@ -1,9 +1,5 @@
-import type {
-  MessagesPayload,
-  MessagesResponse,
-} from "../../../../shared/protocol/messages.ts";
-import type { TargetInterceptor } from "../../run-interceptors.ts";
-import type { EmitToMessagesInput } from "../emit.ts";
+import type { MessagesPayload } from "../../../../shared/protocol/messages.ts";
+import type { MessagesInterceptor } from "../../../interceptors.ts";
 
 // Opt-in workaround for upstreams where forced `tool_choice` and enabled
 // thinking do not compose. Messages has a native `thinking: disabled` shape.
@@ -19,11 +15,12 @@ const disableMessagesReasoning = (
   return { ...rest, thinking: { type: "disabled" as const } };
 };
 
-export const withReasoningDisabledOnForcedToolChoice: TargetInterceptor<
-  EmitToMessagesInput,
-  MessagesResponse
-> = async (ctx, run) => {
-  if (!hasForcedToolChoice(ctx.payload)) return await run();
-  ctx.payload = disableMessagesReasoning(ctx.payload);
-  return await run();
-};
+export const withReasoningDisabledOnForcedToolChoice: MessagesInterceptor =
+  async (
+    ctx,
+    run,
+  ) => {
+    if (!hasForcedToolChoice(ctx.payload)) return await run();
+    ctx.payload = disableMessagesReasoning(ctx.payload);
+    return await run();
+  };

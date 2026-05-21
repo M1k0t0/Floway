@@ -1,6 +1,4 @@
-import type { MessagesResponse } from "../../../../../shared/protocol/messages.ts";
-import type { TargetInterceptor } from "../../../run-interceptors.ts";
-import type { EmitToMessagesInput } from "../../emit.ts";
+import type { MessagesInterceptor } from "../../../../llm/interceptors.ts";
 
 /**
  * Claude Code's prompt-caching-scope beta adds `cache_control.scope`, but
@@ -22,10 +20,10 @@ const stripBlockScope = (block: Record<string, unknown>): void => {
   block.cache_control = Object.keys(rest).length > 0 ? rest : undefined;
 };
 
-export const withCacheControlScopeStripped: TargetInterceptor<
-  EmitToMessagesInput,
-  MessagesResponse
-> = async (ctx, run) => {
+export const withCacheControlScopeStripped: MessagesInterceptor = async (
+  ctx,
+  run,
+) => {
   if (Array.isArray(ctx.payload.system)) {
     for (
       const block of ctx.payload.system as unknown as Record<string, unknown>[]

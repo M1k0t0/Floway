@@ -1,14 +1,13 @@
 import type {
   GeminiGenerateContentRequest,
-  GeminiStreamEvent,
   GeminiToolGroup,
 } from "../../../../shared/protocol/gemini.ts";
-import type { SourceInterceptor } from "../../run-interceptors.ts";
-import type { GeminiSourceContext } from "./index.ts";
+import type { GeminiInterceptor } from "../../../interceptors.ts";
 
 /**
  * Only function declarations are currently translatable from Gemini tool
- * groups. Strip the rest at source so plan and target emitters never see them.
+ * groups. Strip the rest after target planning so target emitters never see
+ * unsupported tool capabilities.
  *
  * TODO: Support Gemini googleSearch through the existing web-search shim
  * instead of dropping it here.
@@ -41,10 +40,7 @@ export const stripUnsupportedToolsFromPayload = (
   }
 };
 
-export const stripUnsupportedTools: SourceInterceptor<
-  GeminiSourceContext,
-  GeminiStreamEvent
-> = (ctx, run) => {
+export const stripUnsupportedTools: GeminiInterceptor = (ctx, run) => {
   stripUnsupportedToolsFromPayload(ctx.payload);
   return run();
 };

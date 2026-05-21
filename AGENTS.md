@@ -70,16 +70,20 @@ list of provider bindings. Request execution tries provider bindings in order
 only until the first binding that can serve the requested source shape; that
 provider's result is final for the request.
 
-Copilot-specific behavior belongs in `src/data-plane/providers/copilot/` or in
-Copilot interceptor collections under target interceptor directories. This
+Copilot-specific behavior belongs in `src/data-plane/providers/copilot/`,
+including provider-owned source and target interceptor implementations. This
 includes Copilot raw model variant selection, Claude public-name normalization,
 Copilot request-alias resolution, Copilot endpoint projection, `anthropic-beta`
 filtering, and Copilot upstream request fixes. Custom OpenAI-compatible provider
 behavior belongs in `src/data-plane/providers/openai/`.
 
-Messages web-search shim registration is provider-owned: Copilot providers
-enable it directly, while custom OpenAI-compatible providers enable it only
-through the `messages-web-search-shim` upstream fix flag.
+Messages web-search behavior is decided by the post-plan Messages protocol
+interceptor. Messages via Responses or Chat Completions always uses the gateway
+shim when native web-search tools are present, because those targets cannot run
+Anthropic server tools. Native Messages targets receive native web-search tools
+directly by default; Copilot enables `messages-web-search-shim` by default, and
+custom OpenAI-compatible providers can opt native Messages into the shim with
+that upstream fix flag.
 
 Backoff is intentionally disabled for now. Control-plane status returns empty
 temporary-unavailability data until a provider-level backoff design lands.
@@ -108,15 +112,29 @@ the owning source directory such as `src/data-plane/llm/sources/messages/`.
 The LLM pipeline is:
 
 ```text
-serve -> source interceptors -> resolve model -> provider attempt loop
-  -> plan from the attempted provider's UpstreamModel capabilities
-  -> build target request -> emit through provider method
-  -> translate events -> respond
+serve -> resolve model -> provider binding loop
+  -> plan from the provider's UpstreamModel capabilities
+  -> source protocol interceptors -> build target request
+  -> target protocol interceptors -> emit through provider method
+  -> translate target protocol events back to source protocol -> respond
 ```
 
 Use those terms. Planning is the only layer that chooses a target. Successful
-execution after `emit` is event-first and should flow through source-shaped
-events whenever practical.
+execution after `emit` is event-first and should flow through protocol events
+whenever practical.
+
+Interceptors are protocol-exchange scoped, not source/target-contract scoped.
+`MessagesInterceptor`, `ResponsesInterceptor`, and `ChatCompletionsInterceptor`
+have one concrete context/result contract per protocol whether that protocol
+appears on the client/source side or the upstream/target side. Provider source
+and target registrations are separate execution slots, but they use the same
+protocol aliases for the same protocol. The shared post-plan `LlmExchangeMeta`
+contains `sourceApi`, `targetApi`, model/provider metadata, `enabledFixes`,
+`apiKeyId`, and the downstream abort signal. Do not put responder or telemetry
+details such as `clientStream`, `runtimeLocation`, or `scheduleBackground` in
+interceptor context. Raw upstream frames stay inside target emitters and
+raw-to-protocol converters; protocol interceptors see protocol request payloads
+and protocol result/events.
 
 Request translation is direct and pairwise. Do not introduce a canonical
 internal request IR. Pair translators belong under
@@ -124,12 +142,14 @@ internal request IR. Pair translators belong under
 
 Workarounds belong at the owning boundary:
 
-- source request cleanup, whole-pipeline retry, and final response shaping stay
-  under `src/data-plane/llm/sources/<source>/`.
+- source-owned request cleanup, whole-pipeline retry, and final response shaping
+  stay under `src/data-plane/llm/sources/<source>/`; source interceptors still
+  run after planning for each attempted provider.
 - target upstream request fixes, upstream retries, and target event fixes stay
   under `src/data-plane/llm/targets/<target>/`.
-- provider-specific target fixes are registered by the provider and live in the
-  target interceptor subtree that owns the upstream protocol boundary.
+- provider-specific source and target fixes are registered by the provider and
+  live under that provider's directory; the generic LLM pipeline only executes
+  registered interceptor lists.
 - shared translation primitives belong in `src/data-plane/llm/translate/shared/`
   only when multiple pair directions need the same protocol rule.
 

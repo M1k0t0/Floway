@@ -1,7 +1,6 @@
-import { getRepo } from "../../../../../../repo/index.ts";
-import type { ResponsesPayload } from "../../../../../shared/protocol/responses.ts";
-import type { ResponsesResult } from "../../../../../shared/protocol/responses.ts";
-import type { TargetInterceptor } from "../../../run-interceptors.ts";
+import { getRepo } from "../../../../../repo/index.ts";
+import type { ResponsesPayload } from "../../../../shared/protocol/responses.ts";
+import type { ResponsesInterceptor } from "../../../../llm/interceptors.ts";
 
 /**
  * Copilot's `/responses` input items can be connection-bound in three ways:
@@ -241,10 +240,10 @@ const collectAndFixAll = async (
   return true;
 };
 
-export const withConnectionMismatchRetried: TargetInterceptor<
-  { payload: ResponsesPayload },
-  ResponsesResult
-> = async (ctx, run) => {
+export const withConnectionMismatchRetried: ResponsesInterceptor = async (
+  ctx,
+  run,
+) => {
   await applySpottedFixes(ctx.payload);
 
   const first = await run();

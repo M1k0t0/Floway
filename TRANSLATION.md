@@ -13,7 +13,7 @@ client-facing data-plane APIs:
 Route planning uses provider-owned model capability data from
 `supported_endpoints`. Request translation is direct and pairwise; there is no
 canonical internal request IR. Provider-specific quirks live in provider-owned
-model projection or target interceptor collections rather than inside pairwise
+model projection or provider interceptor collections rather than inside pairwise
 translators.
 
 ## Routing
@@ -65,24 +65,35 @@ gateway returns a Gemini-shaped unsupported-model error.
   connection-bound IDs, policy retry failures, Messages thinking-display idle
   gaps, unsupported Messages `eager_input_streaming`, and malformed upstream
   stream shapes are handled at the target boundary.
-- Streaming results are source-shaped event streams after upstream emission.
-  Source responders decide final HTTP/SSE shaping.
+- Interceptors are protocol-scoped. A Messages interceptor sees a Messages
+  request and Messages result/events whether Messages is the source protocol or
+  target protocol; Responses and Chat Completions follow the same rule.
+- Raw upstream frames are converted inside target emitters before target
+  interceptors see results. Source responders decide final HTTP/SSE shaping
+  after target protocol events are translated back to source protocol events.
 
 ## Boundary Workarounds
 
 Messages source boundary:
 
-- strips reserved `x-anthropic-billing-header` prompt attribution
 - rejects body-level `anthropic_beta` and `betas`; Anthropic beta flags are
   accepted only from the `anthropic-beta` HTTP header and passed to Messages
   providers as a separate parameter
-- rewrites native Anthropic `web_search_*` server tools into a gateway-executed
-  client-tool shim before planning/emission, decodes shim-owned replay history
-  back into upstream `search_result` blocks, and rewrites shim-owned search
-  results/citations back to native Messages shape
-- rewrites upstream context-window errors into the compact Messages error shape
+- after planning, rewrites native Anthropic `web_search_*` server tools into a
+  gateway-executed client-tool shim when the selected provider/target requires
+  it, decodes shim-owned replay history back into upstream `search_result`
+  blocks, and rewrites shim-owned search results/citations back to native
+  Messages shape
 
-Copilot Messages target boundary:
+Copilot Messages provider source boundary:
+
+- strips reserved `x-anthropic-billing-header` prompt attribution before Copilot
+  prompt submission
+- rewrites Copilot context-window errors into the compact Messages error shape
+- enables the Messages web-search shim by default even for native Messages
+  targets, because Copilot search is executed by the gateway
+
+Copilot Messages provider target boundary:
 
 - strips unsupported `cache_control.scope` before calling Copilot native
   Messages. Custom Messages providers receive the caller's `cache_control`
@@ -92,12 +103,12 @@ Responses source boundary:
 
 - rewrites `apply_patch` from `custom` to `function`
 - removes unsupported `image_generation` tools and forced tool choices before
-  planning/emission
+  target request construction/emission
 
 Gemini source boundary:
 
 - removes unsupported `fileData`, `executableCode`, and `codeExecutionResult`
-  part fields before planning/emission
+  part fields before target request construction/emission
 - removes unsupported Gemini tool capabilities such as `googleSearch`,
   `codeExecution`, URL context, file search, MCP servers, and maps, keeping only
   function declarations
@@ -109,7 +120,7 @@ Gemini source boundary:
 - shapes errors as Google RPC Status payloads while preserving internal debug
   fields for gateway failures
 
-Copilot Messages target boundary:
+Copilot Messages provider target boundary:
 
 - promotes upstream `thinking.display` during active thinking to avoid Copilot
   Messages idle gaps, then preserves downstream omitted-thinking semantics
@@ -121,11 +132,14 @@ Native Messages target:
 
 - strips stray `[DONE]` sentinels from Anthropic-shaped streams
 
-Native Responses target:
+Copilot Responses provider target boundary:
 
 - strips unsupported `service_tier`
 - retries expired connection-bound input IDs once with deterministic rewrites
 - synchronizes mismatched stream output item IDs
+
+Native Responses target:
+
 - retries intermittent upstream `cyber_policy` failures before the failed
   attempt reaches the source pipeline
 

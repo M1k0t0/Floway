@@ -1,21 +1,65 @@
 import { assertEquals } from "@std/assert";
-import type { MessagesPayload } from "../../../../shared/protocol/messages.ts";
-import {
-  stubProvider,
-  stubUpstreamModel,
-  testTelemetryModelIdentity,
-} from "../../../../../test-helpers.ts";
+import type {
+  MessagesPayload,
+  MessagesStreamEventData,
+} from "../../../../shared/protocol/messages.ts";
+import type {
+  ModelProvider,
+  UpstreamModel,
+} from "../../../../providers/types.ts";
+import type { TelemetryModelIdentity } from "../../../../../repo/types.ts";
+import type {
+  MessagesExchangeContext,
+  MessagesExchangeResult,
+} from "../../../interceptors.ts";
 import { eventResult } from "../../../shared/errors/result.ts";
-import type { EmitToMessagesInput } from "../emit.ts";
+import type { ProtocolFrame } from "../../../shared/stream/types.ts";
 import { withReasoningDisabledOnForcedToolChoice } from "./disable-reasoning-on-forced-tool-choice.ts";
 
-const okEvents = () =>
+const stubProvider = (): ModelProvider => ({
+  getProvidedModels: () => Promise.resolve([]),
+  callChatCompletions: () => Promise.reject(new Error("unexpected call")),
+  callResponses: () => Promise.reject(new Error("unexpected call")),
+  callMessages: () => Promise.reject(new Error("unexpected call")),
+  callMessagesCountTokens: () => Promise.reject(new Error("unexpected call")),
+  callEmbeddings: () => Promise.reject(new Error("unexpected call")),
+});
+
+const stubUpstreamModel = (): UpstreamModel => ({
+  id: "test-model",
+  name: "test-model",
+  version: "test-model",
+  object: "model",
+  capabilities: {
+    family: "test-model",
+    type: "chat",
+    limits: {},
+    supports: {},
+  },
+  supportedEndpoints: ["messages"],
+});
+
+const testTelemetryModelIdentity: TelemetryModelIdentity = {
+  model: "test-model",
+  upstream: "test-upstream",
+  modelKey: "test-model-key",
+};
+
+const okEvents = (): Promise<MessagesExchangeResult> =>
   Promise.resolve(
-    eventResult((async function* () {})(), testTelemetryModelIdentity),
+    eventResult(
+      (async function* (): AsyncGenerator<
+        ProtocolFrame<MessagesStreamEventData>
+      > {})(),
+      testTelemetryModelIdentity,
+    ),
   );
 
-const emitInput = (payload: MessagesPayload): EmitToMessagesInput => ({
+const exchangeContext = (
+  payload: MessagesPayload,
+): MessagesExchangeContext => ({
   sourceApi: "messages",
+  targetApi: "messages",
   model: payload.model,
   upstream: "test-upstream",
   payload,
@@ -25,7 +69,7 @@ const emitInput = (payload: MessagesPayload): EmitToMessagesInput => ({
 });
 
 Deno.test("messages forced tool_choice disables thinking and strips output_config", async () => {
-  const input = emitInput({
+  const input = exchangeContext({
     model: "m",
     messages: [],
     max_tokens: 1,
@@ -41,7 +85,7 @@ Deno.test("messages forced tool_choice disables thinking and strips output_confi
 });
 
 Deno.test("messages any tool_choice also disables thinking", async () => {
-  const input = emitInput({
+  const input = exchangeContext({
     model: "m",
     messages: [],
     max_tokens: 1,
@@ -56,7 +100,7 @@ Deno.test("messages any tool_choice also disables thinking", async () => {
 
 Deno.test("messages non-forced tool_choice leaves reasoning untouched", async () => {
   for (const type of ["auto", "none"] as const) {
-    const input = emitInput({
+    const input = exchangeContext({
       model: "m",
       messages: [],
       max_tokens: 1,

@@ -1,10 +1,9 @@
-// Order assertion for the Messages target assembler: base ++ copilot ++
-// optional. The dispatcher (runTargetInterceptors) executes whatever order
-// the assembler returns, so this is the contract guarding interceptor
-// ordering across future refactors.
+// Order assertion for the Messages target assembler: base ++ provider ++
+// optional. The protocol interceptor runner executes whatever order the
+// assembler returns, so this guards interceptor ordering across refactors.
 
 import { assertEquals } from "@std/assert";
-import { messagesCopilotInterceptors } from "./copilot/index.ts";
+import { messagesCopilotInterceptors } from "../../../../providers/copilot/interceptors/messages/index.ts";
 import { withReasoningDisabledOnForcedToolChoice } from "./disable-reasoning-on-forced-tool-choice.ts";
 import {
   interceptorsForMessages,

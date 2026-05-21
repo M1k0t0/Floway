@@ -1,11 +1,16 @@
 import type {
-  MessagesResponse,
+  MessagesStreamEventData,
   MessagesThinkingDisplay,
-} from "../../../../../shared/protocol/messages.ts";
-import { copilotRawModelId } from "../../../../../providers/copilot/model-name.ts";
-import type { StreamFrame } from "../../../../shared/stream/types.ts";
-import type { TargetInterceptor } from "../../../run-interceptors.ts";
-import type { EmitToMessagesInput } from "../../emit.ts";
+} from "../../../../shared/protocol/messages.ts";
+import { copilotRawModelId } from "../../model-name.ts";
+import {
+  eventFrame,
+  type ProtocolFrame,
+} from "../../../../llm/shared/stream/types.ts";
+import type {
+  MessagesExchangeContext,
+  MessagesInterceptor,
+} from "../../../../llm/interceptors.ts";
 
 const CLAUDE_VERSION_PATTERN = /(?:^|-)(\d+)\.(\d+)(?=-|$)/;
 
@@ -33,7 +38,7 @@ const isClaudeVersionAtLeast = (
 };
 
 export const resolveMessagesDownstreamThinkingDisplay = (
-  ctx: EmitToMessagesInput,
+  ctx: Pick<MessagesExchangeContext, "payload">,
 ): MessagesThinkingDisplay | undefined => {
   const display = ctx.payload.thinking?.display;
   if (display !== undefined) {
@@ -48,52 +53,28 @@ export const resolveMessagesDownstreamThinkingDisplay = (
     : "summarized";
 };
 
-const omitThinkingTextFromStreamFrame = (
-  frame: StreamFrame<MessagesResponse>,
-): StreamFrame<MessagesResponse> | undefined => {
-  if (frame.type === "json") {
-    return {
-      ...frame,
-      data: {
-        ...frame.data,
-        content: frame.data.content.map((block) =>
-          block.type === "thinking" ? { ...block, thinking: "" } : block
-        ),
-      },
-    };
-  }
+const omitThinkingTextFromProtocolFrame = (
+  frame: ProtocolFrame<MessagesStreamEventData>,
+): ProtocolFrame<MessagesStreamEventData> | undefined => {
+  if (frame.type === "done") return frame;
 
-  const data = frame.data.trim();
-  if (!data || data === "[DONE]") return frame;
-
-  let event: Record<string, unknown>;
-  try {
-    event = JSON.parse(data) as Record<string, unknown>;
-  } catch {
-    return frame;
-  }
-
+  const { event } = frame;
   if (
     event.type === "content_block_start" &&
-    (event.content_block as Record<string, unknown> | undefined)?.type ===
-      "thinking"
+    event.content_block.type === "thinking"
   ) {
-    return {
-      ...frame,
-      data: JSON.stringify({
-        ...event,
-        content_block: {
-          ...(event.content_block as Record<string, unknown>),
-          thinking: "",
-        },
-      }),
-    };
+    return eventFrame({
+      ...event,
+      content_block: {
+        ...event.content_block,
+        thinking: "",
+      },
+    });
   }
 
   if (
     event.type === "content_block_delta" &&
-    (event.delta as Record<string, unknown> | undefined)?.type ===
-      "thinking_delta"
+    event.delta.type === "thinking_delta"
   ) {
     return undefined;
   }
@@ -101,11 +82,11 @@ const omitThinkingTextFromStreamFrame = (
   return frame;
 };
 
-const omitThinkingTextFromStreamFrames = async function* (
-  frames: AsyncIterable<StreamFrame<MessagesResponse>>,
-): AsyncGenerator<StreamFrame<MessagesResponse>> {
+const omitThinkingTextFromProtocolFrames = async function* (
+  frames: AsyncIterable<ProtocolFrame<MessagesStreamEventData>>,
+): AsyncGenerator<ProtocolFrame<MessagesStreamEventData>> {
   for await (const frame of frames) {
-    const omitted = omitThinkingTextFromStreamFrame(frame);
+    const omitted = omitThinkingTextFromProtocolFrame(frame);
     if (omitted) yield omitted;
   }
 };
@@ -141,10 +122,10 @@ const omitThinkingTextFromStreamFrames = async function* (
  * - https://github.com/anthropics/claude-code/issues/46987
  * - https://github.com/anthropics/claude-code/issues/50477
  */
-export const withThinkingDisplayPromoted: TargetInterceptor<
-  EmitToMessagesInput,
-  MessagesResponse
-> = async (ctx, run) => {
+export const withThinkingDisplayPromoted: MessagesInterceptor = async (
+  ctx,
+  run,
+) => {
   const downstreamDisplay = resolveMessagesDownstreamThinkingDisplay(ctx);
   const thinking = ctx.payload.thinking;
   const hasActiveThinking = !!thinking && thinking.type !== "disabled";
@@ -164,5 +145,8 @@ export const withThinkingDisplayPromoted: TargetInterceptor<
   const result = await run();
 
   if (!shouldExposeOmitted || result.type !== "events") return result;
-  return { ...result, events: omitThinkingTextFromStreamFrames(result.events) };
+  return {
+    ...result,
+    events: omitThinkingTextFromProtocolFrames(result.events),
+  };
 };

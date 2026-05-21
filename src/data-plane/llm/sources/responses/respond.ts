@@ -5,7 +5,7 @@ import {
 } from "../../shared/errors/internal-debug-error.ts";
 import { collectResponsesProtocolEventsToResult } from "./events/reassemble.ts";
 import { responsesProtocolEventsToSSEFrames } from "./events/to-sse.ts";
-import type { SourceResponseStreamEvent } from "./events/protocol.ts";
+import type { ResponsesStreamEvent } from "../../shared/protocol/responses.ts";
 import type { StreamExecuteResult } from "../../shared/errors/result.ts";
 import { upstreamErrorToResponse } from "../../shared/errors/upstream-error.ts";
 import { proxySSE } from "../../shared/stream/proxy-sse.ts";
@@ -64,11 +64,11 @@ const internalResponsesStreamErrorFrame = (error: unknown) => {
   );
 };
 
-const isResponsesFailureEvent = (event: SourceResponseStreamEvent): boolean =>
+const isResponsesFailureEvent = (event: ResponsesStreamEvent): boolean =>
   event.type === "error" || event.type === "response.failed";
 
 const isResponsesCompletionFrame = (
-  frame: ProtocolFrame<SourceResponseStreamEvent>,
+  frame: ProtocolFrame<ResponsesStreamEvent>,
 ): boolean =>
   frame.type === "event" &&
   (frame.event.type === "response.completed" ||
@@ -76,7 +76,7 @@ const isResponsesCompletionFrame = (
 
 export const respondResponses = async (
   c: Context,
-  result: StreamExecuteResult<SourceResponseStreamEvent>,
+  result: StreamExecuteResult<ResponsesStreamEvent>,
   wantsStream: boolean,
   recordUsage: RecordUsage,
   recordRequestPerformance: RecordRequestPerformance,

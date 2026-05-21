@@ -1,6 +1,6 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { eventFrame } from "../../../shared/stream/types.ts";
-import type { SourceResponseStreamEvent } from "./protocol.ts";
+import type { ResponsesStreamEvent } from "../../../shared/protocol/responses.ts";
 import { responsesProtocolEventsToSSEFrames } from "./to-sse.ts";
 
 const collect = async <T>(events: AsyncIterable<T>): Promise<T[]> => {
@@ -23,7 +23,7 @@ Deno.test("responsesProtocolEventsToSSEFrames stops at terminal events", async (
       output: [],
       output_text: "",
     },
-  } satisfies SourceResponseStreamEvent;
+  } satisfies ResponsesStreamEvent;
 
   const frames = await collect(
     responsesProtocolEventsToSSEFrames(
@@ -37,7 +37,7 @@ Deno.test("responsesProtocolEventsToSSEFrames stops at terminal events", async (
             output_index: 0,
             content_index: 0,
             delta: "ignored",
-          } satisfies SourceResponseStreamEvent,
+          } satisfies ResponsesStreamEvent,
         );
       })(),
       ignoreUsage,
@@ -64,7 +64,7 @@ Deno.test("responsesProtocolEventsToSSEFrames rejects streams without terminal e
                 output: [],
                 output_text: "",
               },
-            } satisfies SourceResponseStreamEvent,
+            } satisfies ResponsesStreamEvent,
           );
         })(),
         ignoreUsage,

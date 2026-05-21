@@ -1,7 +1,5 @@
 import type { ResponsesPayload } from "../../../../shared/protocol/responses.ts";
-import type { SourceInterceptor } from "../../run-interceptors.ts";
-import type { SourceResponseStreamEvent } from "../events/protocol.ts";
-import type { ResponsesSourceContext } from "./index.ts";
+import type { ResponsesInterceptor } from "../../../interceptors.ts";
 
 // Hosted Responses tool entries and Freeform `custom` tools the gateway has no
 // source-level execution or translation shim for. Codex emits `web_search`,
@@ -58,8 +56,8 @@ const stripToolChoice = (
 
 /**
  * Strip hosted Responses tool entries the gateway cannot yet execute or
- * translate before planning sees the request. This keeps every target path on
- * the same cleaned tools list and prevents leaking tool entries that lack a
+ * translate after target planning. This keeps every target path on the same
+ * cleaned tools list and prevents leaking tool entries that lack a
  * `name`/`parameters` pair into translation paths that assume function-shaped
  * tools.
  *
@@ -90,10 +88,7 @@ export const stripUnsupportedToolsFromPayload = (
   stripToolChoice(payload, removedUnsupportedTool);
 };
 
-export const stripUnsupportedTools: SourceInterceptor<
-  ResponsesSourceContext,
-  SourceResponseStreamEvent
-> = (ctx, run) => {
+export const stripUnsupportedTools: ResponsesInterceptor = (ctx, run) => {
   stripUnsupportedToolsFromPayload(ctx.payload);
   return run();
 };

@@ -168,3 +168,43 @@ Deno.test("chatCompletionResultToEvents preserves reasoning_items from terminal 
     }],
   );
 });
+
+Deno.test("chatCompletionResultToEvents preserves DeepSeek reasoning_content from terminal JSON", () => {
+  const frames = Array.from(chatCompletionResultToEvents({
+    id: "chatcmpl_deepseek_json",
+    object: "chat.completion",
+    created: 1,
+    model: "deepseek-reasoner",
+    choices: [{
+      index: 0,
+      message: {
+        role: "assistant",
+        content: "answer",
+        reasoning_text: null,
+        reasoning_content: "legacy thinking",
+      } as unknown as {
+        role: "assistant";
+        content: string;
+        reasoning_text: null;
+        reasoning_content: string;
+      },
+      finish_reason: "stop",
+    }],
+  }));
+
+  const reasoningContentFrame = frames.find((frame) =>
+    frame.type === "event" &&
+    (frame.event.choices[0]?.delta as Record<string, unknown>)
+        .reasoning_content !== undefined
+  );
+
+  assertEquals(
+    reasoningContentFrame?.type === "event"
+      ? (reasoningContentFrame.event.choices[0]?.delta as Record<
+        string,
+        unknown
+      >).reasoning_content
+      : undefined,
+    "legacy thinking",
+  );
+});

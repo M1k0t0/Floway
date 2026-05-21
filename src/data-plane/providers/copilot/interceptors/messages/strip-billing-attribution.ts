@@ -1,16 +1,10 @@
-import type { MessagesStreamEventData } from "../../../../shared/protocol/messages.ts";
-import type { SourceInterceptor } from "../../run-interceptors.ts";
-import type { MessagesSourceContext } from "./index.ts";
+import type { MessagesInterceptor } from "../../../../llm/interceptors.ts";
 
 /**
  * Claude Code injects `x-anthropic-billing-header` lines containing a per-turn
- * `cch=` hash. Messages-compatible upstreams that do not understand this
- * metadata treat it as ordinary prompt text, so prompt caching stops hitting
- * even when the real prompt did not change.
- *
- * Strip the whole metadata line and any orphaned `cch=` hashes before routing.
- * This is source-local normalization because every `/v1/messages` path should
- * behave the same after source parsing.
+ * `cch=` hash. Copilot's upstream Messages endpoint treats this metadata as
+ * ordinary prompt text, so prompt caching stops hitting even when the real
+ * prompt did not change.
  *
  * References:
  * - https://github.com/Menci/copilot-gateway/issues/9
@@ -21,10 +15,7 @@ const CCH_HASH_RE = /cch=[0-9a-f]{5,};?/gi;
 const stripText = (text: string): string =>
   text.replace(BILLING_HEADER_LINE_RE, "").replace(CCH_HASH_RE, "").trim();
 
-export const stripBillingAttribution: SourceInterceptor<
-  MessagesSourceContext,
-  MessagesStreamEventData
-> = (ctx, run) => {
+export const stripBillingAttribution: MessagesInterceptor = (ctx, run) => {
   const { payload } = ctx;
 
   if (typeof payload.system === "string") {

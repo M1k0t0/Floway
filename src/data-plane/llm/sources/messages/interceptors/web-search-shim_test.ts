@@ -20,7 +20,8 @@ import type { WebSearchProviderResult } from "../../../../tools/web-search/types
 import { InMemoryRepo } from "../../../../../repo/memory.ts";
 import { initRepo } from "../../../../../repo/index.ts";
 import { type ProtocolFrame } from "../../../shared/stream/types.ts";
-import { messagesResultToEvents } from "../events/from-result.ts";
+import type { MessagesExchangeContext } from "../../../interceptors.ts";
+import { messagesResultToEvents } from "../../../shared/protocol/messages.ts";
 import {
   collectAndRewriteMessagesWebSearchEventsToNative,
   decodeWebSearchCitationPayload,
@@ -40,6 +41,21 @@ const testTelemetryModelIdentity = {
 };
 
 const ignoreUsage = { onUsage: () => {} };
+
+const exchangeContext = (
+  payload: MessagesPayload,
+  apiKeyId?: string,
+): MessagesExchangeContext => ({
+  sourceApi: "messages",
+  targetApi: "messages",
+  model: payload.model,
+  upstream: "test-upstream",
+  upstreamModel: {} as never,
+  provider: {} as never,
+  enabledFixes: new Set(),
+  payload,
+  ...(apiKeyId !== undefined ? { apiKeyId } : {}),
+});
 
 const encodeUnsignedPayload = (payload: unknown): string =>
   `cgws1.${
@@ -884,14 +900,15 @@ Deno.test("withMessagesWebSearchShim returns internal-error when request require
   initRepo(repo);
   await repo.searchConfig.save(DEFAULT_SEARCH_CONFIG);
 
-  const result = await withMessagesWebSearchShim({
-    payload: {
+  const result = await withMessagesWebSearchShim(
+    exchangeContext({
       model: "claude-test",
       max_tokens: 64,
       messages: [{ role: "user", content: "latest React docs" }],
       tools: [{ type: "web_search_20260209" }],
-    },
-  }, () => Promise.reject(new Error("run should not be called")));
+    }),
+    () => Promise.reject(new Error("run should not be called")),
+  );
 
   assertEquals(result.type, "internal-error");
 });
@@ -904,7 +921,7 @@ Deno.test("withMessagesWebSearchShim allows replay-only history when the search 
   const { tools: _tools, ...payload } = makeNativeReplayPayload();
 
   const result = await withMessagesWebSearchShim(
-    { payload },
+    exchangeContext(payload),
     () =>
       Promise.resolve({
         type: "events",
@@ -952,7 +969,7 @@ Deno.test("withMessagesWebSearchShim emits native-like citation deltas for repla
   const { tools: _tools, ...payload } = makeNativeReplayPayload();
 
   const result = await withMessagesWebSearchShim(
-    { payload },
+    exchangeContext(payload),
     () =>
       Promise.resolve({
         type: "events",

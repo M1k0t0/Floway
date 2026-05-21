@@ -20,7 +20,7 @@ import type {
   MessagesWebSearchToolResultError,
 } from "../../../../shared/protocol/messages.ts";
 import { collectMessagesProtocolEventsToResponse } from "../events/to-response.ts";
-import { messagesResultToEvents } from "../events/from-result.ts";
+import { messagesResultToEvents } from "../../../shared/protocol/messages.ts";
 import { internalErrorResult } from "../../../shared/errors/result.ts";
 import { toInternalDebugError } from "../../../shared/errors/internal-debug-error.ts";
 import { type ProtocolFrame } from "../../../shared/stream/types.ts";
@@ -38,8 +38,7 @@ import type {
   WebSearchProviderRequest,
   WebSearchProviderResult,
 } from "../../../../tools/web-search/types.ts";
-import type { SourceInterceptor } from "../../run-interceptors.ts";
-import type { MessagesSourceContext } from "./index.ts";
+import type { MessagesInterceptor } from "../../../interceptors.ts";
 
 const MAX_QUERY_LENGTH = 1000;
 const WEB_SEARCH_TOOL_NAME = "web_search";
@@ -1058,27 +1057,21 @@ const resolveActiveMessagesWebSearchProvider = async (
 };
 
 /**
- * Anthropic exposes native `web_search_*` server tools, but some upstream
- * surfaces do not run those server tools for us, or operators may choose to
- * run search through the gateway's configured provider. This provider-owned
- * source shim rewrites the native tool definition into an ordinary client
- * `web_search` tool, executes each search the model issues using the gateway's
- * configured provider, and rewrites the response back to the Anthropic native
- * `server_tool_use` / `web_search_tool_result` /
- * `web_search_result_location` shape.
+ * Anthropic exposes native `web_search_*` server tools, but non-Messages
+ * targets cannot run Anthropic server tools. This shim rewrites the native tool
+ * definition into an ordinary client `web_search` tool, executes each search
+ * the model issues using the gateway's configured provider, and rewrites the
+ * response back to the Anthropic native `server_tool_use` /
+ * `web_search_tool_result` / `web_search_result_location` shape.
  *
- * Registration is provider-owned: Copilot providers enable this directly,
- * while custom OpenAI-compatible providers enable it only through the
- * `messages-web-search-shim` upstream fix flag. Once registered for a provider,
- * every Messages routing path for that provider (native messages, via
- * responses, via chat-completions) sees the same gateway-executed search
- * behavior, and translators below this layer only ever see ordinary client tool
- * turns and `search_result` blocks.
+ * Base Messages routing applies this shim for Messages via non-Messages
+ * targets. Providers may also register it for native Messages targets when the
+ * upstream should not receive Anthropic native web-search tools directly.
  */
-export const withMessagesWebSearchShim: SourceInterceptor<
-  MessagesSourceContext,
-  MessagesStreamEventData
-> = async (ctx, run) => {
+export const withMessagesWebSearchShim: MessagesInterceptor = async (
+  ctx,
+  run,
+) => {
   const prepared = prepareMessagesWebSearchShimRequest(ctx.payload);
 
   if (prepared.type === "invalid-request") {
@@ -1108,3 +1101,9 @@ export const withMessagesWebSearchShim: SourceInterceptor<
     ),
   };
 };
+
+export const withMessagesWebSearchShimForTranslatedTargets:
+  MessagesInterceptor = async (ctx, run) =>
+    ctx.targetApi === "messages"
+      ? await run()
+      : await withMessagesWebSearchShim(ctx, run);

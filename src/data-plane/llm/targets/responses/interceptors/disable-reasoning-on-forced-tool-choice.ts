@@ -1,9 +1,5 @@
-import type {
-  ResponsesPayload,
-  ResponsesResult,
-} from "../../../../shared/protocol/responses.ts";
-import type { EmitInput } from "../../emit-types.ts";
-import type { TargetInterceptor } from "../../run-interceptors.ts";
+import type { ResponsesPayload } from "../../../../shared/protocol/responses.ts";
+import type { ResponsesInterceptor } from "../../../interceptors.ts";
 
 // Opt-in workaround for upstreams where forced `tool_choice` and enabled
 // reasoning do not compose. By default this strips OpenAI `reasoning` rather
@@ -35,14 +31,15 @@ const disableResponsesReasoning = (
   return out;
 };
 
-export const withReasoningDisabledOnForcedToolChoice: TargetInterceptor<
-  EmitInput<ResponsesPayload>,
-  ResponsesResult
-> = async (ctx, run) => {
-  if (!hasForcedToolChoice(ctx.payload)) return await run();
-  ctx.payload = disableResponsesReasoning(
-    ctx.payload,
-    ctx.enabledFixes,
-  );
-  return await run();
-};
+export const withReasoningDisabledOnForcedToolChoice: ResponsesInterceptor =
+  async (
+    ctx,
+    run,
+  ) => {
+    if (!hasForcedToolChoice(ctx.payload)) return await run();
+    ctx.payload = disableResponsesReasoning(
+      ctx.payload,
+      ctx.enabledFixes,
+    );
+    return await run();
+  };

@@ -1,7 +1,7 @@
-import type { ResponseStreamEvent } from "../../../../shared/protocol/responses.ts";
-import type { ProtocolTerminalAlgebra } from "../../../shared/stream/protocol-algebra.ts";
+import type { ResponseStreamEvent } from "../../../shared/protocol/responses.ts";
+import type { ProtocolTerminalAlgebra } from "../stream/protocol-algebra.ts";
 
-export type SourceResponseStreamEvent = ResponseStreamEvent & {
+export type ResponsesStreamEvent = ResponseStreamEvent & {
   sequence_number?: number;
 };
 
@@ -13,7 +13,7 @@ const isResponsesTerminalEvent = (
   event.type === "response.failed" ||
   event.type === "error";
 
-export const responsesSourceStreamAlgebra = {
+export const responsesStreamAlgebra = {
   isTerminalEvent: isResponsesTerminalEvent,
   missingTerminalMessage: "Responses stream ended without a terminal event.",
-} satisfies ProtocolTerminalAlgebra<SourceResponseStreamEvent>;
+} satisfies ProtocolTerminalAlgebra<ResponsesStreamEvent>;

@@ -1,10 +1,10 @@
 import { assertEquals } from "@std/assert";
-import { eventResult } from "../shared/errors/result.ts";
-import { eventFrame } from "../shared/stream/types.ts";
+import { type Interceptor, runInterceptors } from "./interceptors.ts";
 import {
-  runSourceInterceptors,
-  type SourceInterceptor,
-} from "./run-interceptors.ts";
+  eventResult,
+  type StreamExecuteResult,
+} from "./shared/errors/result.ts";
+import { eventFrame } from "./shared/stream/types.ts";
 
 const collectFrames = async <T>(events: AsyncIterable<T>): Promise<T[]> => {
   const frames: T[] = [];
@@ -18,10 +18,12 @@ const testTelemetryModelIdentity = {
   modelKey: "test-model-key",
 };
 
-Deno.test("runSourceInterceptors lets one interceptor patch payload before run and patch the result after run", async () => {
+type TestResult = StreamExecuteResult<string>;
+
+Deno.test("runInterceptors lets an interceptor patch context before run and patch result after run", async () => {
   const ctx = { payload: { value: "original" } };
 
-  const interceptor: SourceInterceptor<typeof ctx, string> = async (
+  const interceptor: Interceptor<typeof ctx, TestResult> = async (
     current,
     run,
   ) => {
@@ -42,16 +44,10 @@ Deno.test("runSourceInterceptors lets one interceptor patch payload before run a
     };
   };
 
-  const result = await runSourceInterceptors(
+  const result = await runInterceptors(
     ctx,
     [interceptor],
-    () =>
-      Promise.resolve(eventResult(
-        (async function* () {
-          yield eventFrame(ctx.payload.value);
-        })(),
-        testTelemetryModelIdentity,
-      )),
+    () => Promise.resolve(makeResult(ctx.payload.value)),
   );
 
   assertEquals(result.type, "events");
@@ -62,11 +58,48 @@ Deno.test("runSourceInterceptors lets one interceptor patch payload before run a
   ]);
 });
 
-Deno.test("runSourceInterceptors lets one interceptor inspect an upstream error, patch the payload, and retry once", async () => {
+Deno.test("runInterceptors composes interceptors in nested order", async () => {
+  const calls: string[] = [];
+  const ctx = { payload: { value: "ok" } };
+
+  const outer: Interceptor<typeof ctx, TestResult> = async (
+    _ctx,
+    run,
+  ) => {
+    calls.push("outer-before");
+    const result = await run();
+    calls.push("outer-after");
+    return result;
+  };
+  const inner: Interceptor<typeof ctx, TestResult> = async (
+    _ctx,
+    run,
+  ) => {
+    calls.push("inner-before");
+    const result = await run();
+    calls.push("inner-after");
+    return result;
+  };
+
+  await runInterceptors(ctx, [outer, inner], () => {
+    calls.push("terminal");
+    return Promise.resolve(makeResult(ctx.payload.value));
+  });
+
+  assertEquals(calls, [
+    "outer-before",
+    "inner-before",
+    "terminal",
+    "inner-after",
+    "outer-after",
+  ]);
+});
+
+Deno.test("runInterceptors lets an interceptor inspect an upstream error and retry", async () => {
   const ctx = { payload: { value: "broken" } };
   let attempts = 0;
 
-  const interceptor: SourceInterceptor<typeof ctx, string> = async (
+  const interceptor: Interceptor<typeof ctx, TestResult> = async (
     current,
     run,
   ) => {
@@ -77,7 +110,7 @@ Deno.test("runSourceInterceptors lets one interceptor inspect an upstream error,
     return await run();
   };
 
-  const result = await runSourceInterceptors(ctx, [interceptor], () => {
+  const result = await runInterceptors(ctx, [interceptor], () => {
     attempts += 1;
     return Promise.resolve(
       attempts === 1
@@ -87,12 +120,7 @@ Deno.test("runSourceInterceptors lets one interceptor inspect an upstream error,
           headers: new Headers(),
           body: new TextEncoder().encode('{"error":{"message":"broken"}}'),
         }
-        : eventResult(
-          (async function* () {
-            yield eventFrame(ctx.payload.value);
-          })(),
-          testTelemetryModelIdentity,
-        ),
+        : makeResult(ctx.payload.value),
     );
   });
 
@@ -101,3 +129,11 @@ Deno.test("runSourceInterceptors lets one interceptor inspect an upstream error,
   if (result.type !== "events") throw new Error("expected events result");
   assertEquals(await collectFrames(result.events), [eventFrame("fixed")]);
 });
+
+const makeResult = (value: string): TestResult =>
+  eventResult(
+    (async function* () {
+      yield eventFrame(value);
+    })(),
+    testTelemetryModelIdentity,
+  );

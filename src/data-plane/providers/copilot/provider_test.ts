@@ -5,6 +5,7 @@ import {
   setupAppTest,
   withMockedFetch,
 } from "../../../test-helpers.ts";
+import { messagesCopilotSourceInterceptors } from "./interceptors/messages/index.ts";
 import { createCopilotProvider } from "./provider.ts";
 
 Deno.test("Copilot provider exposes the highest-priority non-Claude endpoint", async () => {
@@ -214,9 +215,12 @@ Deno.test("Copilot provider owns default response retry fix", async () => {
   assertEquals(instance.enabledFixes.has("retry-cyber-policy"), true);
 });
 
-Deno.test("Copilot provider enables the Messages web search shim by default", async () => {
+Deno.test("Copilot provider enables Copilot-owned Messages source interceptors by default", async () => {
   const { githubAccount } = await setupAppTest();
   const instance = await createCopilotProvider(githubAccount);
 
-  assertEquals(instance.sourceInterceptors?.messages?.length, 1);
+  assertEquals(
+    instance.sourceInterceptors?.messages,
+    messagesCopilotSourceInterceptors,
+  );
 });

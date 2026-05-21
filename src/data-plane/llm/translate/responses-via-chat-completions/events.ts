@@ -17,7 +17,7 @@ import { checkWhitespaceOverflow } from "../shared/tool-arguments.ts";
 import { mapChatCompletionsUsageToResponsesUsage } from "./result.ts";
 import { protocolEventsUntilTerminal } from "../../shared/stream/protocol-algebra.ts";
 import { eventFrame, type ProtocolFrame } from "../../shared/stream/types.ts";
-import type { SourceResponseStreamEvent } from "../../sources/responses/events/protocol.ts";
+import type { ResponsesStreamEvent } from "../../shared/protocol/responses.ts";
 
 const upstreamChatCompletionStreamAlgebra = {
   doneTerminates: true as const,
@@ -614,7 +614,7 @@ export const flushChatCompletionsToResponsesEvents = (
 
 export const translateToSourceEvents = async function* (
   frames: AsyncIterable<ProtocolFrame<ChatCompletionChunk>>,
-): AsyncGenerator<ProtocolFrame<SourceResponseStreamEvent>> {
+): AsyncGenerator<ProtocolFrame<ResponsesStreamEvent>> {
   const state = createChatCompletionsToResponsesStreamState();
 
   for await (

@@ -2439,6 +2439,229 @@ Deno.test("/v1/messages applies native web search shim to custom Messages provid
   });
 });
 
+Deno.test("/v1/messages applies native web search shim to custom Responses targets", async () => {
+  const { apiKey, repo } = await setupAppTest({
+    searchConfig: ENABLED_SEARCH_CONFIG,
+  });
+  await repo.github.deleteAllAccounts();
+  clearModelsCache();
+  await clearCopilotTokenCache();
+
+  await repo.upstreamConfigs.save({
+    id: "up_responses_search",
+    name: "Responses Search Provider",
+    baseUrl: "https://responses-search.example.com",
+    bearerToken: "sk-responses",
+    supportedEndpoints: ["/responses"],
+    enabled: true,
+    sortOrder: 100,
+    createdAt: "2026-05-01T00:00:00.000Z",
+    enabledFixes: [],
+  });
+
+  let upstreamBody: Record<string, unknown> | undefined;
+  let searchBody: Record<string, unknown> | undefined;
+
+  await withMockedFetch(async (request) => {
+    const url = new URL(request.url);
+
+    if (
+      url.hostname === "responses-search.example.com" &&
+      url.pathname === "/v1/models"
+    ) {
+      return jsonResponse({
+        object: "list",
+        data: [{ id: "custom-search-via-responses" }],
+      });
+    }
+    if (
+      url.hostname === "responses-search.example.com" &&
+      url.pathname === "/v1/responses"
+    ) {
+      upstreamBody = JSON.parse(await request.text());
+      return sseResponse([{
+        event: "response.completed",
+        data: {
+          type: "response.completed",
+          response: {
+            id: "resp_custom_search",
+            object: "response",
+            model: "custom-search-via-responses",
+            status: "completed",
+            output_text: "",
+            output: [{
+              type: "function_call",
+              id: "fc_1",
+              call_id: "toolu_search_1",
+              name: "web_search",
+              arguments: '{"query":"latest React docs"}',
+              status: "completed",
+            }],
+            usage: { input_tokens: 12, output_tokens: 5, total_tokens: 17 },
+          },
+        },
+      }]);
+    }
+    if (url.hostname === "api.tavily.com" && url.pathname === "/search") {
+      searchBody = JSON.parse(await request.text());
+      return jsonResponse({
+        results: [{
+          title: "React",
+          url: "https://react.dev",
+          published_date: "2026-04-01",
+          content: "Official React docs",
+        }],
+      });
+    }
+
+    throw new Error(`Unhandled fetch ${request.url}`);
+  }, async () => {
+    const response = await requestApp("/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": apiKey.key,
+      },
+      body: JSON.stringify({
+        model: "custom-search-via-responses",
+        max_tokens: 64,
+        stream: false,
+        tools: [makeWebSearchTool()],
+        messages: [{ role: "user", content: "latest React docs" }],
+      }),
+    });
+
+    assertEquals(response.status, 200);
+    const body = await response.json();
+    assertEquals(body.stop_reason, "pause_turn");
+    assertEquals(body.content[0].type, "server_tool_use");
+    assertEquals(body.content[1].type, "web_search_tool_result");
+  });
+
+  assertExists(upstreamBody);
+  const upstreamTools = upstreamBody!.tools as Array<Record<string, unknown>>;
+  assertEquals(upstreamTools.length, 1);
+  assertEquals(upstreamTools[0].type, "function");
+  assertEquals(upstreamTools[0].name, "web_search");
+  assertEquals(searchBody?.query, "latest React docs");
+});
+
+Deno.test("/v1/messages applies native web search shim to custom Chat Completions targets", async () => {
+  const { apiKey, repo } = await setupAppTest({
+    searchConfig: ENABLED_SEARCH_CONFIG,
+  });
+  await repo.github.deleteAllAccounts();
+  clearModelsCache();
+  await clearCopilotTokenCache();
+
+  await repo.upstreamConfigs.save({
+    id: "up_chat_search",
+    name: "Chat Search Provider",
+    baseUrl: "https://chat-search.example.com",
+    bearerToken: "sk-chat",
+    supportedEndpoints: ["/chat/completions"],
+    enabled: true,
+    sortOrder: 100,
+    createdAt: "2026-05-01T00:00:00.000Z",
+    enabledFixes: [],
+  });
+
+  let upstreamBody: Record<string, unknown> | undefined;
+  let searchBody: Record<string, unknown> | undefined;
+
+  await withMockedFetch(async (request) => {
+    const url = new URL(request.url);
+
+    if (
+      url.hostname === "chat-search.example.com" &&
+      url.pathname === "/v1/models"
+    ) {
+      return jsonResponse({
+        object: "list",
+        data: [{ id: "custom-search-via-chat" }],
+      });
+    }
+    if (
+      url.hostname === "chat-search.example.com" &&
+      url.pathname === "/v1/chat/completions"
+    ) {
+      upstreamBody = JSON.parse(await request.text());
+      return sseResponse([
+        {
+          data: {
+            id: "chatcmpl_custom_search",
+            object: "chat.completion.chunk",
+            created: 1,
+            model: "custom-search-via-chat",
+            choices: [{
+              index: 0,
+              delta: {
+                role: "assistant",
+                tool_calls: [{
+                  index: 0,
+                  id: "toolu_search_1",
+                  type: "function",
+                  function: {
+                    name: "web_search",
+                    arguments: '{"query":"latest React docs"}',
+                  },
+                }],
+              },
+              finish_reason: "tool_calls",
+            }],
+            usage: { prompt_tokens: 12, completion_tokens: 5 },
+          },
+        },
+        { data: "[DONE]" },
+      ]);
+    }
+    if (url.hostname === "api.tavily.com" && url.pathname === "/search") {
+      searchBody = JSON.parse(await request.text());
+      return jsonResponse({
+        results: [{
+          title: "React",
+          url: "https://react.dev",
+          published_date: "2026-04-01",
+          content: "Official React docs",
+        }],
+      });
+    }
+
+    throw new Error(`Unhandled fetch ${request.url}`);
+  }, async () => {
+    const response = await requestApp("/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": apiKey.key,
+      },
+      body: JSON.stringify({
+        model: "custom-search-via-chat",
+        max_tokens: 64,
+        stream: false,
+        tools: [makeWebSearchTool()],
+        messages: [{ role: "user", content: "latest React docs" }],
+      }),
+    });
+
+    assertEquals(response.status, 200);
+    const body = await response.json();
+    assertEquals(body.stop_reason, "pause_turn");
+    assertEquals(body.content[0].type, "server_tool_use");
+    assertEquals(body.content[1].type, "web_search_tool_result");
+  });
+
+  assertExists(upstreamBody);
+  const upstreamTools = upstreamBody!.tools as Array<Record<string, unknown>>;
+  assertEquals(upstreamTools.length, 1);
+  assertEquals(upstreamTools[0].type, "function");
+  assertEquals(
+    (upstreamTools[0].function as Record<string, unknown>).name,
+    "web_search",
+  );
+  assertEquals(searchBody?.query, "latest React docs");
+});
+
 Deno.test("stripReservedKeywords handles all-billing system blocks by removing system entirely", async () => {
   const { apiKey } = await setupAppTest();
 

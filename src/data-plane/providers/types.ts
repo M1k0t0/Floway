@@ -2,6 +2,12 @@ import type { ChatCompletionsPayload } from "../shared/protocol/chat-completions
 import type { EmbeddingsPayload } from "../shared/protocol/embeddings.ts";
 import type { MessagesPayload } from "../shared/protocol/messages.ts";
 import type { ResponsesPayload } from "../shared/protocol/responses.ts";
+import type {
+  ChatCompletionsInterceptor,
+  GeminiInterceptor,
+  MessagesInterceptor,
+  ResponsesInterceptor,
+} from "../llm/interceptors.ts";
 
 export type ModelEndpoint =
   | "chat_completions"
@@ -71,13 +77,16 @@ export interface Model extends ModelMetadata {
 }
 
 export interface ProviderSourceInterceptors {
-  messages?: readonly unknown[];
+  messages?: readonly MessagesInterceptor[];
+  responses?: readonly ResponsesInterceptor[];
+  chatCompletions?: readonly ChatCompletionsInterceptor[];
+  gemini?: readonly GeminiInterceptor[];
 }
 
 export interface ProviderTargetInterceptors {
-  messages?: readonly unknown[];
-  responses?: readonly unknown[];
-  chatCompletions?: readonly unknown[];
+  messages?: readonly MessagesInterceptor[];
+  responses?: readonly ResponsesInterceptor[];
+  chatCompletions?: readonly ChatCompletionsInterceptor[];
 }
 
 export interface ModelProviderInstance {

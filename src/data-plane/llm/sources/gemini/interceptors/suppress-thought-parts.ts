@@ -1,10 +1,9 @@
 import type { GeminiStreamEvent } from "../../../../shared/protocol/gemini.ts";
-import type { SourceInterceptor } from "../../run-interceptors.ts";
+import type { GeminiInterceptor } from "../../../interceptors.ts";
 import {
   eventFrame,
   type ProtocolFrame,
 } from "../../../shared/stream/types.ts";
-import type { GeminiSourceContext } from "./index.ts";
 
 const hasEventPayload = (event: GeminiStreamEvent): boolean => {
   if ("error" in event) return true;
@@ -47,10 +46,7 @@ const suppressThoughtPartsFromFrames = async function* (
  * Hide Gemini thought-summary parts unless the caller explicitly opted in via
  * `generationConfig.thinkingConfig.includeThoughts === true`.
  */
-export const suppressThoughtParts: SourceInterceptor<
-  GeminiSourceContext,
-  GeminiStreamEvent
-> = async (ctx, run) => {
+export const suppressThoughtParts: GeminiInterceptor = async (ctx, run) => {
   const result = await run();
   if (
     result.type !== "events" ||

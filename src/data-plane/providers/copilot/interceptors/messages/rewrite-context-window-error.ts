@@ -1,29 +1,22 @@
-import type { MessagesStreamEventData } from "../../../../shared/protocol/messages.ts";
-import type { SourceInterceptor } from "../../run-interceptors.ts";
-import type { MessagesSourceContext } from "./index.ts";
+import type { MessagesInterceptor } from "../../../../llm/interceptors.ts";
 
 const isContextWindowError = (text: string): boolean =>
   text.includes("Request body is too large for model context window") ||
   text.includes("context_length_exceeded");
 
 /**
- * Some upstreams report context-window failures using non-Messages strings
- * (for example `Request body is too large for model context window`), but
- * Messages clients expect a Messages-shaped `invalid_request_error` and Claude Code in
- * particular uses that shape to trigger compaction instead of surfacing a raw
+ * Copilot can report context-window failures using non-Messages strings, but
+ * Messages clients expect a Messages-shaped `invalid_request_error`; Claude
+ * Code uses that shape to trigger compaction instead of surfacing a raw
  * upstream error.
- *
- * This workaround is source-owned because the same Messages client contract
- * must hold whether `/v1/messages` was served natively or translated via
- * `/responses` or `/chat/completions`.
  *
  * References:
  * - https://docs.claude.com/en/docs/claude-code/common-workflows#prompt-too-long
  */
-export const rewriteContextWindowError: SourceInterceptor<
-  MessagesSourceContext,
-  MessagesStreamEventData
-> = async (_ctx, run) => {
+export const rewriteContextWindowError: MessagesInterceptor = async (
+  _ctx,
+  run,
+) => {
   const result = await run();
   if (result.type !== "upstream-error") return result;
 

@@ -1,5 +1,4 @@
 import type {
-  ChatCompletionChunk,
   ChatCompletionResponse,
   ChatCompletionsPayload,
 } from "../../../shared/protocol/chat-completions.ts";
@@ -10,9 +9,13 @@ import {
 } from "../../shared/errors/result.ts";
 import { toInternalDebugError } from "../../shared/errors/internal-debug-error.ts";
 import { parseSSEStream } from "../../shared/stream/parse-sse.ts";
-import { jsonFrame } from "../../shared/stream/types.ts";
-import { runTargetInterceptors } from "../run-interceptors.ts";
-import type { EmitInput, EmitResult, RawEmitResult } from "../emit-types.ts";
+import { jsonFrame, type StreamFrame } from "../../shared/stream/types.ts";
+import {
+  type ChatCompletionsExchangeContext,
+  type ChatCompletionsExchangeResult,
+  runInterceptors,
+} from "../../interceptors.ts";
+import type { EmitInput } from "../emit-types.ts";
 import {
   recordUpstreamHttpFailure,
   targetPerformanceContext,
@@ -26,41 +29,48 @@ const isSSEResponse = (response: Response): boolean =>
   (response.headers.get("content-type") ?? "").includes("text/event-stream");
 
 export interface EmitToChatCompletionsInput
-  extends EmitInput<ChatCompletionsPayload> {}
+  extends EmitInput<ChatCompletionsPayload> {
+  targetApi: "chat-completions";
+}
 
-const chatCompletionsRawResultToProtocolResult = (
-  result: RawEmitResult<ChatCompletionResponse>,
-): EmitResult<ChatCompletionChunk> =>
-  result.type === "events"
-    ? eventResult(
-      chatCompletionsStreamFramesToEvents(result.events),
-      result.modelIdentity,
-      result.performance,
-    )
-    : result;
+const exchangeContextFromInput = (
+  input: EmitToChatCompletionsInput,
+): ChatCompletionsExchangeContext => ({
+  sourceApi: input.sourceApi,
+  targetApi: "chat-completions",
+  model: input.model,
+  upstream: input.upstream,
+  upstreamModel: input.upstreamModel,
+  provider: input.provider,
+  enabledFixes: input.enabledFixes,
+  payload: input.payload,
+  ...(input.apiKeyId !== undefined ? { apiKeyId: input.apiKeyId } : {}),
+  ...(input.downstreamAbortSignal !== undefined
+    ? { downstreamAbortSignal: input.downstreamAbortSignal }
+    : {}),
+});
 
 export const emitToChatCompletions = async (
   input: EmitToChatCompletionsInput,
-): Promise<EmitResult<ChatCompletionChunk>> => {
+): Promise<ChatCompletionsExchangeResult> => {
   let modelIdentity: TelemetryModelIdentity | undefined;
+  const ctx = exchangeContextFromInput(input);
+
   try {
-    const result = await runTargetInterceptors<
-      EmitToChatCompletionsInput,
-      ChatCompletionResponse
-    >(
-      input,
+    return await runInterceptors(
+      ctx,
       interceptorsForChatCompletions(input),
       async () => {
         const upstreamStartedAt = performance.now();
-        const { model: _model, ...body } = input.payload;
-        const { response, modelKey } = await input.provider.callChatCompletions(
-          input.upstreamModel,
+        const { model: _model, ...body } = ctx.payload;
+        const { response, modelKey } = await ctx.provider.callChatCompletions(
+          ctx.upstreamModel,
           body,
-          input.downstreamAbortSignal,
+          ctx.downstreamAbortSignal,
         );
         modelIdentity = {
-          model: input.model,
-          upstream: input.upstream,
+          model: ctx.model,
+          upstream: ctx.upstream,
           modelKey,
         };
         const perfContext = targetPerformanceContext(
@@ -70,7 +80,11 @@ export const emitToChatCompletions = async (
         );
 
         if (!response.ok) {
-          recordUpstreamHttpFailure(input, "chat-completions", modelIdentity);
+          recordUpstreamHttpFailure(
+            input,
+            "chat-completions",
+            modelIdentity,
+          );
           return {
             ...(await readUpstreamError(response)),
             performance: perfContext,
@@ -81,50 +95,39 @@ export const emitToChatCompletions = async (
             502,
             toInternalDebugError(
               new Error("No response body from upstream"),
-              input.sourceApi,
+              ctx.sourceApi,
               "chat-completions",
             ),
             perfContext,
           );
         }
 
-        if (isSSEResponse(response)) {
-          return eventResult(
-            withUpstreamTelemetry(
-              parseSSEStream(response.body, {
-                signal: input.downstreamAbortSignal,
-              }),
-              input,
-              "chat-completions",
-              upstreamStartedAt,
-              modelIdentity,
-            ),
-            modelIdentity,
-            perfContext,
-          );
-        }
+        const rawEvents: AsyncIterable<StreamFrame<ChatCompletionResponse>> =
+          isSSEResponse(response)
+            ? parseSSEStream(response.body, {
+              signal: ctx.downstreamAbortSignal,
+            })
+            : (async function* () {
+              yield jsonFrame(await response.json() as ChatCompletionResponse);
+            })();
 
         return eventResult(
-          withUpstreamTelemetry(
-            (async function* () {
-              yield jsonFrame(await response.json() as ChatCompletionResponse);
-            })(),
+          chatCompletionsStreamFramesToEvents(withUpstreamTelemetry(
+            rawEvents,
             input,
             "chat-completions",
             upstreamStartedAt,
             modelIdentity,
-          ),
+          )),
           modelIdentity,
           perfContext,
         );
       },
     );
-
-    return chatCompletionsRawResultToProtocolResult(result);
   } catch (error) {
     return internalErrorResult(
       502,
-      toInternalDebugError(error, input.sourceApi, "chat-completions"),
+      toInternalDebugError(error, ctx.sourceApi, "chat-completions"),
       modelIdentity
         ? targetPerformanceContext(input, "chat-completions", modelIdentity)
         : undefined,

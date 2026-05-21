@@ -1,10 +1,14 @@
+import type { ResponsesResult } from "../../../../shared/protocol/responses.ts";
 import type {
-  ResponsesPayload,
-  ResponsesResult,
-} from "../../../../shared/protocol/responses.ts";
-import type { EmitInput, RawEmitResult } from "../../emit-types.ts";
-import type { TargetInterceptor } from "../../run-interceptors.ts";
-import { sseFrame, type StreamFrame } from "../../../shared/stream/types.ts";
+  ResponsesExchangeContext,
+  ResponsesExchangeResult,
+  ResponsesInterceptor,
+} from "../../../interceptors.ts";
+import {
+  eventFrame,
+  type ProtocolFrame,
+} from "../../../shared/stream/types.ts";
+import type { ResponsesStreamEvent } from "../../../shared/protocol/responses.ts";
 
 const CYBER_POLICY_ERROR_CODE = "cyber_policy";
 const MAX_CYBER_POLICY_RETRIES = 10;
@@ -27,7 +31,7 @@ interface FailurePayload {
 }
 
 type FailureResult = Exclude<
-  RawEmitResult<ResponsesResult>,
+  ResponsesExchangeResult,
   { type: "events" }
 >;
 
@@ -90,7 +94,7 @@ const isCyberPolicyPayload = (value: unknown): boolean => {
 };
 
 const cyberPolicyUpstreamErrorFrom = (
-  result: RawEmitResult<ResponsesResult>,
+  result: ResponsesExchangeResult,
 ): FailurePayload | undefined => {
   if (result.type !== "upstream-error") return undefined;
 
@@ -104,13 +108,13 @@ const cyberPolicyUpstreamErrorFrom = (
 };
 
 const isCyberPolicyUpstreamError = (
-  result: RawEmitResult<ResponsesResult>,
+  result: ResponsesExchangeResult,
 ): boolean => {
   return cyberPolicyUpstreamErrorFrom(result) !== undefined;
 };
 
 const failurePayloadFromUpstreamError = (
-  result: Extract<RawEmitResult<ResponsesResult>, { type: "upstream-error" }>,
+  result: Extract<ResponsesExchangeResult, { type: "upstream-error" }>,
 ): FailurePayload => {
   const bodyText = new TextDecoder().decode(result.body);
   let response: Record<string, unknown> | undefined;
@@ -172,61 +176,63 @@ const failurePayloadFromResult = (
 };
 
 const failureFrameFromResult = (
-  ctx: EmitInput<ResponsesPayload>,
+  ctx: ResponsesExchangeContext,
   result: FailureResult,
-): StreamFrame<ResponsesResult> => {
+): ProtocolFrame<ResponsesStreamEvent> => {
   const payload = failurePayloadFromResult(result);
 
-  return sseFrame(
-    JSON.stringify({
-      type: "response.failed",
-      response: {
-        id: responseStringField(
-          payload.response,
-          "id",
-          "resp_upstream_failed",
-        ),
-        object: responseStringField(payload.response, "object", "response"),
-        model: responseStringField(
-          payload.response,
-          "model",
-          ctx.payload.model,
-        ),
-        status: "failed",
-        output: [],
-        output_text: "",
-        error: payload.error,
-      },
-    }),
-    "response.failed",
-  );
+  return eventFrame({
+    type: "response.failed",
+    response: {
+      id: responseStringField(
+        payload.response,
+        "id",
+        "resp_upstream_failed",
+      ),
+      object: responseStringField(payload.response, "object", "response"),
+      model: responseStringField(
+        payload.response,
+        "model",
+        ctx.payload.model,
+      ),
+      status: "failed",
+      output: [],
+      output_text: "",
+      error: payload.error,
+    },
+  } as ResponsesStreamEvent);
 };
 
-const isCyberPolicyJsonFrame = (response: ResponsesResult): boolean =>
-  response.status === "failed" &&
-  response.error?.code === CYBER_POLICY_ERROR_CODE;
+const isCyberPolicyResponse = (
+  response: unknown,
+): response is ResponsesResult =>
+  isRecord(response) && response.status === "failed" &&
+  isRecord(response.error) && response.error.code === CYBER_POLICY_ERROR_CODE;
 
-const isCyberPolicySseFrame = (data: string): boolean => {
-  try {
-    return isCyberPolicyPayload(JSON.parse(data));
-  } catch {
-    return false;
-  }
-};
+const isCyberPolicyEvent = (event: ResponsesStreamEvent): boolean =>
+  isCyberPolicyPayload(event) ||
+  isCyberPolicyResponse((event as { response?: unknown }).response);
 
-const isCyberPolicyFrame = (frame: StreamFrame<ResponsesResult>): boolean => {
-  if (frame.type === "json") return isCyberPolicyJsonFrame(frame.data);
+const isCyberPolicyFrame = (
+  frame: ProtocolFrame<ResponsesStreamEvent>,
+): boolean => frame.type === "event" && isCyberPolicyEvent(frame.event);
 
-  return isCyberPolicySseFrame(frame.data);
-};
+const isRetryProbePrologue = (
+  frame: ProtocolFrame<ResponsesStreamEvent>,
+): boolean =>
+  frame.type === "event" &&
+  (frame.event.type === "response.created" ||
+    frame.event.type === "response.in_progress");
 
-const replayFirstThenRest = async function* (
-  first: StreamFrame<ResponsesResult>,
-  iterator: AsyncIterator<StreamFrame<ResponsesResult>>,
-): AsyncGenerator<StreamFrame<ResponsesResult>> {
+const replayBufferedThenRest = async function* (
+  buffered: readonly ProtocolFrame<ResponsesStreamEvent>[],
+  first: ProtocolFrame<ResponsesStreamEvent>,
+  iterator: AsyncIterator<ProtocolFrame<ResponsesStreamEvent>>,
+): AsyncGenerator<ProtocolFrame<ResponsesStreamEvent>> {
   let done = false;
 
   try {
+    yield* buffered;
     yield first;
 
     while (true) {
@@ -243,14 +249,14 @@ const replayFirstThenRest = async function* (
   }
 };
 
-type EventsResult = Extract<RawEmitResult<ResponsesResult>, { type: "events" }>;
+type EventsResult = Extract<ResponsesExchangeResult, { type: "events" }>;
 
-const isDownstreamAborted = (ctx: EmitInput<ResponsesPayload>): boolean =>
+const isDownstreamAborted = (ctx: ResponsesExchangeContext): boolean =>
   ctx.downstreamAbortSignal?.aborted === true;
 
 const updateStreamingResultIdentity = (
   returned: EventsResult,
-  latest: RawEmitResult<ResponsesResult>,
+  latest: ResponsesExchangeResult,
 ): void => {
   if (latest.performance) {
     returned.performance = latest.performance;
@@ -265,12 +271,12 @@ const updateStreamingResultIdentity = (
 };
 
 const retryCyberPolicyEvents = async function* (
-  ctx: EmitInput<ResponsesPayload>,
-  run: () => Promise<RawEmitResult<ResponsesResult>>,
+  ctx: ResponsesExchangeContext,
+  run: () => Promise<ResponsesExchangeResult>,
   initialResult: EventsResult,
   returned: EventsResult,
-): AsyncGenerator<StreamFrame<ResponsesResult>> {
-  let result: RawEmitResult<ResponsesResult> = initialResult;
+): AsyncGenerator<ProtocolFrame<ResponsesStreamEvent>> {
+  let result: ResponsesExchangeResult = initialResult;
 
   for (let attempt = 0; attempt <= MAX_CYBER_POLICY_RETRIES; attempt++) {
     updateStreamingResultIdentity(returned, result);
@@ -291,26 +297,39 @@ const retryCyberPolicyEvents = async function* (
     }
 
     const iterator = result.events[Symbol.asyncIterator]();
-    const first = await iterator.next();
-    if (first.done) return;
+    const buffered: ProtocolFrame<ResponsesStreamEvent>[] = [];
 
-    if (!isCyberPolicyFrame(first.value)) {
-      yield* replayFirstThenRest(first.value, iterator);
-      return;
+    while (true) {
+      const next = await iterator.next();
+      if (next.done) {
+        yield* buffered;
+        return;
+      }
+
+      const frame = next.value;
+      if (!isCyberPolicyFrame(frame)) {
+        if (isRetryProbePrologue(frame)) {
+          buffered.push(frame);
+          continue;
+        }
+
+        yield* replayBufferedThenRest(buffered, frame, iterator);
+        return;
+      }
+
+      // Retry only before any failed attempt frames reach the source pipeline.
+      // This lazy probe buffers synthetic JSON fallback prologues so a retryable
+      // terminal policy failure cannot leak `response.created` first.
+      await iterator.return?.();
+      if (attempt >= MAX_CYBER_POLICY_RETRIES || isDownstreamAborted(ctx)) {
+        yield* buffered;
+        yield frame;
+        return;
+      }
+
+      result = await run();
+      break;
     }
-
-    // Retry only before any failed attempt frames reach the source pipeline.
-    // This first-frame inspection is lazy so downstream keep-alives and aborts
-    // are active while Copilot is still idle before its first stream frame.
-    await iterator.return?.();
-    if (
-      attempt >= MAX_CYBER_POLICY_RETRIES || isDownstreamAborted(ctx)
-    ) {
-      yield first.value;
-      return;
-    }
-
-    result = await run();
   }
 };
 
@@ -334,11 +353,11 @@ const retryCyberPolicyEvents = async function* (
  * operators can inspect detailed upstream failures, matching the web-search shim
  * error-log TODO pattern.
  */
-export const withCyberPolicyRetried: TargetInterceptor<
-  EmitInput<ResponsesPayload>,
-  ResponsesResult
-> = async (ctx, run) => {
-  let finalResult: RawEmitResult<ResponsesResult> | undefined;
+export const withCyberPolicyRetried: ResponsesInterceptor = async (
+  ctx,
+  run,
+) => {
+  let finalResult: ResponsesExchangeResult | undefined;
 
   for (let attempt = 0; attempt <= MAX_CYBER_POLICY_RETRIES; attempt++) {
     const current = await run();

@@ -1,8 +1,4 @@
-import type {
-  ChatCompletionResponse,
-  ChatCompletionsPayload,
-} from "../../../../shared/protocol/chat-completions.ts";
-import type { TargetInterceptor } from "../../run-interceptors.ts";
+import type { ChatCompletionsInterceptor } from "../../../interceptors.ts";
 
 /**
  * Chat Completions streaming only includes the final usage-only chunk when
@@ -13,14 +9,15 @@ import type { TargetInterceptor } from "../../run-interceptors.ts";
  * References:
  * - https://platform.openai.com/docs/api-reference/chat/create
  */
-export const withUsageStreamOptionsIncluded: TargetInterceptor<
-  { payload: ChatCompletionsPayload },
-  ChatCompletionResponse
-> = async (ctx, run) => {
-  ctx.payload.stream = true;
-  ctx.payload.stream_options = ctx.payload.stream_options
-    ? { ...ctx.payload.stream_options, include_usage: true }
-    : { include_usage: true };
+export const withUsageStreamOptionsIncluded: ChatCompletionsInterceptor =
+  async (
+    ctx,
+    run,
+  ) => {
+    ctx.payload.stream = true;
+    ctx.payload.stream_options = ctx.payload.stream_options
+      ? { ...ctx.payload.stream_options, include_usage: true }
+      : { include_usage: true };
 
-  return await run();
-};
+    return await run();
+  };

@@ -1,10 +1,12 @@
 import type { Context } from "hono";
 import type { ResponsesPayload } from "../../../shared/protocol/responses.ts";
+import { responsesSourceInterceptors } from "./interceptors/index.ts";
 import {
-  type ResponsesSourceContext,
-  responsesSourceInterceptors,
-} from "./interceptors/index.ts";
-import { runSourceInterceptors } from "../run-interceptors.ts";
+  type LlmTargetApi,
+  type ResponsesExchangeContext,
+  type ResponsesInterceptor,
+  runInterceptors,
+} from "../../interceptors.ts";
 import { planResponsesRequest } from "./plan.ts";
 import { getModelCapabilities } from "../../../providers/capabilities.ts";
 import { resolveModelForRequest } from "../../../providers/registry.ts";
@@ -25,7 +27,7 @@ import {
 import { toInternalDebugError } from "../../shared/errors/internal-debug-error.ts";
 import { thrownUpstreamErrorResult } from "../../shared/errors/upstream-error.ts";
 import type { ProtocolFrame } from "../../shared/stream/types.ts";
-import type { SourceResponseStreamEvent } from "./events/protocol.ts";
+import type { ResponsesStreamEvent } from "../../shared/protocol/responses.ts";
 import { modelLoadErrorResult } from "../../shared/errors/model-load-error.ts";
 import {
   type PerformanceTelemetryContext,
@@ -34,6 +36,7 @@ import {
 } from "../../../shared/telemetry/performance.ts";
 import { backgroundSchedulerFromContext } from "../../../../runtime/background.ts";
 import { recordUsageForApiKey } from "../../../shared/telemetry/usage.ts";
+import type { ModelProviderBinding } from "../../../providers/types.ts";
 
 const CODEX_AUTO_REVIEW_ALIAS = "codex-auto-review";
 const CODEX_AUTO_REVIEW_TARGET = "gpt-5.4";
@@ -42,8 +45,8 @@ const withTranslatedEvents = <T>(
   result: StreamExecuteResult<T>,
   translate: (
     events: AsyncIterable<ProtocolFrame<T>>,
-  ) => AsyncIterable<ProtocolFrame<SourceResponseStreamEvent>>,
-): StreamExecuteResult<SourceResponseStreamEvent> =>
+  ) => AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>,
+): StreamExecuteResult<ResponsesStreamEvent> =>
   result.type === "events"
     ? { ...result, events: translate(result.events) }
     : result;
@@ -101,6 +104,33 @@ const unsupportedResponsesModelResult = (
   ...(performance ? { performance } : {}),
 });
 
+const responsesSourceInterceptorsForProvider = (
+  binding: ModelProviderBinding,
+): readonly ResponsesInterceptor[] => [
+  ...responsesSourceInterceptors,
+  ...(binding.sourceInterceptors?.responses ?? []),
+];
+
+const responsesExchangeContext = (
+  binding: ModelProviderBinding,
+  targetApi: LlmTargetApi,
+  model: string,
+  payload: ResponsesPayload,
+  apiKeyId: string | undefined,
+  downstreamAbortSignal: AbortSignal | undefined,
+): ResponsesExchangeContext => ({
+  sourceApi: "responses",
+  targetApi,
+  model,
+  upstream: binding.upstream,
+  upstreamModel: binding.upstreamModel,
+  provider: binding.provider,
+  enabledFixes: binding.enabledFixes,
+  payload,
+  ...(apiKeyId !== undefined ? { apiKeyId } : {}),
+  ...(downstreamAbortSignal !== undefined ? { downstreamAbortSignal } : {}),
+});
+
 const createTranslatedResponseId = (): string =>
   `resp_${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
 
@@ -151,74 +181,119 @@ export const serveResponses = async (
     }
     const wantsStream = payload.stream === true;
     downstreamAbortController = wantsStream ? new AbortController() : undefined;
-    const ctx: ResponsesSourceContext = { payload, apiKeyId };
 
-    const result = await runSourceInterceptors(
-      ctx,
-      responsesSourceInterceptors,
-      async () => {
-        const { id: modelId, model } = await resolveModelForRequest(
-          ctx.payload.model,
-        );
+    const result = await (async () => {
+      const { id: modelId, model } = await resolveModelForRequest(
+        payload.model,
+      );
 
-        if (!model) {
-          return {
-            type: "upstream-error" as const,
-            status: 404,
-            headers: new Headers({ "content-type": "application/json" }),
-            body: new TextEncoder().encode(JSON.stringify({
-              error: {
-                message:
-                  `No upstream provides model ${modelId}. Configure an upstream that exposes this model in the dashboard.`,
-                type: "invalid_request_error",
-              },
-            })),
-          };
-        }
+      if (!model) {
+        return {
+          type: "upstream-error" as const,
+          status: 404,
+          headers: new Headers({ "content-type": "application/json" }),
+          body: new TextEncoder().encode(JSON.stringify({
+            error: {
+              message:
+                `No upstream provides model ${modelId}. Configure an upstream that exposes this model in the dashboard.`,
+              type: "invalid_request_error",
+            },
+          })),
+        };
+      }
 
-        return await runOnModel(
-          model,
-          async (binding) => {
-            const attemptPayload = structuredClone(ctx.payload);
-            attemptPayload.model = modelId;
-            const capabilities = getModelCapabilities(binding.upstreamModel);
-            const plan = planResponsesRequest(capabilities);
-            if (!plan) {
-              return skipProvider(unsupportedResponsesModelResult(
-                attemptPayload.model,
-              ));
-            }
+      return await runOnModel(
+        model,
+        async (binding) => {
+          const attemptPayload = structuredClone(payload);
+          attemptPayload.model = modelId;
+          const capabilities = getModelCapabilities(binding.upstreamModel);
+          const plan = planResponsesRequest(capabilities);
+          if (!plan) {
+            return skipProvider(unsupportedResponsesModelResult(
+              attemptPayload.model,
+            ));
+          }
 
-            if (plan.target === "responses") {
-              const result = await emitToResponses({
-                sourceApi: "responses",
-                model: modelId,
-                upstream: binding.upstream,
-                payload: attemptPayload,
-                provider: binding.provider,
-                upstreamModel: binding.upstreamModel,
-                enabledFixes: binding.enabledFixes,
-                targetInterceptors: binding.targetInterceptors,
-                apiKeyId,
-                clientStream: wantsStream,
-                runtimeLocation,
-                scheduleBackground,
-                downstreamAbortSignal: downstreamAbortController?.signal,
-              });
-              if (result.performance) lastPerformance = result.performance;
-              return result;
-            }
+          const sourceCtx = responsesExchangeContext(
+            binding,
+            plan.target,
+            modelId,
+            attemptPayload,
+            apiKeyId,
+            downstreamAbortController?.signal,
+          );
 
-            if (plan.target === "messages") {
-              const messagesPayload = await buildMessagesTargetRequest(
-                attemptPayload,
-                capabilities,
+          return await runInterceptors(
+            sourceCtx,
+            responsesSourceInterceptorsForProvider(binding),
+            async () => {
+              const payload = sourceCtx.payload;
+
+              if (plan.target === "responses") {
+                const result = await emitToResponses({
+                  sourceApi: "responses",
+                  targetApi: "responses",
+                  model: modelId,
+                  upstream: binding.upstream,
+                  payload,
+                  provider: binding.provider,
+                  upstreamModel: binding.upstreamModel,
+                  enabledFixes: binding.enabledFixes,
+                  targetInterceptors: binding.targetInterceptors,
+                  apiKeyId,
+                  clientStream: wantsStream,
+                  runtimeLocation,
+                  scheduleBackground,
+                  downstreamAbortSignal: downstreamAbortController?.signal,
+                });
+                if (result.performance) lastPerformance = result.performance;
+                return result;
+              }
+
+              if (plan.target === "messages") {
+                const messagesPayload = await buildMessagesTargetRequest(
+                  payload,
+                  capabilities,
+                );
+                const result = await emitToMessages({
+                  sourceApi: "responses",
+                  targetApi: "messages",
+                  model: modelId,
+                  upstream: binding.upstream,
+                  payload: messagesPayload,
+                  provider: binding.provider,
+                  upstreamModel: binding.upstreamModel,
+                  enabledFixes: binding.enabledFixes,
+                  targetInterceptors: binding.targetInterceptors,
+                  apiKeyId,
+                  clientStream: wantsStream,
+                  runtimeLocation,
+                  scheduleBackground,
+                  downstreamAbortSignal: downstreamAbortController?.signal,
+                });
+
+                if (result.performance) lastPerformance = result.performance;
+                return withTranslatedEvents(
+                  result,
+                  (events) =>
+                    translateToSourceEvents(
+                      events,
+                      createTranslatedResponseId(),
+                      messagesPayload.model,
+                    ),
+                );
+              }
+
+              const chatPayload = buildChatCompletionsTargetRequest(
+                payload,
               );
-              const result = await emitToMessages({
+              const result = await emitToChatCompletions({
                 sourceApi: "responses",
+                targetApi: "chat-completions",
                 model: modelId,
                 upstream: binding.upstream,
-                payload: messagesPayload,
+                payload: chatPayload,
                 provider: binding.provider,
                 upstreamModel: binding.upstreamModel,
                 enabledFixes: binding.enabledFixes,
@@ -233,43 +308,13 @@ export const serveResponses = async (
               if (result.performance) lastPerformance = result.performance;
               return withTranslatedEvents(
                 result,
-                (events) =>
-                  translateToSourceEvents(
-                    events,
-                    createTranslatedResponseId(),
-                    messagesPayload.model,
-                  ),
+                translateChatCompletionsToSourceEvents,
               );
-            }
-
-            const chatPayload = buildChatCompletionsTargetRequest(
-              attemptPayload,
-            );
-            const result = await emitToChatCompletions({
-              sourceApi: "responses",
-              model: modelId,
-              upstream: binding.upstream,
-              payload: chatPayload,
-              provider: binding.provider,
-              upstreamModel: binding.upstreamModel,
-              enabledFixes: binding.enabledFixes,
-              targetInterceptors: binding.targetInterceptors,
-              apiKeyId,
-              clientStream: wantsStream,
-              runtimeLocation,
-              scheduleBackground,
-              downstreamAbortSignal: downstreamAbortController?.signal,
-            });
-
-            if (result.performance) lastPerformance = result.performance;
-            return withTranslatedEvents(
-              result,
-              translateChatCompletionsToSourceEvents,
-            );
-          },
-        );
-      },
-    );
+            },
+          );
+        },
+      );
+    })();
 
     return await respondResponses(
       c,

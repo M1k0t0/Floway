@@ -1,14 +1,11 @@
-import type {
-  ChatCompletionResponse,
-  ChatCompletionsPayload,
-} from "../../../../shared/protocol/chat-completions.ts";
+import type { ChatCompletionChunk } from "../../../../shared/protocol/chat-completions.ts";
 import {
   asJsonObject,
   type JsonObject,
   readJsonNumber,
 } from "../../../../../shared/json-helpers.ts";
-import { jsonFrame, sseFrame } from "../../../shared/stream/types.ts";
-import type { TargetInterceptor } from "../../run-interceptors.ts";
+import type { ChatCompletionsInterceptor } from "../../../interceptors.ts";
+import { eventFrame } from "../../../shared/stream/types.ts";
 
 /**
  * Normalize OpenAI-compatible upstream `usage` into the OpenAI standard shape
@@ -62,71 +59,54 @@ const normalizeUsage = (usage: JsonObject): JsonObject => {
   return out;
 };
 
-const isCarrierChunk = (root: JsonObject): boolean => {
-  const choices = root.choices;
-  return Array.isArray(choices) && choices.length === 0;
-};
+const isCarrierChunk = (chunk: ChatCompletionChunk): boolean =>
+  chunk.choices.length === 0;
 
-const splitOrNormalizeStreamFrame = (data: string): string[] => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(data);
-  } catch {
-    return [data];
-  }
-  const root = asJsonObject(parsed);
-  if (!root) return [data];
-  const usage = asJsonObject(root.usage);
-  if (!usage) return [data];
+const splitOrNormalizeChunk = (
+  chunk: ChatCompletionChunk,
+): readonly ChatCompletionChunk[] => {
+  const usage = asJsonObject(chunk.usage);
+  if (!usage) return [chunk];
 
-  const normalized = normalizeUsage(usage);
-  if (isCarrierChunk(root)) {
-    return [JSON.stringify({ ...root, usage: normalized })];
-  }
+  const normalized = normalizeUsage(
+    usage,
+  ) as unknown as ChatCompletionChunk["usage"];
+  if (isCarrierChunk(chunk)) return [{ ...chunk, usage: normalized }];
 
   // Relocate: original chunk loses its `usage`; carrier chunk gets it so
   // downstream readers see usage only on the spec-compliant `choices: []` shape.
-  const withoutUsage: JsonObject = { ...root };
-  delete withoutUsage.usage;
-  const carrier: JsonObject = {
-    id: root.id,
-    object: root.object,
-    created: root.created,
-    model: root.model,
+  const { usage: _usage, ...withoutUsage } = chunk;
+  return [withoutUsage, {
+    id: chunk.id,
+    object: chunk.object,
+    created: chunk.created,
+    model: chunk.model,
     choices: [],
     usage: normalized,
-  };
-  return [JSON.stringify(withoutUsage), JSON.stringify(carrier)];
+  }];
 };
 
-const normalizeNonStreamResponse = (
-  response: ChatCompletionResponse,
-): ChatCompletionResponse => {
-  const usage = asJsonObject((response as unknown as JsonObject).usage);
-  if (!usage) return response;
-  return {
-    ...response,
-    usage: normalizeUsage(usage) as unknown as ChatCompletionResponse["usage"],
-  };
-};
-
-export const withUsageNormalized: TargetInterceptor<
-  { payload: ChatCompletionsPayload },
-  ChatCompletionResponse
-> = async (_ctx, run) => {
+export const withUsageNormalized: ChatCompletionsInterceptor = async (
+  _ctx,
+  run,
+) => {
   const result = await run();
   if (result.type !== "events") return result;
   return {
     ...result,
     events: (async function* () {
       for await (const frame of result.events) {
-        if (frame.type === "sse") {
-          for (const data of splitOrNormalizeStreamFrame(frame.data)) {
-            yield sseFrame(data, frame.event);
-          }
+        if (frame.type !== "event") {
+          yield frame;
           continue;
         }
-        yield jsonFrame(normalizeNonStreamResponse(frame.data));
+
+        const chunks = splitOrNormalizeChunk(frame.event);
+        if (chunks.length === 1 && chunks[0] === frame.event) {
+          yield frame;
+          continue;
+        }
+        for (const chunk of chunks) yield eventFrame(chunk);
       }
     })(),
   };

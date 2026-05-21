@@ -55,3 +55,46 @@ Deno.test("messagesProtocolEventsToSSEFrames rejects streams without message_sto
     "Messages stream ended without a message_stop event.",
   );
 });
+
+Deno.test("messagesProtocolEventsToSSEFrames maps search_result_location url to SSE source", async () => {
+  const frames = await collect(
+    messagesProtocolEventsToSSEFrames(
+      (async function* () {
+        yield eventFrame(
+          {
+            type: "content_block_delta",
+            index: 0,
+            delta: {
+              type: "citations_delta",
+              citation: {
+                type: "search_result_location",
+                url: "https://example.com/protocol",
+                title: "Protocol Citation",
+                search_result_index: 0,
+                start_block_index: 0,
+                end_block_index: 0,
+              },
+            },
+          } satisfies MessagesStreamEventData,
+        );
+        yield eventFrame(
+          { type: "message_stop" } satisfies MessagesStreamEventData,
+        );
+      })(),
+      ignoreUsage,
+    ),
+  );
+
+  const payload = JSON.parse(frames[0].data) as {
+    delta: { citation: Record<string, unknown> };
+  };
+
+  assertEquals(payload.delta.citation, {
+    type: "search_result_location",
+    source: "https://example.com/protocol",
+    title: "Protocol Citation",
+    search_result_index: 0,
+    start_block_index: 0,
+    end_block_index: 0,
+  });
+});

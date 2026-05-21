@@ -1,7 +1,7 @@
 // Order assertion for the Responses target assembler.
 
 import { assertEquals } from "@std/assert";
-import { responsesCopilotInterceptors } from "./copilot/index.ts";
+import { responsesCopilotInterceptors } from "../../../../providers/copilot/interceptors/responses/index.ts";
 import {
   interceptorsForResponses,
   responsesOptionalInterceptors,

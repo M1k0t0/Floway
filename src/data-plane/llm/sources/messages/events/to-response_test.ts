@@ -4,7 +4,7 @@ import type {
   MessagesStreamEventData,
 } from "../../../../shared/protocol/messages.ts";
 import { eventFrame } from "../../../shared/stream/types.ts";
-import { messagesResultToEvents } from "./from-result.ts";
+import { messagesResultToEvents } from "../../../shared/protocol/messages.ts";
 import { collectMessagesProtocolEventsToResponse } from "./to-response.ts";
 
 Deno.test("collectMessagesProtocolEventsToResponse reassembles synthetic Messages events", async () => {

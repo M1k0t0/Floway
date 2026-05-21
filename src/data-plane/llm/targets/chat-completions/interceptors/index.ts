@@ -1,11 +1,15 @@
-import type { ChatCompletionResponse } from "../../../../shared/protocol/chat-completions.ts";
+import type { ChatCompletionsInterceptor } from "../../../interceptors.ts";
+import type { ProviderTargetInterceptors } from "../../../../providers/types.ts";
 import type { OptionalInterceptor } from "../../optional-interceptor.ts";
-import type { TargetInterceptor } from "../../run-interceptors.ts";
-import type { EmitToChatCompletionsInput } from "../emit.ts";
 import { withReasoningDisabledOnForcedToolChoice } from "./disable-reasoning-on-forced-tool-choice.ts";
 import { withUsageStreamOptionsIncluded } from "./include-usage-stream-options.ts";
 import { withDeepseekReasoningDialect } from "./normalize-reasoning-dialect.ts";
 import { withUsageNormalized } from "./normalize-usage.ts";
+
+interface ChatCompletionsInterceptorProvider {
+  enabledFixes: ReadonlySet<string>;
+  targetInterceptors?: ProviderTargetInterceptors;
+}
 
 // Always-on Chat Completions target interceptors. Both gate the gateway's
 // usage-tracking pipeline:
@@ -19,10 +23,7 @@ import { withUsageNormalized } from "./normalize-usage.ts";
 const baseInterceptors = [
   withUsageStreamOptionsIncluded,
   withUsageNormalized,
-] as const satisfies readonly TargetInterceptor<
-  EmitToChatCompletionsInput,
-  ChatCompletionResponse
->[];
+] as const satisfies readonly ChatCompletionsInterceptor[];
 
 export const chatCompletionsOptionalInterceptors = [
   {
@@ -33,26 +34,13 @@ export const chatCompletionsOptionalInterceptors = [
     fixId: "disable-reasoning-on-forced-tool-choice",
     run: withReasoningDisabledOnForcedToolChoice,
   },
-] as const satisfies readonly OptionalInterceptor<
-  EmitToChatCompletionsInput,
-  ChatCompletionResponse
->[];
+] as const satisfies readonly OptionalInterceptor<ChatCompletionsInterceptor>[];
 
 export const interceptorsForChatCompletions = (
-  provider: Pick<
-    EmitToChatCompletionsInput,
-    "enabledFixes" | "targetInterceptors"
-  >,
-): readonly TargetInterceptor<
-  EmitToChatCompletionsInput,
-  ChatCompletionResponse
->[] => [
+  provider: ChatCompletionsInterceptorProvider,
+): readonly ChatCompletionsInterceptor[] => [
   ...baseInterceptors,
-  ...((provider.targetInterceptors?.chatCompletions ??
-    []) as readonly TargetInterceptor<
-      EmitToChatCompletionsInput,
-      ChatCompletionResponse
-    >[]),
+  ...(provider.targetInterceptors?.chatCompletions ?? []),
   ...chatCompletionsOptionalInterceptors
     .filter(({ fixId }) => provider.enabledFixes.has(fixId))
     .map(({ run }) => run),

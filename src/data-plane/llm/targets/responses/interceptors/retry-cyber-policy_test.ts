@@ -3,9 +3,16 @@ import type {
   ResponsesPayload,
   ResponsesResult,
 } from "../../../../shared/protocol/responses.ts";
-import type { EmitInput } from "../../emit-types.ts";
+import type {
+  ResponsesExchangeContext,
+  ResponsesExchangeResult,
+} from "../../../interceptors.ts";
 import { eventResult } from "../../../shared/errors/result.ts";
-import { jsonFrame, sseFrame } from "../../../shared/stream/types.ts";
+import {
+  eventFrame,
+  type ProtocolFrame,
+} from "../../../shared/stream/types.ts";
+import type { ResponsesStreamEvent } from "../../../shared/protocol/responses.ts";
 import {
   stubProvider,
   stubUpstreamModel,
@@ -28,8 +35,9 @@ const makePayload = (): ResponsesPayload => ({
   parallel_tool_calls: true,
 });
 
-const makeInput = (payload: ResponsesPayload): EmitInput<ResponsesPayload> => ({
+const makeContext = (payload: ResponsesPayload): ResponsesExchangeContext => ({
   sourceApi: "responses",
+  targetApi: "responses",
   model: payload.model,
   upstream: "test-upstream",
   payload,
@@ -74,6 +82,82 @@ const completedResponse = (): ResponsesResult => ({
   usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
 });
 
+const inProgressResponse = (id: string): ResponsesResult => ({
+  id,
+  object: "response",
+  model: "gpt-test",
+  status: "in_progress",
+  output_text: "",
+  output: [],
+});
+
+const failedResponse = (id: string, message: string): ResponsesResult => ({
+  id,
+  object: "response",
+  model: "gpt-test",
+  status: "failed",
+  output_text: "",
+  output: [],
+  error: {
+    message,
+    type: "invalid_request_error",
+    code: "cyber_policy",
+  },
+});
+
+const completedEvent = (
+  sequence_number = 1,
+): ResponsesStreamEvent => ({
+  type: "response.completed",
+  sequence_number,
+  response: completedResponse(),
+});
+
+const cyberPolicyEvent = (
+  id: string,
+  sequence_number = 1,
+): ResponsesStreamEvent => ({
+  type: "response.failed",
+  sequence_number,
+  response: failedResponse(
+    id,
+    "This request was flagged for cyber policy.",
+  ),
+});
+
+const deltaEvent = (
+  delta: string,
+  sequence_number = 1,
+): ResponsesStreamEvent => ({
+  type: "response.output_text.delta",
+  sequence_number,
+  item_id: "msg_0",
+  output_index: 0,
+  content_index: 0,
+  delta,
+});
+
+const protocolResult = (
+  events: readonly ResponsesStreamEvent[],
+  modelIdentity = testTelemetryModelIdentity,
+  performance?: ResponsesExchangeResult["performance"],
+): ResponsesExchangeResult =>
+  eventResult(
+    (async function* () {
+      for (const event of events) yield eventFrame(event);
+    })(),
+    modelIdentity,
+    performance,
+  );
+
+const collectFrames = async (
+  events: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>,
+): Promise<ProtocolFrame<ResponsesStreamEvent>[]> => {
+  const frames: ProtocolFrame<ResponsesStreamEvent>[] = [];
+  for await (const frame of events) frames.push(frame);
+  return frames;
+};
+
 const modelIdentityFor = (modelKey: string) => ({
   ...testTelemetryModelIdentity,
   modelKey,
@@ -90,8 +174,10 @@ const performanceFor = (modelKey: string) => ({
   runtimeLocation: "test",
 });
 
-const upstreamCyberPolicyError = (message: string) => ({
-  type: "upstream-error" as const,
+const upstreamCyberPolicyError = (
+  message: string,
+): ResponsesExchangeResult => ({
+  type: "upstream-error",
   status: 400,
   headers: new Headers({ "content-type": "application/json" }),
   body: new TextEncoder().encode(
@@ -105,8 +191,8 @@ const upstreamCyberPolicyError = (message: string) => ({
   ),
 });
 
-const upstreamServerError = (message: string) => ({
-  type: "upstream-error" as const,
+const upstreamServerError = (message: string): ResponsesExchangeResult => ({
+  type: "upstream-error",
   status: 500,
   headers: new Headers({ "content-type": "application/json" }),
   body: new TextEncoder().encode(
@@ -120,147 +206,100 @@ const upstreamServerError = (message: string) => ({
   ),
 });
 
-Deno.test("withCyberPolicyRetried retries fatal upstream cyber policy errors five times before returning success", async () => {
+Deno.test("withCyberPolicyRetried retries fatal upstream cyber policy errors before returning success", async () => {
   const payload = makePayload();
   let attempts = 0;
 
-  const result = await withCyberPolicyRetried(makeInput(payload), () => {
+  const result = await withCyberPolicyRetried(makeContext(payload), () => {
     attempts += 1;
 
     if (attempts < 6) {
       return Promise.resolve(upstreamCyberPolicyError(`blocked ${attempts}`));
     }
 
-    return Promise.resolve(eventResult(
-      (async function* () {
-        yield jsonFrame(completedResponse());
-      })(),
-      testTelemetryModelIdentity,
-    ));
+    return Promise.resolve(protocolResult([completedEvent()]));
   });
 
   assertEquals(attempts, 6);
   assertEquals(result.type, "events");
 });
 
-Deno.test("withCyberPolicyRetried retries fatal Responses SSE cyber policy failures before returning success", async () => {
+Deno.test("withCyberPolicyRetried retries first Responses protocol cyber policy failures before returning success", async () => {
   const payload = makePayload();
   let attempts = 0;
 
-  const result = await withCyberPolicyRetried(makeInput(payload), () => {
+  const result = await withCyberPolicyRetried(makeContext(payload), () => {
     attempts += 1;
 
     if (attempts < 3) {
-      return Promise.resolve(eventResult(
-        (async function* () {
-          yield sseFrame(
-            JSON.stringify({
-              type: "response.failed",
-              sequence_number: 1,
-              response: {
-                id: `resp_blocked_${attempts}`,
-                object: "response",
-                model: "gpt-test",
-                status: "failed",
-                output: [],
-                output_text: "",
-                error: {
-                  message: "This request was flagged for cyber policy.",
-                  type: "invalid_request_error",
-                  code: "cyber_policy",
-                },
-              },
-            }),
-            "response.failed",
-          );
-        })(),
-        testTelemetryModelIdentity,
-      ));
+      return Promise.resolve(
+        protocolResult([cyberPolicyEvent(`resp_blocked_${attempts}`)]),
+      );
     }
 
-    return Promise.resolve(eventResult(
-      (async function* () {
-        yield sseFrame(
-          JSON.stringify({
-            type: "response.completed",
-            sequence_number: 1,
-            response: completedResponse(),
-          }),
-          "response.completed",
-        );
-      })(),
-      testTelemetryModelIdentity,
-    ));
+    return Promise.resolve(protocolResult([completedEvent()]));
   });
 
   assertEquals(attempts, 1);
   assertEquals(result.type, "events");
   if (result.type !== "events") throw new Error("expected events result");
 
-  const frames = [];
-  for await (const frame of result.events) frames.push(frame);
+  const frames = await collectFrames(result.events);
   assertEquals(attempts, 3);
-  assertEquals(frames.length, 1);
-  assertEquals(
-    frames[0],
-    sseFrame(
-      JSON.stringify({
-        type: "response.completed",
-        sequence_number: 1,
-        response: completedResponse(),
-      }),
-      "response.completed",
-    ),
-  );
+  assertEquals(frames, [eventFrame(completedEvent())]);
+});
+
+Deno.test("withCyberPolicyRetried buffers converted fallback prologue frames before retrying terminal cyber policy failures", async () => {
+  const payload = makePayload();
+  let attempts = 0;
+
+  const result = await withCyberPolicyRetried(makeContext(payload), () => {
+    attempts += 1;
+
+    if (attempts === 1) {
+      return Promise.resolve(protocolResult([
+        {
+          type: "response.created",
+          sequence_number: 0,
+          response: inProgressResponse("resp_blocked"),
+        },
+        {
+          type: "response.in_progress",
+          sequence_number: 1,
+          response: inProgressResponse("resp_blocked"),
+        },
+        cyberPolicyEvent("resp_blocked", 2),
+      ]));
+    }
+
+    return Promise.resolve(protocolResult([completedEvent()]));
+  });
+
+  assertEquals(result.type, "events");
+  if (result.type !== "events") throw new Error("expected events result");
+
+  const frames = await collectFrames(result.events);
+  assertEquals(attempts, 2);
+  assertEquals(frames, [eventFrame(completedEvent())]);
 });
 
 Deno.test("withCyberPolicyRetried attributes streaming retries to the final provider call", async () => {
   const payload = makePayload();
   let attempts = 0;
 
-  const result = await withCyberPolicyRetried(makeInput(payload), () => {
+  const result = await withCyberPolicyRetried(makeContext(payload), () => {
     attempts += 1;
 
     if (attempts === 1) {
-      return Promise.resolve(eventResult(
-        (async function* () {
-          yield sseFrame(
-            JSON.stringify({
-              type: "response.failed",
-              sequence_number: 1,
-              response: {
-                id: "resp_blocked_first_model_key",
-                object: "response",
-                model: "gpt-test",
-                status: "failed",
-                output: [],
-                output_text: "",
-                error: {
-                  message: "This request was flagged for cyber policy.",
-                  type: "invalid_request_error",
-                  code: "cyber_policy",
-                },
-              },
-            }),
-            "response.failed",
-          );
-        })(),
+      return Promise.resolve(protocolResult(
+        [cyberPolicyEvent("resp_blocked_first_model_key")],
         modelIdentityFor("first-model-key"),
         performanceFor("first-model-key"),
       ));
     }
 
-    return Promise.resolve(eventResult(
-      (async function* () {
-        yield sseFrame(
-          JSON.stringify({
-            type: "response.completed",
-            sequence_number: 1,
-            response: completedResponse(),
-          }),
-          "response.completed",
-        );
-      })(),
+    return Promise.resolve(protocolResult(
+      [completedEvent()],
       modelIdentityFor("final-model-key"),
       performanceFor("final-model-key"),
     ));
@@ -270,8 +309,7 @@ Deno.test("withCyberPolicyRetried attributes streaming retries to the final prov
   if (result.type !== "events") throw new Error("expected events result");
   assertEquals(result.modelIdentity.modelKey, "first-model-key");
 
-  const frames = [];
-  for await (const frame of result.events) frames.push(frame);
+  const frames = await collectFrames(result.events);
 
   assertEquals(frames.length, 1);
   assertEquals(result.modelIdentity.modelKey, "final-model-key");
@@ -288,29 +326,15 @@ Deno.test("withCyberPolicyRetried returns successful streams without draining th
   });
 
   const resultPromise = withCyberPolicyRetried(
-    makeInput(payload),
+    makeContext(payload),
     () =>
       Promise.resolve(eventResult(
         (async function* () {
-          yield sseFrame(
-            JSON.stringify({
-              type: "response.output_text.delta",
-              sequence_number: 1,
-              delta: "ok",
-            }),
-            "response.output_text.delta",
-          );
+          yield eventFrame(deltaEvent("ok"));
 
           markStreamDrained();
           await untilRelease;
-          yield sseFrame(
-            JSON.stringify({
-              type: "response.completed",
-              sequence_number: 2,
-              response: completedResponse(),
-            }),
-            "response.completed",
-          );
+          yield eventFrame(completedEvent(2));
         })(),
         testTelemetryModelIdentity,
       )),
@@ -327,8 +351,7 @@ Deno.test("withCyberPolicyRetried returns successful streams without draining th
   assertEquals(result.type, "events");
   if (result.type !== "events") throw new Error("expected events result");
 
-  const frames = [];
-  for await (const frame of result.events) frames.push(frame);
+  const frames = await collectFrames(result.events);
   assertEquals(frames.length, 2);
 });
 
@@ -340,19 +363,12 @@ Deno.test("withCyberPolicyRetried returns streaming results before the first ups
   });
 
   const resultPromise = withCyberPolicyRetried(
-    makeInput(payload),
+    makeContext(payload),
     () =>
       Promise.resolve(eventResult(
         (async function* () {
           await firstFrameReady;
-          yield sseFrame(
-            JSON.stringify({
-              type: "response.completed",
-              sequence_number: 1,
-              response: completedResponse(),
-            }),
-            "response.completed",
-          );
+          yield eventFrame(completedEvent());
         })(),
         testTelemetryModelIdentity,
       )),
@@ -370,30 +386,13 @@ Deno.test("withCyberPolicyRetried does not start another streaming retry after d
   const payload = makePayload();
   const downstreamAbortController = new AbortController();
   let attempts = 0;
-  const cyberPolicyFrame = sseFrame(
-    JSON.stringify({
-      type: "response.failed",
-      sequence_number: 1,
-      response: {
-        id: "resp_blocked_after_abort",
-        object: "response",
-        model: "gpt-test",
-        status: "failed",
-        output: [],
-        output_text: "",
-        error: {
-          message: "This request was flagged for cyber policy.",
-          type: "invalid_request_error",
-          code: "cyber_policy",
-        },
-      },
-    }),
-    "response.failed",
+  const cyberPolicyFrame = eventFrame(
+    cyberPolicyEvent("resp_blocked_after_abort"),
   );
 
   const result = await withCyberPolicyRetried(
     {
-      ...makeInput(payload),
+      ...makeContext(payload),
       downstreamAbortSignal: downstreamAbortController.signal,
     },
     () => {
@@ -411,8 +410,7 @@ Deno.test("withCyberPolicyRetried does not start another streaming retry after d
   assertEquals(result.type, "events");
   if (result.type !== "events") throw new Error("expected events result");
 
-  const frames = [];
-  for await (const frame of result.events) frames.push(frame);
+  const frames = await collectFrames(result.events);
 
   assertEquals(attempts, 1);
   assertEquals(frames, [cyberPolicyFrame]);
@@ -422,35 +420,13 @@ Deno.test("withCyberPolicyRetried streams the final HTTP cyber policy failure af
   const payload = makePayload();
   let attempts = 0;
 
-  const result = await withCyberPolicyRetried(makeInput(payload), () => {
+  const result = await withCyberPolicyRetried(makeContext(payload), () => {
     attempts += 1;
 
     if (attempts === 1) {
-      return Promise.resolve(eventResult(
-        (async function* () {
-          yield sseFrame(
-            JSON.stringify({
-              type: "response.failed",
-              sequence_number: 1,
-              response: {
-                id: "resp_stream_policy_failure",
-                object: "response",
-                model: "gpt-test",
-                status: "failed",
-                output: [],
-                output_text: "",
-                error: {
-                  message: "This request was flagged for cyber policy.",
-                  type: "invalid_request_error",
-                  code: "cyber_policy",
-                },
-              },
-            }),
-            "response.failed",
-          );
-        })(),
-        testTelemetryModelIdentity,
-      ));
+      return Promise.resolve(
+        protocolResult([cyberPolicyEvent("resp_stream_policy_failure")]),
+      );
     }
 
     return Promise.resolve(upstreamCyberPolicyError(`blocked ${attempts}`));
@@ -459,20 +435,21 @@ Deno.test("withCyberPolicyRetried streams the final HTTP cyber policy failure af
   assertEquals(result.type, "events");
   if (result.type !== "events") throw new Error("expected events result");
 
-  const frames = [];
-  for await (const frame of result.events) frames.push(frame);
+  const frames = await collectFrames(result.events);
 
   assertEquals(attempts, 11);
   assertEquals(frames.length, 1);
   const finalFrame = frames[0];
-  assertEquals(finalFrame.type, "sse");
-  if (finalFrame.type !== "sse") throw new Error("expected SSE frame");
-  assertEquals(finalFrame.event, "response.failed");
-  const finalFailure = JSON.parse(finalFrame.data);
-  assertEquals(finalFailure.type, "response.failed");
+  assertEquals(finalFrame.type, "event");
+  if (finalFrame.type !== "event") throw new Error("expected event frame");
+  assertEquals(finalFrame.event.type, "response.failed");
+  const finalFailure = finalFrame.event as Extract<
+    ResponsesStreamEvent,
+    { type: "response.failed" }
+  >;
   assertEquals(finalFailure.response.status, "failed");
   assertEquals(finalFailure.response.model, "gpt-test");
-  assertEquals(finalFailure.response.error, {
+  assertEquals(finalFailure.response.error as Record<string, unknown>, {
     message: "blocked 11",
     type: "invalid_request_error",
     code: "cyber_policy",
@@ -483,35 +460,13 @@ Deno.test("withCyberPolicyRetried streams a later HTTP upstream failure after a 
   const payload = makePayload();
   let attempts = 0;
 
-  const result = await withCyberPolicyRetried(makeInput(payload), () => {
+  const result = await withCyberPolicyRetried(makeContext(payload), () => {
     attempts += 1;
 
     if (attempts === 1) {
-      return Promise.resolve(eventResult(
-        (async function* () {
-          yield sseFrame(
-            JSON.stringify({
-              type: "response.failed",
-              sequence_number: 1,
-              response: {
-                id: "resp_stream_policy_failure",
-                object: "response",
-                model: "gpt-test",
-                status: "failed",
-                output: [],
-                output_text: "",
-                error: {
-                  message: "This request was flagged for cyber policy.",
-                  type: "invalid_request_error",
-                  code: "cyber_policy",
-                },
-              },
-            }),
-            "response.failed",
-          );
-        })(),
-        testTelemetryModelIdentity,
-      ));
+      return Promise.resolve(
+        protocolResult([cyberPolicyEvent("resp_stream_policy_failure")]),
+      );
     }
 
     return Promise.resolve(upstreamServerError("upstream failed after retry"));
@@ -520,16 +475,17 @@ Deno.test("withCyberPolicyRetried streams a later HTTP upstream failure after a 
   assertEquals(result.type, "events");
   if (result.type !== "events") throw new Error("expected events result");
 
-  const frames = [];
-  for await (const frame of result.events) frames.push(frame);
+  const frames = await collectFrames(result.events);
 
   assertEquals(attempts, 2);
   assertEquals(frames.length, 1);
   const finalFrame = frames[0];
-  assertEquals(finalFrame.type, "sse");
-  if (finalFrame.type !== "sse") throw new Error("expected SSE frame");
-  assertEquals(finalFrame.event, "response.failed");
-  const finalFailure = JSON.parse(finalFrame.data);
+  assertEquals(finalFrame.type, "event");
+  if (finalFrame.type !== "event") throw new Error("expected event frame");
+  const finalFailure = finalFrame.event as Extract<
+    ResponsesStreamEvent,
+    { type: "response.failed" }
+  >;
   assertEquals(finalFailure.response.status, "failed");
   assertEquals(finalFailure.response.error, {
     message: "upstream failed after retry",
@@ -542,35 +498,13 @@ Deno.test("withCyberPolicyRetried preserves debug fields for later internal fail
   const payload = makePayload();
   let attempts = 0;
 
-  const result = await withCyberPolicyRetried(makeInput(payload), () => {
+  const result = await withCyberPolicyRetried(makeContext(payload), () => {
     attempts += 1;
 
     if (attempts === 1) {
-      return Promise.resolve(eventResult(
-        (async function* () {
-          yield sseFrame(
-            JSON.stringify({
-              type: "response.failed",
-              sequence_number: 1,
-              response: {
-                id: "resp_stream_policy_failure",
-                object: "response",
-                model: "gpt-test",
-                status: "failed",
-                output: [],
-                output_text: "",
-                error: {
-                  message: "This request was flagged for cyber policy.",
-                  type: "invalid_request_error",
-                  code: "cyber_policy",
-                },
-              },
-            }),
-            "response.failed",
-          );
-        })(),
-        testTelemetryModelIdentity,
-      ));
+      return Promise.resolve(
+        protocolResult([cyberPolicyEvent("resp_stream_policy_failure")]),
+      );
     }
 
     return Promise.resolve({
@@ -591,16 +525,18 @@ Deno.test("withCyberPolicyRetried preserves debug fields for later internal fail
   assertEquals(result.type, "events");
   if (result.type !== "events") throw new Error("expected events result");
 
-  const frames = [];
-  for await (const frame of result.events) frames.push(frame);
+  const frames = await collectFrames(result.events);
 
   assertEquals(attempts, 2);
   assertEquals(frames.length, 1);
   const finalFrame = frames[0];
-  assertEquals(finalFrame.type, "sse");
-  if (finalFrame.type !== "sse") throw new Error("expected SSE frame");
-  const finalFailure = JSON.parse(finalFrame.data);
-  assertEquals(finalFailure.response.error, {
+  assertEquals(finalFrame.type, "event");
+  if (finalFrame.type !== "event") throw new Error("expected event frame");
+  const finalFailure = finalFrame.event as Extract<
+    ResponsesStreamEvent,
+    { type: "response.failed" }
+  >;
+  assertEquals(finalFailure.response.error as Record<string, unknown>, {
     message: "retry setup failed",
     type: "internal_error",
     code: "internal_error",
@@ -616,7 +552,7 @@ Deno.test("withCyberPolicyRetried returns the final cyber policy failure after e
   const payload = makePayload();
   let attempts = 0;
 
-  const result = await withCyberPolicyRetried(makeInput(payload), () => {
+  const result = await withCyberPolicyRetried(makeContext(payload), () => {
     attempts += 1;
     return Promise.resolve(upstreamCyberPolicyError(`blocked ${attempts}`));
   });

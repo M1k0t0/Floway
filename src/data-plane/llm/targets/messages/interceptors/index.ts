@@ -1,13 +1,9 @@
-import type { MessagesResponse } from "../../../../shared/protocol/messages.ts";
+import type { MessagesInterceptor } from "../../../interceptors.ts";
+import type { ProviderTargetInterceptors } from "../../../../providers/types.ts";
 import type { OptionalInterceptor } from "../../optional-interceptor.ts";
-import type { TargetInterceptor } from "../../run-interceptors.ts";
-import type { EmitToMessagesInput } from "../emit.ts";
 import { withReasoningDisabledOnForcedToolChoice } from "./disable-reasoning-on-forced-tool-choice.ts";
 
-const baseInterceptors: readonly TargetInterceptor<
-  EmitToMessagesInput,
-  MessagesResponse
->[] = [];
+const baseInterceptors: readonly MessagesInterceptor[] = [];
 
 export const messagesOptionalInterceptors = [
   {
@@ -15,19 +11,17 @@ export const messagesOptionalInterceptors = [
     run: withReasoningDisabledOnForcedToolChoice,
   },
 ] as const satisfies readonly OptionalInterceptor<
-  EmitToMessagesInput,
-  MessagesResponse
+  MessagesInterceptor
 >[];
 
 export const interceptorsForMessages = (
-  provider: Pick<EmitToMessagesInput, "enabledFixes" | "targetInterceptors">,
-): readonly TargetInterceptor<EmitToMessagesInput, MessagesResponse>[] => [
+  provider: {
+    enabledFixes: ReadonlySet<string>;
+    targetInterceptors?: ProviderTargetInterceptors;
+  },
+): readonly MessagesInterceptor[] => [
   ...baseInterceptors,
-  ...((provider.targetInterceptors?.messages ??
-    []) as readonly TargetInterceptor<
-      EmitToMessagesInput,
-      MessagesResponse
-    >[]),
+  ...(provider.targetInterceptors?.messages ?? []),
   ...messagesOptionalInterceptors
     .filter(({ fixId }) => provider.enabledFixes.has(fixId))
     .map(({ run }) => run),

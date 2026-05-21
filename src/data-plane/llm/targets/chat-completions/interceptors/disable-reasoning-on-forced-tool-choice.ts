@@ -1,9 +1,7 @@
 import type {
-  ChatCompletionResponse,
   ChatCompletionsPayload,
 } from "../../../../shared/protocol/chat-completions.ts";
-import type { TargetInterceptor } from "../../run-interceptors.ts";
-import type { EmitToChatCompletionsInput } from "../emit.ts";
+import type { ChatCompletionsInterceptor } from "../../../interceptors.ts";
 
 // Opt-in workaround for upstreams where forced `tool_choice` and enabled
 // reasoning do not compose. By default this strips OpenAI `reasoning_effort`
@@ -36,14 +34,15 @@ const disableChatCompletionsReasoning = (
   return out;
 };
 
-export const withReasoningDisabledOnForcedToolChoice: TargetInterceptor<
-  EmitToChatCompletionsInput,
-  ChatCompletionResponse
-> = async (ctx, run) => {
-  if (!hasForcedToolChoice(ctx.payload)) return await run();
-  ctx.payload = disableChatCompletionsReasoning(
-    ctx.payload,
-    ctx.enabledFixes,
-  );
-  return await run();
-};
+export const withReasoningDisabledOnForcedToolChoice:
+  ChatCompletionsInterceptor = async (
+    ctx,
+    run,
+  ) => {
+    if (!hasForcedToolChoice(ctx.payload)) return await run();
+    ctx.payload = disableChatCompletionsReasoning(
+      ctx.payload,
+      ctx.enabledFixes,
+    );
+    return await run();
+  };

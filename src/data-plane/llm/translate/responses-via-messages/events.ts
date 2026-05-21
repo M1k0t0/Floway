@@ -19,7 +19,7 @@ import type {
 } from "../../../shared/protocol/responses.ts";
 import { protocolEventsUntilTerminal } from "../../shared/stream/protocol-algebra.ts";
 import { eventFrame, type ProtocolFrame } from "../../shared/stream/types.ts";
-import type { SourceResponseStreamEvent } from "../../sources/responses/events/protocol.ts";
+import type { ResponsesStreamEvent } from "../../shared/protocol/responses.ts";
 
 const upstreamMessagesStreamAlgebra = {
   isTerminalEvent: (event: Pick<MessagesStreamEventData, "type">): boolean =>
@@ -523,7 +523,7 @@ export const translateToSourceEvents = async function* (
   frames: AsyncIterable<ProtocolFrame<MessagesStreamEventData>>,
   responseId: string,
   model: string,
-): AsyncGenerator<ProtocolFrame<SourceResponseStreamEvent>> {
+): AsyncGenerator<ProtocolFrame<ResponsesStreamEvent>> {
   const state = createMessagesToResponsesStreamState(responseId, model);
 
   for await (

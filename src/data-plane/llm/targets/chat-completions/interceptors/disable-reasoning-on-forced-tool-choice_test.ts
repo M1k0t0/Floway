@@ -1,13 +1,11 @@
 import { assertEquals } from "@std/assert";
 import type { ChatCompletionsPayload } from "../../../../shared/protocol/chat-completions.ts";
-import {
-  stubProvider,
-  stubUpstreamModel,
-  testTelemetryModelIdentity,
-} from "../../../../../test-helpers.ts";
 import { eventResult } from "../../../shared/errors/result.ts";
-import type { EmitToChatCompletionsInput } from "../emit.ts";
 import { withReasoningDisabledOnForcedToolChoice } from "./disable-reasoning-on-forced-tool-choice.ts";
+import {
+  chatCompletionsExchangeContext,
+  testTelemetryModelIdentity,
+} from "./test-helpers.ts";
 
 const okEvents = () =>
   Promise.resolve(
@@ -17,15 +15,8 @@ const okEvents = () =>
 const emitInput = (
   payload: ChatCompletionsPayload,
   enabledFixes: ReadonlySet<string> = new Set(),
-): EmitToChatCompletionsInput => ({
-  sourceApi: "chat-completions",
-  model: payload.model,
-  upstream: "test-upstream",
-  payload,
-  provider: stubProvider(),
-  upstreamModel: stubUpstreamModel(),
-  enabledFixes,
-});
+): ReturnType<typeof chatCompletionsExchangeContext> =>
+  chatCompletionsExchangeContext(payload, enabledFixes);
 
 Deno.test("chat completions required tool_choice strips reasoning_effort", async () => {
   const input = emitInput({

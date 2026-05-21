@@ -4,7 +4,7 @@ import { type Context, Hono } from "hono";
 import type { ChatCompletionChunk } from "../../shared/protocol/chat-completions.ts";
 import type { GeminiStreamEvent } from "../../shared/protocol/gemini.ts";
 import type { MessagesStreamEventData } from "../../shared/protocol/messages.ts";
-import type { SourceResponseStreamEvent } from "./responses/events/protocol.ts";
+import type { ResponsesStreamEvent } from "../shared/protocol/responses.ts";
 import { respondChatCompletions } from "./chat-completions/respond.ts";
 import { respondGemini } from "./gemini/respond.ts";
 import { respondMessages } from "./messages/respond.ts";
@@ -159,7 +159,7 @@ Deno.test("Messages streaming keepalive uses Anthropic ping events", async () =>
 });
 
 Deno.test("Responses streaming keepalive uses SSE comments", async () => {
-  await assertSourceKeepAlive<SourceResponseStreamEvent>(
+  await assertSourceKeepAlive<ResponsesStreamEvent>(
     (c, events) =>
       respondResponses(
         c,

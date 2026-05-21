@@ -3,9 +3,7 @@ import type {
   ResponsesPayload,
   ResponseTool,
 } from "../../../../shared/protocol/responses.ts";
-import type { SourceInterceptor } from "../../run-interceptors.ts";
-import type { SourceResponseStreamEvent } from "../events/protocol.ts";
-import type { ResponsesSourceContext } from "./index.ts";
+import type { ResponsesInterceptor } from "../../../interceptors.ts";
 
 const APPLY_PATCH_FUNCTION_TOOL: ResponseFunctionTool = {
   type: "function",
@@ -60,10 +58,7 @@ const fixPayload = (payload: ResponsesPayload): void => {
   }
 };
 
-export const fixApplyPatchTools: SourceInterceptor<
-  ResponsesSourceContext,
-  SourceResponseStreamEvent
-> = (ctx, run) => {
+export const fixApplyPatchTools: ResponsesInterceptor = (ctx, run) => {
   fixPayload(ctx.payload);
   return run();
 };

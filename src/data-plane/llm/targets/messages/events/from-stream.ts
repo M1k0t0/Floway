@@ -9,7 +9,7 @@ import {
   type SseFrame,
   type StreamFrame,
 } from "../../../shared/stream/types.ts";
-import { messagesResultToEvents } from "../../../sources/messages/events/from-result.ts";
+import { messagesResultToEvents } from "../../../shared/protocol/messages.ts";
 
 const messagesSSEFrameToEvent = (
   frame: SseFrame,

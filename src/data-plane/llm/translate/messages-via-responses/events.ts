@@ -19,7 +19,7 @@ import {
   eventFrame,
   type ProtocolFrame,
 } from "../../shared/stream/types.ts";
-import { messagesResultToEvents } from "../../sources/messages/events/from-result.ts";
+import { messagesResultToEvents } from "../../shared/protocol/messages.ts";
 
 type UpstreamResponseStreamEvent = ResponseStreamEvent & {
   sequence_number?: number;
