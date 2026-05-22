@@ -1,13 +1,27 @@
-import { messagesStreamFramesToEvents } from './events/from-stream.ts';
 import { interceptorsForMessages } from './interceptors/index.ts';
 import type { TelemetryModelIdentity } from '../../../../repo/types.ts';
 import type { MessagesPayload, MessagesStreamEventData } from '../../../shared/protocol/messages.ts';
 import { type MessagesInvocation, type RequestContext, runInterceptors } from '../../interceptors.ts';
 import { eventResult, type ExecuteResult } from '../../shared/errors/result.ts';
-import type { ProtocolFrame } from '../../shared/stream/types.ts';
+import { doneFrame, eventFrame, type ProtocolFrame, type SseFrame } from '../../shared/stream/types.ts';
 import { targetInternalError, targetModelIdentity, targetProviderResultToFrames } from '../emit.ts';
+import { parseTargetStreamFrames } from '../events/from-stream.ts';
 
 const targetApi = 'messages';
+
+export const messagesStreamFramesToEvents = (frames: AsyncIterable<SseFrame>): AsyncGenerator<ProtocolFrame<MessagesStreamEventData>> =>
+  (async function* () {
+    for await (const frame of parseTargetStreamFrames<MessagesStreamEventData>(frames, {
+      protocol: 'Messages',
+      malformedJsonEventName: 'message',
+    })) {
+      if (frame.type === 'done') {
+        yield doneFrame();
+      } else {
+        yield eventFrame(frame.data);
+      }
+    }
+  })();
 
 export const emitToMessages = async (invocation: MessagesInvocation, request: RequestContext): Promise<ExecuteResult<ProtocolFrame<MessagesStreamEventData>>> => {
   let modelIdentity: TelemetryModelIdentity | undefined;

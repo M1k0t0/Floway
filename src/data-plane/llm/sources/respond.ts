@@ -1,5 +1,6 @@
 import type { TelemetryModelIdentity, TokenUsage } from '../../../repo/types.ts';
-import { hasTokenUsage, type RecordUsage } from '../../shared/telemetry/usage.ts';
+import { recordRequestPerformanceForApiKey } from '../../shared/telemetry/performance.ts';
+import { hasTokenUsage, recordTokenUsageForApiKey } from '../../shared/telemetry/usage.ts';
 import type { RequestContext } from '../interceptors.ts';
 import type { EventResultMetadata, ExecuteResult } from '../shared/errors/result.ts';
 import type { StreamCompletion } from '../shared/stream/proxy-sse.ts';
@@ -21,8 +22,8 @@ export const rememberSourceFrameUsage = (state: SourceStreamState, usage: TokenU
   if (usage && hasTokenUsage(usage)) state.usage = usage;
 };
 
-export const recordSourceUsage = async (modelIdentity: TelemetryModelIdentity, usage: TokenUsage | null, recordUsage: RecordUsage): Promise<void> => {
-  if (usage && hasTokenUsage(usage)) await recordUsage(modelIdentity, usage);
+export const recordSourceUsage = async (request: RequestContext, modelIdentity: TelemetryModelIdentity, usage: TokenUsage | null): Promise<void> => {
+  if (usage && hasTokenUsage(usage)) await recordTokenUsageForApiKey(request.apiKeyId, modelIdentity, usage);
 };
 
 export const eventResultMetadata = async <TEvent>(result: Extract<ExecuteResult<ProtocolFrame<TEvent>>, { type: 'events' }>): Promise<EventResultMetadata> =>
@@ -33,7 +34,7 @@ export const eventResultMetadata = async <TEvent>(result: Extract<ExecuteResult<
     }));
 
 export const recordSourcePerformance = (request: RequestContext, context: EventResultMetadata['performance'], failed: boolean): void => {
-  request.recordRequestPerformance(context, failed, performance.now() - request.requestStartedAt);
+  recordRequestPerformanceForApiKey(request.apiKeyId, request.scheduleBackground, context, failed, performance.now() - request.requestStartedAt);
 };
 
 export const sourceStreamFailed = (completion: StreamCompletion, state: SourceStreamState): boolean => completion === 'error' || state.failed || (completion === 'cancel' && !state.completed);

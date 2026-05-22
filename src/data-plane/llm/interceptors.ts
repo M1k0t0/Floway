@@ -4,8 +4,6 @@ import type { ChatCompletionChunk, ChatCompletionsPayload } from '../shared/prot
 import type { GeminiGenerateContentRequest, GeminiStreamEvent } from '../shared/protocol/gemini.ts';
 import type { MessagesPayload, MessagesStreamEventData } from '../shared/protocol/messages.ts';
 import type { ResponsesPayload } from '../shared/protocol/responses.ts';
-import type { RecordRequestPerformance } from '../shared/telemetry/performance.ts';
-import type { RecordUsage } from '../shared/telemetry/usage.ts';
 import type { ExecuteResult } from './shared/errors/result.ts';
 import type { ResponsesStreamEvent } from './shared/protocol/responses.ts';
 import type { ProtocolFrame } from './shared/stream/types.ts';
@@ -23,15 +21,11 @@ export type LlmTargetApi = 'messages' | 'responses' | 'chat-completions';
  * passes belong here. Fields that depend on which binding the planner is
  * trying belong on `Invocation`.
  *
- * - apiKeyId / runtimeLocation / scheduleBackground / recordUsage /
- *   recordRequestPerformance / requestStartedAt: bound to the HTTP request,
- *   not to a binding choice.
- * - downstreamAbortSignal: tied to the downstream Response stream lifetime,
- *   which exists at the request scope, not the binding scope.
- *
- * apiKeyId and downstreamAbortSignal live on RequestContext rather than on
- * the per-binding Invocation because the api key never changes for a given
- * request and the downstream abort signal is bound to the HTTP response.
+ * Pure data: identities and runtime adapters only. No method-like fields,
+ * no closures captured over identities. Telemetry recording is done via
+ * global helpers that accept `apiKeyId` (and `scheduleBackground` for
+ * performance) explicitly so call sites stay visible about the no-op when
+ * the request has no API key (ADMIN_KEY playground path).
  *
  * Mutable per-request state (last performance row, downstream abort
  * controller) is intentionally NOT here. It lives as local variables in the
@@ -43,8 +37,6 @@ export interface RequestContext {
   readonly apiKeyId?: string;
   readonly runtimeLocation: string;
   readonly scheduleBackground?: BackgroundScheduler;
-  readonly recordUsage: RecordUsage;
-  readonly recordRequestPerformance: RecordRequestPerformance;
   readonly downstreamAbortSignal?: AbortSignal;
   readonly clientStream: boolean;
 }

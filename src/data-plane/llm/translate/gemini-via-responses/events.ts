@@ -1,8 +1,7 @@
 import type { GeminiFinishReason, GeminiPart, GeminiStreamEvent, GeminiUsageMetadata } from '../../../shared/protocol/gemini.ts';
 import type { ResponseOutputFunctionCall, ResponseOutputReasoning, ResponsesResult, ResponseStreamEvent } from '../../../shared/protocol/responses.ts';
 import { eventFrame, type ProtocolFrame } from '../../shared/stream/types.ts';
-import { geminiResponse } from '../shared/gemini-response.ts';
-import { parseStrictJsonObject } from '../shared/gemini.ts';
+import { geminiResponse, parseStrictJsonObject } from '../shared/gemini.ts';
 
 type ResponseTerminalEvent = Extract<ResponseStreamEvent, { type: 'response.completed' } | { type: 'response.incomplete' } | { type: 'response.failed' }>;
 

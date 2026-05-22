@@ -1,25 +1,26 @@
 import type { Context } from 'hono';
 
-import { countGeminiTokens } from './count-tokens/serve.ts';
 import { geminiSourceInterceptors } from './interceptors/index.ts';
-import { geminiRpcErrorResponse, respondGemini } from './respond.ts';
-import { getModelCapabilities, type ModelCapabilities } from '../../../providers/capabilities.ts';
+import { respondGemini } from './respond.ts';
+import { getModelCapabilities } from '../../../providers/capabilities.ts';
 import { resolveModelForRequest } from '../../../providers/registry.ts';
-import type { ProviderModelRecord } from '../../../providers/types.ts';
+import type { ModelEndpoint, ProviderModelRecord } from '../../../providers/types.ts';
 import type { ChatCompletionsPayload } from '../../../shared/protocol/chat-completions.ts';
 import type { GeminiGenerateContentRequest, GeminiStreamEvent } from '../../../shared/protocol/gemini.ts';
 import type { MessagesPayload } from '../../../shared/protocol/messages.ts';
 import type { ResponsesPayload } from '../../../shared/protocol/responses.ts';
-import { type PerformanceTelemetryContext } from '../../../shared/telemetry/performance.ts';
 import { type GeminiInterceptor, type GeminiInvocation, type LlmTargetApi, runInterceptors } from '../../interceptors.ts';
 import type { ExecuteResult } from '../../shared/errors/result.ts';
 import type { ProtocolFrame } from '../../shared/stream/types.ts';
 import { emitToChatCompletions } from '../../targets/chat-completions/emit.ts';
 import { emitToMessages } from '../../targets/messages/emit.ts';
 import { emitToResponses } from '../../targets/responses/emit.ts';
-import { geminiViaChatCompletionsTranslation } from '../../translate/gemini-via-chat-completions/index.ts';
-import { geminiViaMessagesTranslation } from '../../translate/gemini-via-messages/index.ts';
-import { geminiViaResponsesTranslation } from '../../translate/gemini-via-responses/index.ts';
+import { translateToSourceEvents as geminiViaChatCompletionsEvents } from '../../translate/gemini-via-chat-completions/events.ts';
+import { buildTargetRequest as geminiViaChatCompletionsRequest } from '../../translate/gemini-via-chat-completions/request.ts';
+import { translateToSourceEvents as geminiViaMessagesEvents } from '../../translate/gemini-via-messages/events.ts';
+import { buildTargetRequest as geminiViaMessagesRequest } from '../../translate/gemini-via-messages/request.ts';
+import { translateToSourceEvents as geminiViaResponsesEvents } from '../../translate/gemini-via-responses/events.ts';
+import { buildTargetRequest as geminiViaResponsesRequest } from '../../translate/gemini-via-responses/request.ts';
 import { type SourceEmit, viaTranslation } from '../../translate/types.ts';
 import { createRequestContext, jsonUpstreamErrorResult, sourceErrorResult } from '../execute.ts';
 
@@ -61,21 +62,15 @@ const geminiInvocation = <TPayload>(
 });
 
 export const serveGemini = async (c: Context, model: string, wantsStream: boolean): Promise<Response> => {
-  let lastPerformance: PerformanceTelemetryContext | undefined;
-  const rememberPerformance = <T extends { performance?: PerformanceTelemetryContext }>(result: T): T => {
-    if (result.performance) lastPerformance = result.performance;
-    return result;
-  };
-
   const downstreamAbortController = wantsStream ? new AbortController() : undefined;
   const request = createRequestContext(c, downstreamAbortController?.signal, wantsStream);
 
   // Gemini has no native upstream target in the provider API; prefer Chat
   // Completions, then Messages, then Responses.
-  const pickTarget = (c: ModelCapabilities): LlmTargetApi | null => {
-    if (c.supportsChatCompletions) return 'chat-completions';
-    if (c.supportsMessages) return 'messages';
-    if (c.supportsResponses) return 'responses';
+  const pickTarget = (endpoints: readonly ModelEndpoint[]): LlmTargetApi | null => {
+    if (endpoints.includes('chat_completions')) return 'chat-completions';
+    if (endpoints.includes('messages')) return 'messages';
+    if (endpoints.includes('responses')) return 'responses';
     return null;
   };
 
@@ -91,7 +86,7 @@ export const serveGemini = async (c: Context, model: string, wantsStream: boolea
       for (const binding of resolved.providers) {
         const attemptPayload = structuredClone(payload);
         const capabilities = getModelCapabilities(binding.upstreamModel);
-        const target = pickTarget(capabilities);
+        const target = pickTarget(binding.upstreamModel.supportedEndpoints);
         if (!target) continue;
 
         // Gemini source payload has no `model` field on the request body; the
@@ -99,12 +94,24 @@ export const serveGemini = async (c: Context, model: string, wantsStream: boolea
         const invocation: GeminiInvocation = geminiInvocation(binding, target, modelId, attemptPayload);
 
         const emits: Record<LlmTargetApi, SourceEmit<GeminiGenerateContentRequest, GeminiStreamEvent>> = {
-          messages: viaTranslation(geminiViaMessagesTranslation, async (tgtPayload: MessagesPayload) =>
-            rememberPerformance(await emitToMessages(geminiInvocation(binding, 'messages', modelId, tgtPayload), request))),
-          responses: viaTranslation(geminiViaResponsesTranslation, async (tgtPayload: ResponsesPayload) =>
-            rememberPerformance(await emitToResponses(geminiInvocation(binding, 'responses', modelId, tgtPayload), request))),
-          'chat-completions': viaTranslation(geminiViaChatCompletionsTranslation, async (tgtPayload: ChatCompletionsPayload) =>
-            rememberPerformance(await emitToChatCompletions(geminiInvocation(binding, 'chat-completions', modelId, tgtPayload), request))),
+          messages: viaTranslation({
+            targetApi: 'messages',
+            buildTargetPayload: (payload, ctx) => geminiViaMessagesRequest(payload, ctx.model, ctx.wantsStream, ctx.capabilities),
+            translateEvents: frames => geminiViaMessagesEvents(frames),
+          }, async (tgtPayload: MessagesPayload) =>
+            await emitToMessages(geminiInvocation(binding, 'messages', modelId, tgtPayload), request)),
+          responses: viaTranslation({
+            targetApi: 'responses',
+            buildTargetPayload: (payload, ctx) => geminiViaResponsesRequest(payload, ctx.model, ctx.wantsStream),
+            translateEvents: frames => geminiViaResponsesEvents(frames),
+          }, async (tgtPayload: ResponsesPayload) =>
+            await emitToResponses(geminiInvocation(binding, 'responses', modelId, tgtPayload), request)),
+          'chat-completions': viaTranslation({
+            targetApi: 'chat-completions',
+            buildTargetPayload: (payload, ctx) => geminiViaChatCompletionsRequest(payload, ctx.model, ctx.wantsStream),
+            translateEvents: frames => geminiViaChatCompletionsEvents(frames),
+          }, async (tgtPayload: ChatCompletionsPayload) =>
+            await emitToChatCompletions(geminiInvocation(binding, 'chat-completions', modelId, tgtPayload), request)),
         };
 
         result = await runInterceptors(invocation, request, geminiSourceInterceptorsForProvider(binding), () =>
@@ -115,45 +122,16 @@ export const serveGemini = async (c: Context, model: string, wantsStream: boolea
       result ??= unsupportedGeminiModelResult(modelId);
     }
 
-    return await respondGemini(c, result, wantsStream, request, lastPerformance, downstreamAbortController);
+    return await respondGemini(c, result, wantsStream, request, downstreamAbortController);
   } catch (error) {
     return await respondGemini(
       c,
       sourceErrorResult(error, {
         sourceApi: 'gemini',
         internalStatus: 500,
-        lastPerformance,
       }),
       false,
-      request,
-      lastPerformance,
-      downstreamAbortController,
+      request, downstreamAbortController,
     );
-  }
-};
-
-export const serveGeminiPost = async (c: Context): Promise<Response> => {
-  const modelAction = c.req.param('modelAction');
-  if (!modelAction) {
-    return geminiRpcErrorResponse(404, 'Missing Gemini model action.');
-  }
-
-  const separator = modelAction.lastIndexOf(':');
-  if (separator <= 0 || separator === modelAction.length - 1) {
-    return geminiRpcErrorResponse(404, `Unknown Gemini model action: ${modelAction}`);
-  }
-
-  const model = modelAction.slice(0, separator);
-  const action = modelAction.slice(separator + 1);
-
-  switch (action) {
-  case 'generateContent':
-    return await serveGemini(c, model, false);
-  case 'streamGenerateContent':
-    return await serveGemini(c, model, true);
-  case 'countTokens':
-    return await countGeminiTokens(c, model);
-  default:
-    return geminiRpcErrorResponse(404, `Unknown Gemini model action: ${action}`);
   }
 };

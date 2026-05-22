@@ -70,8 +70,6 @@ const stubRequest: RequestContext = {
   requestStartedAt: 0,
   runtimeLocation: 'test',
   clientStream: false,
-  recordUsage: async () => {},
-  recordRequestPerformance: () => {},
 };
 
 const okEvents = (): Promise<ExecuteResult<ProtocolFrame<MessagesStreamEventData>>> => Promise.resolve(eventResult((async function* (): AsyncGenerator<ProtocolFrame<MessagesStreamEventData>> {})(), testTelemetryModelIdentity));

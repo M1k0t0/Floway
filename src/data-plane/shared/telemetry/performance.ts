@@ -16,8 +16,6 @@ export interface PerformanceTelemetryContext {
   runtimeLocation: string;
 }
 
-export type RecordRequestPerformance = (context: PerformanceTelemetryContext | undefined, failed: boolean, durationMs: number) => void;
-
 const currentHour = (): string => new Date().toISOString().slice(0, 13);
 
 export function runtimeLocationFromRequest(request: Request): string {
@@ -58,12 +56,15 @@ export async function recordPerformanceError(context: PerformanceTelemetryContex
   }
 }
 
-export const recordRequestPerformanceForApiKey = (keyId: string | undefined, scheduler: BackgroundScheduler | undefined): RecordRequestPerformance => {
-  if (!keyId) return () => {};
-  return (context, failed, durationMs) => {
-    if (!context) return;
-    const keyed = { ...context, keyId };
-    const promise = failed ? recordPerformanceError(keyed, 'request_total') : recordPerformanceLatency(keyed, 'request_total', durationMs);
-    scheduler ? scheduler(promise) : void promise;
-  };
+export const recordRequestPerformanceForApiKey = (
+  apiKeyId: string | undefined,
+  scheduler: BackgroundScheduler | undefined,
+  context: PerformanceTelemetryContext | undefined,
+  failed: boolean,
+  durationMs: number,
+): void => {
+  if (!apiKeyId || !context) return;
+  const keyed = { ...context, keyId: apiKeyId };
+  const promise = failed ? recordPerformanceError(keyed, 'request_total') : recordPerformanceLatency(keyed, 'request_total', durationMs);
+  scheduler ? scheduler(promise) : void promise;
 };

@@ -2,8 +2,7 @@ import type { Context } from 'hono';
 
 import type { PerformanceApiName } from '../../../repo/types.ts';
 import { backgroundSchedulerFromContext } from '../../../runtime/background.ts';
-import { type PerformanceTelemetryContext, recordRequestPerformanceForApiKey, runtimeLocationFromRequest } from '../../shared/telemetry/performance.ts';
-import { recordUsageForApiKey } from '../../shared/telemetry/usage.ts';
+import { type PerformanceTelemetryContext, runtimeLocationFromRequest } from '../../shared/telemetry/performance.ts';
 import type { RequestContext } from '../interceptors.ts';
 import { toInternalDebugError } from '../shared/errors/internal-debug-error.ts';
 import { internalErrorResult, type ExecuteResult, type UpstreamErrorResult } from '../shared/errors/result.ts';
@@ -21,8 +20,6 @@ export const createRequestContext = (c: Context, downstreamAbortSignal: AbortSig
     apiKeyId,
     runtimeLocation: runtimeLocationFromRequest(c.req.raw),
     scheduleBackground,
-    recordUsage: recordUsageForApiKey(apiKeyId),
-    recordRequestPerformance: recordRequestPerformanceForApiKey(apiKeyId, scheduleBackground),
     clientStream,
     ...(downstreamAbortSignal !== undefined ? { downstreamAbortSignal } : {}),
   };
@@ -50,11 +47,10 @@ export const sourceErrorResult = <TEvent>(
   options: {
     sourceApi: PerformanceLlmSourceApi;
     internalStatus: number;
-    lastPerformance?: PerformanceTelemetryContext;
   },
 ): ExecuteResult<ProtocolFrame<TEvent>> => {
-  const upstreamError = thrownUpstreamErrorResult(error, options.lastPerformance);
+  const upstreamError = thrownUpstreamErrorResult(error);
   if (upstreamError) return upstreamError;
 
-  return internalErrorResult(options.internalStatus, toInternalDebugError(error, options.sourceApi), options.lastPerformance);
+  return internalErrorResult(options.internalStatus, toInternalDebugError(error, options.sourceApi));
 };

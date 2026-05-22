@@ -1,8 +1,8 @@
 import { test } from 'vitest';
 
-import { chatCompletionsStreamFramesToEvents } from './from-stream.ts';
-import { assertEquals, assertRejects } from '../../../../../test-assert.ts';
-import { sseFrame } from '../../../shared/stream/types.ts';
+import { chatCompletionsStreamFramesToEvents } from './emit.ts';
+import { assertEquals, assertRejects } from '../../../../test-assert.ts';
+import { sseFrame } from '../../shared/stream/types.ts';
 
 const collect = async <T>(events: AsyncIterable<T>): Promise<T[]> => {
   const collected: T[] = [];

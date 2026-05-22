@@ -2,9 +2,9 @@ import { withReasoningDisabledOnForcedToolChoice } from './disable-reasoning-on-
 import { withUsageStreamOptionsIncluded } from './include-usage-stream-options.ts';
 import { withDeepseekReasoningDialect } from './normalize-reasoning-dialect.ts';
 import { withUsageNormalized } from './normalize-usage.ts';
+import type { OptionalFixId } from '../../../../providers/fixes.ts';
 import type { ProviderTargetInterceptors } from '../../../../providers/types.ts';
 import type { ChatCompletionsInterceptor } from '../../../interceptors.ts';
-import type { OptionalInterceptor } from '../../optional-interceptor.ts';
 
 interface ChatCompletionsInterceptorProvider {
   enabledFixes: ReadonlySet<string>;
@@ -31,7 +31,7 @@ export const chatCompletionsOptionalInterceptors = [
     fixId: 'disable-reasoning-on-forced-tool-choice',
     run: withReasoningDisabledOnForcedToolChoice,
   },
-] as const satisfies readonly OptionalInterceptor<ChatCompletionsInterceptor>[];
+] as const satisfies readonly { fixId: OptionalFixId; run: ChatCompletionsInterceptor }[];
 
 export const interceptorsForChatCompletions = (provider: ChatCompletionsInterceptorProvider): readonly ChatCompletionsInterceptor[] => [
   ...baseInterceptors,

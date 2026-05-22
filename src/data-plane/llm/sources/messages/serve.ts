@@ -2,21 +2,22 @@ import type { Context } from 'hono';
 
 import { messagesSourceInterceptors } from './interceptors/index.ts';
 import { respondMessages } from './respond.ts';
-import { getModelCapabilities, type ModelCapabilities } from '../../../providers/capabilities.ts';
+import { getModelCapabilities } from '../../../providers/capabilities.ts';
 import { resolveModelForRequest } from '../../../providers/registry.ts';
-import type { ProviderModelRecord } from '../../../providers/types.ts';
+import type { ModelEndpoint, ProviderModelRecord } from '../../../providers/types.ts';
 import type { ChatCompletionsPayload } from '../../../shared/protocol/chat-completions.ts';
 import type { MessagesPayload, MessagesStreamEventData } from '../../../shared/protocol/messages.ts';
 import type { ResponsesPayload } from '../../../shared/protocol/responses.ts';
-import { type PerformanceTelemetryContext } from '../../../shared/telemetry/performance.ts';
 import { type LlmTargetApi, type MessagesInterceptor, type MessagesInvocation, runInterceptors } from '../../interceptors.ts';
 import type { ExecuteResult } from '../../shared/errors/result.ts';
 import type { ProtocolFrame } from '../../shared/stream/types.ts';
 import { emitToChatCompletions } from '../../targets/chat-completions/emit.ts';
 import { emitToMessages } from '../../targets/messages/emit.ts';
 import { emitToResponses } from '../../targets/responses/emit.ts';
-import { messagesViaChatCompletionsTranslation } from '../../translate/messages-via-chat-completions/index.ts';
-import { messagesViaResponsesTranslation } from '../../translate/messages-via-responses/index.ts';
+import { translateToSourceEvents as messagesViaChatCompletionsEvents } from '../../translate/messages-via-chat-completions/events.ts';
+import { buildTargetRequest as messagesViaChatCompletionsRequest } from '../../translate/messages-via-chat-completions/request.ts';
+import { translateToSourceEvents as messagesViaResponsesEvents } from '../../translate/messages-via-responses/events.ts';
+import { buildTargetRequest as messagesViaResponsesRequest } from '../../translate/messages-via-responses/request.ts';
 import { type SourceEmit, viaTranslation } from '../../translate/types.ts';
 import { createRequestContext, openAiMissingModelResult, openAiUnsupportedEndpointResult, sourceErrorResult } from '../execute.ts';
 
@@ -70,19 +71,13 @@ const messagesInvocation = <TPayload extends { model: string }>(
 });
 
 export const serveMessages = async (c: Context): Promise<Response> => {
-  let lastPerformance: PerformanceTelemetryContext | undefined;
-  const rememberPerformance = <T extends { performance?: PerformanceTelemetryContext }>(result: T): T => {
-    if (result.performance) lastPerformance = result.performance;
-    return result;
-  };
-
   let request = createRequestContext(c, undefined, false);
   let downstreamAbortController: AbortController | undefined;
 
-  const pickTarget = (c: ModelCapabilities): LlmTargetApi | null => {
-    if (c.supportsMessages) return 'messages';
-    if (c.supportsResponses) return 'responses';
-    if (c.supportsChatCompletions) return 'chat-completions';
+  const pickTarget = (endpoints: readonly ModelEndpoint[]): LlmTargetApi | null => {
+    if (endpoints.includes('messages')) return 'messages';
+    if (endpoints.includes('responses')) return 'responses';
+    if (endpoints.includes('chat_completions')) return 'chat-completions';
     return null;
   };
 
@@ -106,17 +101,25 @@ export const serveMessages = async (c: Context): Promise<Response> => {
         const attemptPayload = structuredClone(payload);
         attemptPayload.model = model;
         const capabilities = getModelCapabilities(binding.upstreamModel);
-        const target = pickTarget(capabilities);
+        const target = pickTarget(binding.upstreamModel.supportedEndpoints);
         if (!target) continue;
 
         const invocation: MessagesInvocation = messagesInvocation(binding, target, model, attemptPayload, anthropicBeta);
 
         const emits: Record<LlmTargetApi, SourceEmit<MessagesPayload, MessagesStreamEventData>> = {
-          messages: async srcPayload => rememberPerformance(await emitToMessages({ ...invocation, payload: srcPayload }, request)),
-          responses: viaTranslation(messagesViaResponsesTranslation, async (tgtPayload: ResponsesPayload) =>
-            rememberPerformance(await emitToResponses(messagesInvocation(binding, 'responses', model, tgtPayload), request))),
-          'chat-completions': viaTranslation(messagesViaChatCompletionsTranslation, async (tgtPayload: ChatCompletionsPayload) =>
-            rememberPerformance(await emitToChatCompletions(messagesInvocation(binding, 'chat-completions', model, tgtPayload), request))),
+          messages: async srcPayload => await emitToMessages({ ...invocation, payload: srcPayload }, request),
+          responses: viaTranslation({
+            targetApi: 'responses',
+            buildTargetPayload: payload => messagesViaResponsesRequest(payload),
+            translateEvents: frames => messagesViaResponsesEvents(frames),
+          }, async (tgtPayload: ResponsesPayload) =>
+            await emitToResponses(messagesInvocation(binding, 'responses', model, tgtPayload), request)),
+          'chat-completions': viaTranslation({
+            targetApi: 'chat-completions',
+            buildTargetPayload: payload => messagesViaChatCompletionsRequest(payload),
+            translateEvents: frames => messagesViaChatCompletionsEvents(frames),
+          }, async (tgtPayload: ChatCompletionsPayload) =>
+            await emitToChatCompletions(messagesInvocation(binding, 'chat-completions', model, tgtPayload), request)),
         };
 
         result = await runInterceptors(invocation, request, messagesSourceInterceptorsForProvider(binding), () =>
@@ -127,19 +130,16 @@ export const serveMessages = async (c: Context): Promise<Response> => {
       result ??= openAiUnsupportedEndpointResult(model, '/messages');
     }
 
-    return await respondMessages(c, result, wantsStream, request, lastPerformance, downstreamAbortController);
+    return await respondMessages(c, result, wantsStream, request, downstreamAbortController);
   } catch (error) {
     return await respondMessages(
       c,
       sourceErrorResult(error, {
         sourceApi: 'messages',
         internalStatus: 502,
-        lastPerformance,
       }),
       false,
-      request,
-      lastPerformance,
-      downstreamAbortController,
+      request, downstreamAbortController,
     );
   }
 };

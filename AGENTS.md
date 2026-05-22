@@ -178,15 +178,15 @@ not accept target-specific callback tables or call back into target behavior.
 Request translation is direct and pairwise. Do not introduce a canonical
 internal request IR. Each cross-protocol pair lives under
 `src/data-plane/llm/translate/<source>-via-<target>/` and contains exactly
-three files: `request.ts` builds the target-shape payload from the source
-payload, `events.ts` translates target protocol events back into source
+two files: `request.ts` builds the target-shape payload from the source
+payload, and `events.ts` translates target protocol events back into source
 protocol events (including any terminal projection of usage/stop_reason
-from terminal target frames), and `index.ts` exports a `Translation<>`
-value tying both together with its `targetApi`. Source serves hold a
-`Record<LlmTargetApi, SourceEmit<...>>` dispatch map and combine each
-non-native target with `viaTranslation(translation, targetEmit)`; there
-are no per-pair `result.ts` files. Cross-pair helpers (envelope shapers
-shared between Gemini pairs, etc.) live in `translate/shared/`.
+from terminal target frames). Source serves construct each non-native
+target as a `Translation<>` literal inline inside their
+`Record<LlmTargetApi, SourceEmit<...>>` dispatch map, combined with
+`viaTranslation(translation, targetEmit)`; there are no per-pair `index.ts`
+or `result.ts` files. Cross-pair helpers (envelope shapers shared between
+Gemini pairs, etc.) live in `translate/shared/`.
 
 Workarounds belong at the owning boundary:
 

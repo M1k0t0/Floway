@@ -1,8 +1,7 @@
 import type { GeminiFinishReason, GeminiStreamEvent, GeminiUsageMetadata } from '../../../shared/protocol/gemini.ts';
 import type { MessagesStreamEventData } from '../../../shared/protocol/messages.ts';
 import { eventFrame, type ProtocolFrame } from '../../shared/stream/types.ts';
-import { geminiResponse } from '../shared/gemini-response.ts';
-import { appendGeminiThoughtSignature, flushGeminiThoughtSignature, type GeminiThoughtSignatureState, parseStrictJsonObject, signGeminiPart } from '../shared/gemini.ts';
+import { appendGeminiThoughtSignature, flushGeminiThoughtSignature, type GeminiThoughtSignatureState, geminiResponse, parseStrictJsonObject, signGeminiPart } from '../shared/gemini.ts';
 
 const messagesStopReasonToGemini = (stopReason: Extract<MessagesStreamEventData, { type: 'message_delta' }>['delta']['stop_reason']): GeminiFinishReason => {
   switch (stopReason) {

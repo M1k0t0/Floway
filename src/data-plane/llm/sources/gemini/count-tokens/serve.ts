@@ -48,7 +48,7 @@ export const countGeminiTokens = async (c: Context, model: string): Promise<Resp
     let response: Response | undefined;
     for (const binding of resolvedModel.providers) {
       const capabilities = getModelCapabilities(binding.upstreamModel);
-      if (!capabilities.supportsMessagesCountTokens) continue;
+      if (!binding.upstreamModel.supportedEndpoints.includes('messages_count_tokens')) continue;
 
       const messagesPayload = buildMessagesTargetRequest(generateContentRequest, modelId, false, capabilities);
       const { model: _model, ...body } = messagesPayload;

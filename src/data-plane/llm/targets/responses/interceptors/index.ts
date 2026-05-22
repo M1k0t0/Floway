@@ -1,8 +1,8 @@
 import { withReasoningDisabledOnForcedToolChoice } from './disable-reasoning-on-forced-tool-choice.ts';
 import { withCyberPolicyRetried } from './retry-cyber-policy.ts';
+import type { OptionalFixId } from '../../../../providers/fixes.ts';
 import type { ProviderTargetInterceptors } from '../../../../providers/types.ts';
 import type { ResponsesInterceptor } from '../../../interceptors.ts';
-import type { OptionalInterceptor } from '../../optional-interceptor.ts';
 
 const baseInterceptors: readonly ResponsesInterceptor[] = [];
 
@@ -12,7 +12,7 @@ export const responsesOptionalInterceptors = [
     fixId: 'disable-reasoning-on-forced-tool-choice',
     run: withReasoningDisabledOnForcedToolChoice,
   },
-] as const satisfies readonly OptionalInterceptor<ResponsesInterceptor>[];
+] as const satisfies readonly { fixId: OptionalFixId; run: ResponsesInterceptor }[];
 
 export const interceptorsForResponses = (provider: { enabledFixes: ReadonlySet<string>; targetInterceptors?: ProviderTargetInterceptors }): readonly ResponsesInterceptor[] => [
   ...baseInterceptors,

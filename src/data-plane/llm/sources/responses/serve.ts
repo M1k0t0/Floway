@@ -2,13 +2,12 @@ import type { Context } from 'hono';
 
 import { responsesSourceInterceptors } from './interceptors/index.ts';
 import { respondResponses } from './respond.ts';
-import { getModelCapabilities, type ModelCapabilities } from '../../../providers/capabilities.ts';
+import { getModelCapabilities } from '../../../providers/capabilities.ts';
 import { resolveModelForRequest } from '../../../providers/registry.ts';
-import type { ProviderModelRecord } from '../../../providers/types.ts';
+import type { ModelEndpoint, ProviderModelRecord } from '../../../providers/types.ts';
 import type { ChatCompletionsPayload } from '../../../shared/protocol/chat-completions.ts';
 import type { MessagesPayload } from '../../../shared/protocol/messages.ts';
 import type { ResponsesPayload } from '../../../shared/protocol/responses.ts';
-import { type PerformanceTelemetryContext } from '../../../shared/telemetry/performance.ts';
 import { type LlmTargetApi, type ResponsesInterceptor, type ResponsesInvocation, runInterceptors } from '../../interceptors.ts';
 import type { ExecuteResult } from '../../shared/errors/result.ts';
 import type { ResponsesStreamEvent } from '../../shared/protocol/responses.ts';
@@ -16,8 +15,10 @@ import type { ProtocolFrame } from '../../shared/stream/types.ts';
 import { emitToChatCompletions } from '../../targets/chat-completions/emit.ts';
 import { emitToMessages } from '../../targets/messages/emit.ts';
 import { emitToResponses } from '../../targets/responses/emit.ts';
-import { responsesViaChatCompletionsTranslation } from '../../translate/responses-via-chat-completions/index.ts';
-import { responsesViaMessagesTranslation } from '../../translate/responses-via-messages/index.ts';
+import { translateToSourceEvents as responsesViaChatCompletionsEvents } from '../../translate/responses-via-chat-completions/events.ts';
+import { buildTargetRequest as responsesViaChatCompletionsRequest } from '../../translate/responses-via-chat-completions/request.ts';
+import { translateToSourceEvents as responsesViaMessagesEvents } from '../../translate/responses-via-messages/events.ts';
+import { buildTargetRequest as responsesViaMessagesRequest } from '../../translate/responses-via-messages/request.ts';
 import { type SourceEmit, viaTranslation } from '../../translate/types.ts';
 import { createRequestContext, openAiMissingModelResult, openAiUnsupportedEndpointResult, sourceErrorResult } from '../execute.ts';
 
@@ -87,19 +88,13 @@ const responsesInvocation = <TPayload extends { model: string }>(
 });
 
 export const serveResponses = async (c: Context): Promise<Response> => {
-  let lastPerformance: PerformanceTelemetryContext | undefined;
-  const rememberPerformance = <T extends { performance?: PerformanceTelemetryContext }>(result: T): T => {
-    if (result.performance) lastPerformance = result.performance;
-    return result;
-  };
-
   let request = createRequestContext(c, undefined, false);
   let downstreamAbortController: AbortController | undefined;
 
-  const pickTarget = (c: ModelCapabilities): LlmTargetApi | null => {
-    if (c.supportsResponses) return 'responses';
-    if (c.supportsMessages) return 'messages';
-    if (c.supportsChatCompletions) return 'chat-completions';
+  const pickTarget = (endpoints: readonly ModelEndpoint[]): LlmTargetApi | null => {
+    if (endpoints.includes('responses')) return 'responses';
+    if (endpoints.includes('messages')) return 'messages';
+    if (endpoints.includes('chat_completions')) return 'chat-completions';
     return null;
   };
 
@@ -127,17 +122,29 @@ export const serveResponses = async (c: Context): Promise<Response> => {
         const attemptPayload = structuredClone(payload);
         attemptPayload.model = model;
         const capabilities = getModelCapabilities(binding.upstreamModel);
-        const target = pickTarget(capabilities);
+        const target = pickTarget(binding.upstreamModel.supportedEndpoints);
         if (!target) continue;
 
         const invocation: ResponsesInvocation = responsesInvocation(binding, target, model, attemptPayload);
 
         const emits: Record<LlmTargetApi, SourceEmit<ResponsesPayload, ResponsesStreamEvent>> = {
-          responses: async srcPayload => rememberPerformance(await emitToResponses({ ...invocation, payload: srcPayload }, request)),
-          messages: viaTranslation(responsesViaMessagesTranslation, async (tgtPayload: MessagesPayload) =>
-            rememberPerformance(await emitToMessages(responsesInvocation(binding, 'messages', model, tgtPayload), request))),
-          'chat-completions': viaTranslation(responsesViaChatCompletionsTranslation, async (tgtPayload: ChatCompletionsPayload) =>
-            rememberPerformance(await emitToChatCompletions(responsesInvocation(binding, 'chat-completions', model, tgtPayload), request))),
+          responses: async srcPayload => await emitToResponses({ ...invocation, payload: srcPayload }, request),
+          messages: viaTranslation({
+            targetApi: 'messages',
+            buildTargetPayload: (payload, ctx) => responsesViaMessagesRequest(payload, ctx.capabilities),
+            // Synthetic response id generated per Translation invocation so that
+            // Responses callers can correlate a Messages-backed response. Built
+            // here inside the dispatch map so the lifetime is "one viaTranslation
+            // call" — fresh on every binding attempt.
+            translateEvents: (frames, ctx) => responsesViaMessagesEvents(frames, `resp_${crypto.randomUUID().replace(/-/g, '').slice(0, 24)}`, ctx.model),
+          }, async (tgtPayload: MessagesPayload) =>
+            await emitToMessages(responsesInvocation(binding, 'messages', model, tgtPayload), request)),
+          'chat-completions': viaTranslation({
+            targetApi: 'chat-completions',
+            buildTargetPayload: payload => responsesViaChatCompletionsRequest(payload),
+            translateEvents: frames => responsesViaChatCompletionsEvents(frames),
+          }, async (tgtPayload: ChatCompletionsPayload) =>
+            await emitToChatCompletions(responsesInvocation(binding, 'chat-completions', model, tgtPayload), request)),
         };
 
         result = await runInterceptors(invocation, request, responsesSourceInterceptorsForProvider(binding), () =>
@@ -148,19 +155,16 @@ export const serveResponses = async (c: Context): Promise<Response> => {
       result ??= openAiUnsupportedEndpointResult(model, '/responses');
     }
 
-    return await respondResponses(c, result, wantsStream, request, lastPerformance, downstreamAbortController);
+    return await respondResponses(c, result, wantsStream, request, downstreamAbortController);
   } catch (error) {
     return await respondResponses(
       c,
       sourceErrorResult(error, {
         sourceApi: 'responses',
         internalStatus: 502,
-        lastPerformance,
       }),
       false,
-      request,
-      lastPerformance,
-      downstreamAbortController,
+      request, downstreamAbortController,
     );
   }
 };

@@ -1,7 +1,10 @@
-import { isMessagesTerminalEvent, MESSAGES_MISSING_TERMINAL_MESSAGE } from './protocol.ts';
 import { reassembleMessagesEvents } from './reassemble.ts';
 import type { MessagesResponse, MessagesStreamEventData } from '../../../../shared/protocol/messages.ts';
 import type { ProtocolFrame } from '../../../shared/stream/types.ts';
+
+export const MESSAGES_MISSING_TERMINAL_MESSAGE = 'Messages stream ended without a message_stop event.';
+
+const isMessagesTerminalEvent = (event: Pick<MessagesStreamEventData, 'type'>): boolean => event.type === 'message_stop' || event.type === 'error';
 
 const messagesEventsUntilTerminal = async function* (frames: AsyncIterable<ProtocolFrame<MessagesStreamEventData>>): AsyncGenerator<MessagesStreamEventData> {
   for await (const frame of frames) {

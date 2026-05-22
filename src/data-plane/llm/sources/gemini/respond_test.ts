@@ -17,19 +17,15 @@ const testTelemetryModelIdentity = {
   upstream: 'test-upstream',
   modelKey: 'test-model-key',
 };
-const recordUsage = () => Promise.resolve();
-const recordRequestPerformance = () => {};
 const request = (): RequestContext => ({
   requestStartedAt: performance.now(),
   runtimeLocation: 'test',
   clientStream: false,
-  recordUsage,
-  recordRequestPerformance,
 });
 
 const requestGeminiResponse = async (result: ExecuteResult<ProtocolFrame<GeminiErrorResponse>>): Promise<Response> => {
   const app = new Hono();
-  app.get('/', c => respondGemini(c, result, false, request(), undefined, undefined));
+  app.get('/', c => respondGemini(c, result, false, request(), undefined));
   return await app.request('/');
 };
 

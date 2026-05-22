@@ -1,11 +1,10 @@
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 
-import { MESSAGES_MISSING_TERMINAL_MESSAGE } from './events/protocol.ts';
-import { collectMessagesProtocolEventsToResponse } from './events/to-response.ts';
+import { MESSAGES_MISSING_TERMINAL_MESSAGE, collectMessagesProtocolEventsToResponse } from './events/to-response.ts';
 import { messagesProtocolFrameToSSEFrame } from './events/to-sse.ts';
-import type { MessagesStreamEventData } from '../../../shared/protocol/messages.ts';
-import type { PerformanceTelemetryContext } from '../../../shared/telemetry/performance.ts';
+import type { MessagesMessageDeltaEvent, MessagesStreamEventData, MessagesUsage } from '../../../shared/protocol/messages.ts';
+import { tokenUsage } from '../../../shared/telemetry/usage.ts';
 import type { RequestContext } from '../../interceptors.ts';
 import { type InternalDebugError, toInternalDebugError } from '../../shared/errors/internal-debug-error.ts';
 import type { ExecuteResult } from '../../shared/errors/result.ts';
@@ -13,7 +12,37 @@ import { upstreamErrorToResponse } from '../../shared/errors/upstream-error.ts';
 import { type StreamCompletion, writeSSEFrames } from '../../shared/stream/proxy-sse.ts';
 import { type ProtocolFrame, sseFrame } from '../../shared/stream/types.ts';
 import { createSourceStreamState, eventResultMetadata, recordSourcePerformance, recordSourceUsage, rememberSourceFrameUsage, sourceStreamFailed } from '../respond.ts';
-import { createMessagesStreamUsageState, tokenUsageFromMessagesFrame, tokenUsageFromMessagesUsage } from '../usage.ts';
+
+type MU = MessagesUsage | NonNullable<MessagesMessageDeltaEvent['usage']>;
+
+export const tokenUsageFromMessagesUsage = (u: MU) => {
+  const read = u.cache_read_input_tokens ?? 0;
+  const created = u.cache_creation_input_tokens ?? 0;
+  return tokenUsage((u.input_tokens ?? 0) + read + created, u.output_tokens, read, created);
+};
+
+export const createMessagesStreamUsageState = () => ({
+  current: tokenUsage(),
+  gotInputFromStart: false,
+});
+
+type MessagesStreamUsageState = ReturnType<typeof createMessagesStreamUsageState>;
+const mergeMessagesUsage = (state: MessagesStreamUsageState, u: MU) => Object.assign(state.current, tokenUsageFromMessagesUsage(u));
+
+export const tokenUsageFromMessagesFrame = (frame: ProtocolFrame<MessagesStreamEventData>, state: MessagesStreamUsageState) => {
+  if (frame.type !== 'event') return null;
+  const { event } = frame;
+  if (event.type === 'message_start') {
+    const usage = mergeMessagesUsage(state, event.message.usage);
+    state.gotInputFromStart ||= usage.inputTokens > 0;
+  }
+  if (event.type === 'message_delta' && event.usage) {
+    if (!state.gotInputFromStart && event.usage.input_tokens !== undefined) {
+      mergeMessagesUsage(state, event.usage);
+    } else state.current.outputTokens = event.usage.output_tokens;
+  }
+  return event.type === 'message_stop' ? state.current : null;
+};
 
 const internalMessagesErrorPayload = (error: InternalDebugError) => ({
   type: 'error',
@@ -74,16 +103,15 @@ export const respondMessages = async (
   result: ExecuteResult<ProtocolFrame<MessagesStreamEventData>>,
   wantsStream: boolean,
   request: RequestContext,
-  lastPerformance: PerformanceTelemetryContext | undefined,
   downstreamAbortController: AbortController | undefined,
 ): Promise<Response> => {
   if (result.type === 'upstream-error') {
-    recordSourcePerformance(request, result.performance ?? lastPerformance, true);
+    recordSourcePerformance(request, result.performance, true);
     return upstreamErrorToResponse(result);
   }
 
   if (result.type === 'internal-error') {
-    recordSourcePerformance(request, result.performance ?? lastPerformance, true);
+    recordSourcePerformance(request, result.performance, true);
     return internalMessagesErrorResponse(result.status, result.error);
   }
 
@@ -95,11 +123,11 @@ export const respondMessages = async (
     try {
       const response = await collectMessagesProtocolEventsToResponse(frames);
       const metadata = await eventResultMetadata(result);
-      await recordSourceUsage(metadata.modelIdentity, tokenUsageFromMessagesUsage(response.usage), request.recordUsage);
+      await recordSourceUsage(request, metadata.modelIdentity, tokenUsageFromMessagesUsage(response.usage));
       recordSourcePerformance(request, metadata.performance, state.failed);
       return Response.json(response);
     } catch (error) {
-      recordSourcePerformance(request, result.performance ?? lastPerformance, true);
+      recordSourcePerformance(request, result.performance, true);
       return internalMessagesErrorResponse(502, toInternalDebugError(error, 'messages'));
     }
   }
@@ -114,7 +142,7 @@ export const respondMessages = async (
     } finally {
       const metadata = await eventResultMetadata(result);
       try {
-        await recordSourceUsage(metadata.modelIdentity, state.usage, request.recordUsage);
+        await recordSourceUsage(request, metadata.modelIdentity, state.usage);
       } finally {
         recordSourcePerformance(request, metadata.performance, sourceStreamFailed(completion, state));
       }

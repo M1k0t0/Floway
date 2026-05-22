@@ -56,8 +56,6 @@ const stubRequest: RequestContext = {
   requestStartedAt: 0,
   runtimeLocation: 'test',
   clientStream: false,
-  recordUsage: async () => {},
-  recordRequestPerformance: () => {},
 };
 
 test('messages forced tool_choice disables thinking and strips output_config', async () => {

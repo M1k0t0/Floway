@@ -1,11 +1,10 @@
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 
-import { GEMINI_MISSING_TERMINAL_MESSAGE, isGeminiErrorEvent, isGeminiTerminalEvent } from './events/protocol.ts';
-import { collectGeminiProtocolEventsToResponse } from './events/to-response.ts';
+import { GEMINI_MISSING_TERMINAL_MESSAGE, isGeminiErrorEvent, isGeminiTerminalEvent, collectGeminiProtocolEventsToResponse } from './events/to-response.ts';
 import { geminiProtocolFrameToSSEFrame } from './events/to-sse.ts';
-import type { GeminiErrorResponse, GeminiStreamEvent } from '../../../shared/protocol/gemini.ts';
-import type { PerformanceTelemetryContext } from '../../../shared/telemetry/performance.ts';
+import type { GeminiErrorResponse, GeminiGenerateContentResponse, GeminiStreamEvent, GeminiUsageMetadata } from '../../../shared/protocol/gemini.ts';
+import { tokenUsage } from '../../../shared/telemetry/usage.ts';
 import type { RequestContext } from '../../interceptors.ts';
 import { type InternalDebugError, toInternalDebugError } from '../../shared/errors/internal-debug-error.ts';
 import type { ExecuteResult, UpstreamErrorResult } from '../../shared/errors/result.ts';
@@ -13,7 +12,19 @@ import { decodeUpstreamErrorBody } from '../../shared/errors/upstream-error.ts';
 import { type StreamCompletion, writeSSEFrames } from '../../shared/stream/proxy-sse.ts';
 import { type ProtocolFrame, sseCommentFrame, sseFrame } from '../../shared/stream/types.ts';
 import { createSourceStreamState, eventResultMetadata, recordSourcePerformance, recordSourceUsage, rememberSourceFrameUsage, sourceStreamFailed } from '../respond.ts';
-import { tokenUsageFromGeminiFrame, tokenUsageFromGeminiResponse } from '../usage.ts';
+
+type GE = GeminiStreamEvent;
+type GR = GeminiGenerateContentResponse;
+
+export const tokenUsageFromGeminiUsageMetadata = (m: GeminiUsageMetadata) => {
+  const input = m.promptTokenCount ?? 0;
+  const output = (m.candidatesTokenCount ?? 0) + (m.thoughtsTokenCount ?? 0);
+  return tokenUsage(input, output, m.cachedContentTokenCount ?? 0);
+};
+
+export const tokenUsageFromGeminiResponse = (r: GR) => (r.usageMetadata ? tokenUsageFromGeminiUsageMetadata(r.usageMetadata) : null);
+
+export const tokenUsageFromGeminiFrame = (f: ProtocolFrame<GE>) => (f.type === 'event' && !('error' in f.event) ? tokenUsageFromGeminiResponse(f.event) : null);
 
 const geminiStatusForHttpStatus = (status: number): string => {
   switch (status) {
@@ -180,16 +191,15 @@ export const respondGemini = async (
   result: ExecuteResult<ProtocolFrame<GeminiStreamEvent>>,
   wantsStream: boolean,
   request: RequestContext,
-  lastPerformance: PerformanceTelemetryContext | undefined,
   downstreamAbortController: AbortController | undefined,
 ): Promise<Response> => {
   if (result.type === 'upstream-error') {
-    recordSourcePerformance(request, result.performance ?? lastPerformance, true);
+    recordSourcePerformance(request, result.performance, true);
     return geminiUpstreamErrorResponse(result);
   }
 
   if (result.type === 'internal-error') {
-    recordSourcePerformance(request, result.performance ?? lastPerformance, true);
+    recordSourcePerformance(request, result.performance, true);
     return internalGeminiErrorResponse(result.status, result.error);
   }
 
@@ -200,11 +210,11 @@ export const respondGemini = async (
     try {
       const response = await collectGeminiProtocolEventsToResponse(frames);
       const metadata = await eventResultMetadata(result);
-      await recordSourceUsage(metadata.modelIdentity, tokenUsageFromGeminiResponse(response), request.recordUsage);
+      await recordSourceUsage(request, metadata.modelIdentity, tokenUsageFromGeminiResponse(response));
       recordSourcePerformance(request, metadata.performance, state.failed);
       return Response.json(response);
     } catch (error) {
-      recordSourcePerformance(request, result.performance ?? lastPerformance, true);
+      recordSourcePerformance(request, result.performance, true);
       return geminiCollectErrorResponse(error);
     }
   }
@@ -219,7 +229,7 @@ export const respondGemini = async (
     } finally {
       const metadata = await eventResultMetadata(result);
       try {
-        await recordSourceUsage(metadata.modelIdentity, state.usage, request.recordUsage);
+        await recordSourceUsage(request, metadata.modelIdentity, state.usage);
       } finally {
         recordSourcePerformance(request, metadata.performance, sourceStreamFailed(completion, state));
       }

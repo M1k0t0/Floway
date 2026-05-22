@@ -21,8 +21,6 @@ const baseRequest = (): RequestContext => ({
   apiKeyId: 'key_a',
   clientStream: true,
   runtimeLocation: 'SJC',
-  recordUsage: async () => {},
-  recordRequestPerformance: () => {},
 });
 
 const testTelemetryModelIdentity = {

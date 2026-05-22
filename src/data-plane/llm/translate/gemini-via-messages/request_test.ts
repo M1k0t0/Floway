@@ -8,10 +8,6 @@ import { MESSAGES_FALLBACK_MAX_TOKENS } from '../../../shared/protocol/messages.
 
 const noCapabilities: ModelCapabilities = {
   supportedEndpoints: ['messages'],
-  supportsMessages: true,
-  supportsResponses: false,
-  supportsChatCompletions: false,
-  supportsAdaptiveThinking: false,
 };
 
 const withMaxOutputTokens = (maxOutputTokens: number): ModelCapabilities => ({

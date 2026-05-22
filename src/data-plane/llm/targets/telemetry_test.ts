@@ -53,8 +53,6 @@ const baseRequest = (
   apiKeyId: 'apiKeyId' in overrides ? overrides.apiKeyId : 'key_a',
   clientStream: overrides.stream ?? true,
   runtimeLocation: 'SJC',
-  recordUsage: async () => {},
-  recordRequestPerformance: () => {},
   scheduleBackground: (promise: Promise<unknown>) => {
     harness.background.push(promise);
   },
@@ -319,8 +317,6 @@ test('withUpstreamTelemetry skips recording when apiKeyId is absent', async () =
       requestStartedAt: 0,
       clientStream: true,
       runtimeLocation: 'SJC',
-      recordUsage: async () => {},
-      recordRequestPerformance: () => {},
       scheduleBackground: promise => background.push(promise),
     },
     'messages',

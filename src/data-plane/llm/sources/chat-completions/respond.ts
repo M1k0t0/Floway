@@ -5,8 +5,8 @@ import { CHAT_COMPLETIONS_MISSING_DONE_MESSAGE } from './events/protocol.ts';
 import { collectChatProtocolEventsToCompletion } from './events/reassemble.ts';
 import { chatProtocolFrameToSSEFrame } from './events/to-sse.ts';
 import { chatCompletionsErrorPayloadMessage } from '../../../shared/protocol/chat-completions-errors.ts';
-import type { ChatCompletionChunk } from '../../../shared/protocol/chat-completions.ts';
-import type { PerformanceTelemetryContext } from '../../../shared/telemetry/performance.ts';
+import type { ChatCompletionChunk, ChatCompletionResponse } from '../../../shared/protocol/chat-completions.ts';
+import { tokenUsage } from '../../../shared/telemetry/usage.ts';
 import type { RequestContext } from '../../interceptors.ts';
 import { type InternalDebugError, toInternalDebugError } from '../../shared/errors/internal-debug-error.ts';
 import type { ExecuteResult } from '../../shared/errors/result.ts';
@@ -14,7 +14,17 @@ import { upstreamErrorToResponse } from '../../shared/errors/upstream-error.ts';
 import { type StreamCompletion, writeSSEFrames } from '../../shared/stream/proxy-sse.ts';
 import { type ProtocolFrame, sseCommentFrame, sseFrame } from '../../shared/stream/types.ts';
 import { createSourceStreamState, eventResultMetadata, recordSourcePerformance, recordSourceUsage, rememberSourceFrameUsage, sourceStreamFailed } from '../respond.ts';
-import { tokenUsageFromChatFrame, tokenUsageFromChatUsage } from '../usage.ts';
+
+type CC = ChatCompletionChunk;
+type CU = NonNullable<ChatCompletionResponse['usage']>;
+
+export const tokenUsageFromChatUsage = (u: CU) => {
+  const read = u.prompt_tokens_details?.cached_tokens ?? 0;
+  return tokenUsage(u.prompt_tokens, u.completion_tokens, read);
+};
+
+export const tokenUsageFromChatFrame = (f: ProtocolFrame<CC>) =>
+  f.type === 'event' && Array.isArray(f.event.choices) && f.event.choices.length === 0 && f.event.usage ? tokenUsageFromChatUsage(f.event.usage) : null;
 
 const internalChatErrorPayload = (error: InternalDebugError) => ({
   error: {
@@ -68,16 +78,15 @@ export const respondChatCompletions = async (
   wantsStream: boolean,
   includeUsageChunk: boolean,
   request: RequestContext,
-  lastPerformance: PerformanceTelemetryContext | undefined,
   downstreamAbortController: AbortController | undefined,
 ): Promise<Response> => {
   if (result.type === 'upstream-error') {
-    recordSourcePerformance(request, result.performance ?? lastPerformance, true);
+    recordSourcePerformance(request, result.performance, true);
     return upstreamErrorToResponse(result);
   }
 
   if (result.type === 'internal-error') {
-    recordSourcePerformance(request, result.performance ?? lastPerformance, true);
+    recordSourcePerformance(request, result.performance, true);
     return internalChatErrorResponse(result.status, result.error);
   }
 
@@ -89,11 +98,11 @@ export const respondChatCompletions = async (
       const response = await collectChatProtocolEventsToCompletion(frames);
       const metadata = await eventResultMetadata(result);
       const usage = response.usage ? tokenUsageFromChatUsage(response.usage) : null;
-      await recordSourceUsage(metadata.modelIdentity, usage, request.recordUsage);
+      await recordSourceUsage(request, metadata.modelIdentity, usage);
       recordSourcePerformance(request, metadata.performance, state.failed);
       return Response.json(response);
     } catch (error) {
-      recordSourcePerformance(request, result.performance ?? lastPerformance, true);
+      recordSourcePerformance(request, result.performance, true);
       return internalChatErrorResponse(502, toInternalDebugError(error, 'chat-completions'));
     }
   }
@@ -108,7 +117,7 @@ export const respondChatCompletions = async (
     } finally {
       const metadata = await eventResultMetadata(result);
       try {
-        await recordSourceUsage(metadata.modelIdentity, state.usage, request.recordUsage);
+        await recordSourceUsage(request, metadata.modelIdentity, state.usage);
       } finally {
         recordSourcePerformance(request, metadata.performance, sourceStreamFailed(completion, state));
       }

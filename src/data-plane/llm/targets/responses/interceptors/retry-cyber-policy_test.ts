@@ -39,8 +39,6 @@ const stubRequest = (overrides: { downstreamAbortSignal?: AbortSignal } = {}): R
   requestStartedAt: 0,
   runtimeLocation: 'test',
   clientStream: true,
-  recordUsage: async () => {},
-  recordRequestPerformance: () => {},
   ...(overrides.downstreamAbortSignal !== undefined ? { downstreamAbortSignal: overrides.downstreamAbortSignal } : {}),
 });
 

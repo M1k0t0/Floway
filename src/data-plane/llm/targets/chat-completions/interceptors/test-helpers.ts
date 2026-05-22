@@ -49,6 +49,4 @@ export const stubRequestContext: RequestContext = {
   requestStartedAt: 0,
   runtimeLocation: 'test',
   clientStream: false,
-  recordUsage: async () => {},
-  recordRequestPerformance: () => {},
 };

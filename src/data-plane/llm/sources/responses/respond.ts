@@ -3,7 +3,8 @@ import { streamSSE } from 'hono/streaming';
 
 import { collectResponsesProtocolEventsToResult } from './events/reassemble.ts';
 import { responsesProtocolFrameToSSEFrame } from './events/to-sse.ts';
-import type { PerformanceTelemetryContext } from '../../../shared/telemetry/performance.ts';
+import type { ResponseStreamEvent, ResponsesResult } from '../../../shared/protocol/responses.ts';
+import { tokenUsage } from '../../../shared/telemetry/usage.ts';
 import type { RequestContext } from '../../interceptors.ts';
 import { type InternalDebugError, toInternalDebugError } from '../../shared/errors/internal-debug-error.ts';
 import type { ExecuteResult } from '../../shared/errors/result.ts';
@@ -13,7 +14,18 @@ import { isResponsesTerminalEvent, RESPONSES_MISSING_TERMINAL_MESSAGE } from '..
 import { type StreamCompletion, writeSSEFrames } from '../../shared/stream/proxy-sse.ts';
 import { type ProtocolFrame, sseCommentFrame, sseFrame } from '../../shared/stream/types.ts';
 import { createSourceStreamState, eventResultMetadata, recordSourcePerformance, recordSourceUsage, rememberSourceFrameUsage, sourceStreamFailed } from '../respond.ts';
-import { tokenUsageFromResponsesFrame, tokenUsageFromResponsesResult } from '../usage.ts';
+
+type RE = ResponseStreamEvent;
+type RR = ResponsesResult;
+
+export const tokenUsageFromResponsesResult = (r: RR) => {
+  const u = r.usage;
+  if (!u) return null;
+  const read = u.input_tokens_details?.cached_tokens ?? 0;
+  return tokenUsage(u.input_tokens, u.output_tokens, read);
+};
+
+export const tokenUsageFromResponsesFrame = (f: ProtocolFrame<RE>) => (f.type === 'event' && 'response' in f.event ? tokenUsageFromResponsesResult((f.event as { response: RR }).response) : null);
 
 const internalResponsesErrorPayload = (error: InternalDebugError) => ({
   error: {
@@ -81,16 +93,15 @@ export const respondResponses = async (
   result: ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>,
   wantsStream: boolean,
   request: RequestContext,
-  lastPerformance: PerformanceTelemetryContext | undefined,
   downstreamAbortController: AbortController | undefined,
 ): Promise<Response> => {
   if (result.type === 'upstream-error') {
-    recordSourcePerformance(request, result.performance ?? lastPerformance, true);
+    recordSourcePerformance(request, result.performance, true);
     return upstreamErrorToResponse(result);
   }
 
   if (result.type === 'internal-error') {
-    recordSourcePerformance(request, result.performance ?? lastPerformance, true);
+    recordSourcePerformance(request, result.performance, true);
     return internalResponsesErrorResponse(result.status, result.error);
   }
 
@@ -101,11 +112,11 @@ export const respondResponses = async (
     try {
       const response = await collectResponsesProtocolEventsToResult(frames);
       const metadata = await eventResultMetadata(result);
-      await recordSourceUsage(metadata.modelIdentity, tokenUsageFromResponsesResult(response), request.recordUsage);
+      await recordSourceUsage(request, metadata.modelIdentity, tokenUsageFromResponsesResult(response));
       recordSourcePerformance(request, metadata.performance, state.failed || response.status === 'failed');
       return Response.json(response);
     } catch (error) {
-      recordSourcePerformance(request, result.performance ?? lastPerformance, true);
+      recordSourcePerformance(request, result.performance, true);
       return internalResponsesErrorResponse(502, toInternalDebugError(error, 'responses'));
     }
   }
@@ -120,7 +131,7 @@ export const respondResponses = async (
     } finally {
       const metadata = await eventResultMetadata(result);
       try {
-        await recordSourceUsage(metadata.modelIdentity, state.usage, request.recordUsage);
+        await recordSourceUsage(request, metadata.modelIdentity, state.usage);
       } finally {
         recordSourcePerformance(request, metadata.performance, sourceStreamFailed(completion, state));
       }

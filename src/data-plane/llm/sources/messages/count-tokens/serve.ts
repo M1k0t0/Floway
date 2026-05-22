@@ -1,6 +1,5 @@
 import type { Context } from 'hono';
 
-import { getModelCapabilities } from '../../../../providers/capabilities.ts';
 import { resolveModelForRequest } from '../../../../providers/registry.ts';
 import { ModelsFetchError } from '../../../../providers/upstream-model-cache.ts';
 import type { MessagesPayload } from '../../../../shared/protocol/messages.ts';
@@ -36,7 +35,7 @@ export const countTokens = async (c: Context) => {
 
     let resp: Response | undefined;
     for (const binding of model.providers) {
-      if (!getModelCapabilities(binding.upstreamModel).supportsMessagesCountTokens) {
+      if (!binding.upstreamModel.supportedEndpoints.includes('messages_count_tokens')) {
         continue;
       }
 

@@ -1,8 +1,6 @@
 import { getRepo } from '../../../repo/index.ts';
 import type { TelemetryModelIdentity, TokenUsage } from '../../../repo/types.ts';
 
-export type RecordUsage = (modelIdentity: TelemetryModelIdentity, usage: TokenUsage) => Promise<void>;
-
 const currentHour = (): string => new Date().toISOString().slice(0, 13);
 
 export const hasTokenUsage = (usage: TokenUsage): boolean => usage.inputTokens > 0 || usage.outputTokens > 0 || usage.cacheReadTokens > 0 || usage.cacheCreationTokens > 0;
@@ -45,10 +43,9 @@ export const recordTokenUsage = async (keyId: string, modelIdentity: TelemetryMo
   ]);
 };
 
-export const recordUsageForApiKey = (keyId: string | undefined): RecordUsage => {
+export const recordTokenUsageForApiKey = async (apiKeyId: string | undefined, modelIdentity: TelemetryModelIdentity, usage: TokenUsage): Promise<void> => {
   // Dashboard playground requests authenticate with ADMIN_KEY and intentionally
-  // have no API key id. They still pass an explicit recorder so billable source
-  // responders cannot accidentally make usage recording optional.
-  if (!keyId) return () => Promise.resolve();
-  return (modelIdentity, usage) => recordTokenUsage(keyId, modelIdentity, usage);
+  // have no API key id; usage is not recorded for those.
+  if (!apiKeyId) return;
+  await recordTokenUsage(apiKeyId, modelIdentity, usage);
 };

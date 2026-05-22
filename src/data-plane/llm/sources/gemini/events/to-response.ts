@@ -1,6 +1,13 @@
-import { GEMINI_MISSING_TERMINAL_MESSAGE, isGeminiErrorEvent, isGeminiTerminalEvent } from './protocol.ts';
-import type { GeminiCandidate, GeminiGenerateContentResponse, GeminiPart, GeminiStreamEvent } from '../../../../shared/protocol/gemini.ts';
+import type { GeminiCandidate, GeminiErrorResponse, GeminiGenerateContentResponse, GeminiPart, GeminiStreamEvent } from '../../../../shared/protocol/gemini.ts';
 import type { ProtocolFrame } from '../../../shared/stream/types.ts';
+
+export const GEMINI_MISSING_TERMINAL_MESSAGE = 'Gemini stream ended without a terminal event.';
+
+export const isGeminiErrorEvent = (event: GeminiStreamEvent): event is GeminiErrorResponse => 'error' in event;
+
+const isGeminiFinishedEvent = (event: GeminiStreamEvent): boolean => 'candidates' in event && event.candidates?.some(candidate => candidate.finishReason !== undefined) === true;
+
+export const isGeminiTerminalEvent = (event: GeminiStreamEvent): boolean => isGeminiErrorEvent(event) || isGeminiFinishedEvent(event);
 
 const hasOnlyTextShape = (part: GeminiPart): boolean =>
   part.inlineData === undefined &&

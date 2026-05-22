@@ -6,13 +6,12 @@ import type { Context } from 'hono';
 import type { BackgroundScheduler } from '../../runtime/background.ts';
 import { backgroundSchedulerFromContext } from '../../runtime/background.ts';
 import { toInternalDebugError } from '../llm/shared/errors/internal-debug-error.ts';
-import { getModelCapabilities } from '../providers/capabilities.ts';
 import { resolveModelForRequest } from '../providers/registry.ts';
 import type { ProviderModelRecord } from '../providers/types.ts';
 import { ModelsFetchError } from '../providers/upstream-model-cache.ts';
 import type { PerformanceTelemetryContext } from '../shared/telemetry/performance.ts';
 import { recordPerformanceError, recordPerformanceLatency, recordRequestPerformanceForApiKey, runtimeLocationFromRequest } from '../shared/telemetry/performance.ts';
-import { recordUsageForApiKey, tokenUsageFromPromptTokenResponse } from '../shared/telemetry/usage.ts';
+import { recordTokenUsageForApiKey, tokenUsageFromPromptTokenResponse } from '../shared/telemetry/usage.ts';
 
 interface EmbeddingsRequestBody {
   model?: unknown;
@@ -95,7 +94,6 @@ export const embeddings = async (c: Context): Promise<Response> => {
   const apiKeyId = c.get('apiKeyId') as string | undefined;
   const runtimeLocation = runtimeLocationFromRequest(c.req.raw);
   const scheduleBackground = backgroundSchedulerFromContext(c);
-  const recordRequestPerformance = recordRequestPerformanceForApiKey(apiKeyId, scheduleBackground);
   let lastPerformance: PerformanceTelemetryContext | undefined;
 
   try {
@@ -103,7 +101,6 @@ export const embeddings = async (c: Context): Promise<Response> => {
     if (request.type === 'invalid') {
       return apiErrorResponse(c, request.message, 400);
     }
-    const recordUsage = recordUsageForApiKey(apiKeyId);
 
     const { id: modelId, model } = await resolveModelForRequest(request.model);
     if (!model) {
@@ -111,7 +108,7 @@ export const embeddings = async (c: Context): Promise<Response> => {
     }
 
     for (const binding of model.providers) {
-      if (!getModelCapabilities(binding.upstreamModel).supportsEmbeddings) {
+      if (!binding.upstreamModel.supportedEndpoints.includes('embeddings')) {
         continue;
       }
 
@@ -123,7 +120,7 @@ export const embeddings = async (c: Context): Promise<Response> => {
 
       if (!response.ok) {
         recordUpstreamPerformance(scheduleBackground, performanceContext, true, performance.now() - upstreamStartedAt);
-        recordRequestPerformance(performanceContext, true, performance.now() - requestStartedAt);
+        recordRequestPerformanceForApiKey(apiKeyId, scheduleBackground, performanceContext, true, performance.now() - requestStartedAt);
         return proxyJsonResponse(response);
       }
 
@@ -132,7 +129,8 @@ export const embeddings = async (c: Context): Promise<Response> => {
         const usage = tokenUsageFromPromptTokenResponse(parsed);
         recordUpstreamPerformance(scheduleBackground, performanceContext, false, performance.now() - upstreamStartedAt);
         if (usage) {
-          await recordUsage(
+          await recordTokenUsageForApiKey(
+            apiKeyId,
             {
               model: modelId,
               upstream: binding.upstream,
@@ -145,7 +143,7 @@ export const embeddings = async (c: Context): Promise<Response> => {
         recordUpstreamPerformance(scheduleBackground, performanceContext, true, performance.now() - upstreamStartedAt);
         throw error;
       }
-      recordRequestPerformance(performanceContext, false, performance.now() - requestStartedAt);
+      recordRequestPerformanceForApiKey(apiKeyId, scheduleBackground, performanceContext, false, performance.now() - requestStartedAt);
       return proxyJsonResponse(response);
     }
 
@@ -154,7 +152,7 @@ export const embeddings = async (c: Context): Promise<Response> => {
     const response = modelsLoadErrorResponse(e);
     if (response) return response;
 
-    recordRequestPerformance(lastPerformance, true, performance.now() - requestStartedAt);
+    recordRequestPerformanceForApiKey(apiKeyId, scheduleBackground, lastPerformance, true, performance.now() - requestStartedAt);
     return internalDebugErrorResponse(c, e);
   }
 };

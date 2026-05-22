@@ -25,8 +25,6 @@ const stubRequest: RequestContext = {
   requestStartedAt: 0,
   runtimeLocation: 'test',
   clientStream: false,
-  recordUsage: async () => {},
-  recordRequestPerformance: () => {},
 };
 
 test('withConnectionMismatchRetried does not retry unrelated upstream errors', async () => {

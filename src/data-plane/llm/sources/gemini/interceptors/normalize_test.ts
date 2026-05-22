@@ -28,8 +28,6 @@ const stubRequest: RequestContext = {
   requestStartedAt: 0,
   runtimeLocation: 'test',
   clientStream: false,
-  recordUsage: async () => {},
-  recordRequestPerformance: () => {},
 };
 
 const runStripSafetySettings = async (payload: GeminiGenerateContentRequest): Promise<void> => {

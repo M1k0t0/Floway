@@ -27,8 +27,6 @@ const stubRequest: RequestContext = {
   requestStartedAt: 0,
   runtimeLocation: 'test',
   clientStream: false,
-  recordUsage: async () => {},
-  recordRequestPerformance: () => {},
 };
 
 const run = async (payload: ResponsesPayload): Promise<ResponsesPayload> => {

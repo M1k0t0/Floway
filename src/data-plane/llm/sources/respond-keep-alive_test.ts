@@ -118,29 +118,25 @@ const testTelemetryModelIdentity = {
   modelKey: 'test-model-key',
 };
 
-const recordUsage = () => Promise.resolve();
-const recordRequestPerformance = () => {};
 const requestStartedAt = performance.now();
 const request = (): RequestContext => ({
   requestStartedAt,
   runtimeLocation: 'test',
   clientStream: true,
-  recordUsage,
-  recordRequestPerformance,
 });
 
 test('Messages streaming keepalive uses Anthropic ping events', async () => {
-  await assertSourceKeepAlive<MessagesStreamEventData>((c, events) => respondMessages(c, eventResult(events, testTelemetryModelIdentity), true, request(), undefined, undefined), 'event: ping\ndata: {"type":"ping"}\n\n');
+  await assertSourceKeepAlive<MessagesStreamEventData>((c, events) => respondMessages(c, eventResult(events, testTelemetryModelIdentity), true, request(), undefined), 'event: ping\ndata: {"type":"ping"}\n\n');
 });
 
 test('Responses streaming keepalive uses SSE comments', async () => {
-  await assertSourceKeepAlive<ResponsesStreamEvent>((c, events) => respondResponses(c, eventResult(events, testTelemetryModelIdentity), true, request(), undefined, undefined), ': keepalive\n\n');
+  await assertSourceKeepAlive<ResponsesStreamEvent>((c, events) => respondResponses(c, eventResult(events, testTelemetryModelIdentity), true, request(), undefined), ': keepalive\n\n');
 });
 
 test('Chat Completions streaming keepalive uses SSE comments', async () => {
-  await assertSourceKeepAlive<ChatCompletionChunk>((c, events) => respondChatCompletions(c, eventResult(events, testTelemetryModelIdentity), true, true, request(), undefined, undefined), ': keepalive\n\n');
+  await assertSourceKeepAlive<ChatCompletionChunk>((c, events) => respondChatCompletions(c, eventResult(events, testTelemetryModelIdentity), true, true, request(), undefined), ': keepalive\n\n');
 });
 
 test('Gemini streaming keepalive uses SSE comments', async () => {
-  await assertSourceKeepAlive<GeminiStreamEvent>((c, events) => respondGemini(c, eventResult(events, testTelemetryModelIdentity), true, request(), undefined, undefined), ': keepalive\n\n');
+  await assertSourceKeepAlive<GeminiStreamEvent>((c, events) => respondGemini(c, eventResult(events, testTelemetryModelIdentity), true, request(), undefined), ': keepalive\n\n');
 });

@@ -1,9 +1,9 @@
 import { test } from 'vitest';
 
-import { createMessagesStreamUsageState, tokenUsageFromMessagesFrame } from './usage.ts';
-import { assertEquals } from '../../../test-assert.ts';
-import type { MessagesStreamEventData } from '../../shared/protocol/messages.ts';
-import { eventFrame } from '../shared/stream/types.ts';
+import { createMessagesStreamUsageState, tokenUsageFromMessagesFrame } from './respond.ts';
+import { assertEquals } from '../../../../test-assert.ts';
+import type { MessagesStreamEventData } from '../../../shared/protocol/messages.ts';
+import { eventFrame } from '../../shared/stream/types.ts';
 
 const stop = () => eventFrame({ type: 'message_stop' } satisfies MessagesStreamEventData);
 
