@@ -946,15 +946,17 @@ export function dashboardAssets() {
                 if (first) this.chatModelId = first.id;
               }
 
-              // All pickers list every capable model regardless of upstream
-              // provider. Backend model merging has already collapsed dated
-              // and variant aliases (-xhigh, -1m) into base ids, so we just
-              // dedupe by id and apply the picker-specific sort.
+              // Pickers are scoped to the model families each CLI actually
+              // accepts: Claude Code only takes claude-* ids, and Codex only
+              // takes gpt-*/codex-* ids. Backend model merging has already
+              // collapsed dated and variant aliases (-xhigh, -1m) into base
+              // ids, so we just dedupe and apply the picker-specific sort.
               const dedupeIds = ms => [...new Set(ms.map(m => m.id))];
 
               this.claudeContextMap = Object.fromEntries(data.filter(m => m.id.startsWith('claude-') && m.supported_endpoints?.includes('/v1/messages')).map(m => [m.id, modelContextWindow(m)]));
 
               const messagesCapable = data.filter(m => {
+                if (!m.id.startsWith('claude-')) return false;
                 const eps = m.supported_endpoints ?? [];
                 return eps.includes('/v1/messages') || eps.includes('/responses') || eps.includes('/chat/completions');
               });
@@ -970,6 +972,7 @@ export function dashboardAssets() {
               // supports /responses natively or that can be served by
               // responses-via-chat-completions translation qualifies.
               const codexCapable = data.filter(m => {
+                if (!m.id.startsWith('gpt-') && !m.id.startsWith('codex-')) return false;
                 const eps = m.supported_endpoints ?? [];
                 return eps.includes('/responses') || eps.includes('/chat/completions');
               });
