@@ -15,8 +15,8 @@ export const emitToMessages = async (invocation: MessagesInvocation, request: Re
   try {
     return await runInterceptors(invocation, request, interceptorsForMessages(invocation), async () => {
       const upstreamStartedAt = performance.now();
-      const { model: _model, ...body } = invocation.payload;
-      const providerResult = await invocation.provider.callMessages(invocation.upstreamModel, body as Omit<MessagesPayload, 'model'>, request.downstreamAbortSignal, invocation.anthropicBeta);
+      const { model: _model, ...body }: MessagesPayload = invocation.payload;
+      const providerResult = await invocation.provider.callMessages(invocation.upstreamModel, body, request.downstreamAbortSignal, invocation.anthropicBeta);
       modelIdentity = targetModelIdentity(invocation, providerResult.modelKey);
       const result = await targetProviderResultToFrames(invocation, request, targetApi, providerResult, modelIdentity, upstreamStartedAt);
 

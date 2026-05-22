@@ -2,9 +2,8 @@ import type { Context } from 'hono';
 
 import { countGeminiTokens } from './count-tokens/serve.ts';
 import { geminiSourceInterceptors } from './interceptors/index.ts';
-import { planGeminiRequest } from './plan.ts';
 import { geminiRpcErrorResponse, respondGemini } from './respond.ts';
-import { getModelCapabilities } from '../../../providers/capabilities.ts';
+import { getModelCapabilities, type ModelCapabilities } from '../../../providers/capabilities.ts';
 import { resolveModelForRequest } from '../../../providers/registry.ts';
 import type { ProviderModelRecord } from '../../../providers/types.ts';
 import type { ChatCompletionsPayload } from '../../../shared/protocol/chat-completions.ts';
@@ -71,6 +70,15 @@ export const serveGemini = async (c: Context, model: string, wantsStream: boolea
   const downstreamAbortController = wantsStream ? new AbortController() : undefined;
   const request = createRequestContext(c, downstreamAbortController?.signal, wantsStream);
 
+  // Gemini has no native upstream target in the provider API; prefer Chat
+  // Completions, then Messages, then Responses.
+  const pickTarget = (c: ModelCapabilities): LlmTargetApi | null => {
+    if (c.supportsChatCompletions) return 'chat-completions';
+    if (c.supportsMessages) return 'messages';
+    if (c.supportsResponses) return 'responses';
+    return null;
+  };
+
   try {
     const payload = await c.req.json<GeminiGenerateContentRequest>();
 
@@ -83,12 +91,12 @@ export const serveGemini = async (c: Context, model: string, wantsStream: boolea
       for (const binding of resolved.providers) {
         const attemptPayload = structuredClone(payload);
         const capabilities = getModelCapabilities(binding.upstreamModel);
-        const plan = planGeminiRequest(capabilities);
-        if (!plan) continue;
+        const target = pickTarget(capabilities);
+        if (!target) continue;
 
         // Gemini source payload has no `model` field on the request body; the
         // invocation carries the resolved id for telemetry/dispatch use.
-        const invocation: GeminiInvocation = geminiInvocation(binding, plan.target, modelId, attemptPayload);
+        const invocation: GeminiInvocation = geminiInvocation(binding, target, modelId, attemptPayload);
 
         const emits: Record<LlmTargetApi, SourceEmit<GeminiGenerateContentRequest, GeminiStreamEvent>> = {
           messages: viaTranslation(geminiViaMessagesTranslation, async (tgtPayload: MessagesPayload) =>
@@ -100,7 +108,7 @@ export const serveGemini = async (c: Context, model: string, wantsStream: boolea
         };
 
         result = await runInterceptors(invocation, request, geminiSourceInterceptorsForProvider(binding), () =>
-          emits[plan.target](invocation.payload, { model: modelId, wantsStream, capabilities }));
+          emits[target](invocation.payload, { model: modelId, wantsStream, capabilities }));
         break;
       }
 

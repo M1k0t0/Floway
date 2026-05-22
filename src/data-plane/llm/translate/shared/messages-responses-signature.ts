@@ -1,10 +1,9 @@
 import { makeResponsesReasoningId } from './reasoning.ts';
 import type { MessagesRedactedThinkingBlock, MessagesThinkingBlock } from '../../../shared/protocol/messages.ts';
-import type { ResponseInputReasoning, ResponseOutputReasoning } from '../../../shared/protocol/responses.ts';
+import type { ResponseInputReasoning } from '../../../shared/protocol/responses.ts';
+import type { ResponsesReasoningItem } from '../../shared/protocol/responses.ts';
 
 export type MessagesReasoningBlock = MessagesThinkingBlock | MessagesRedactedThinkingBlock;
-
-export type ResponsesReasoningItem = ResponseInputReasoning | ResponseOutputReasoning;
 
 /**
  * Pack a Responses reasoning item's `id` and `encrypted_content` into an

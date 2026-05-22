@@ -1,9 +1,8 @@
 import { DEFAULT_WEB_SEARCH_RESULT_COUNT, type WebSearchProviderRequest, type WebSearchProviderResult } from '../types.ts';
 import { extractWebSearchProviderErrorMessage, toWebSearchTextBlocks, validateWebSearchQuery } from './shared.ts';
+import { isJsonObject } from '../../../../shared/json-helpers.ts';
 
 const TAVILY_SEARCH_URL = 'https://api.tavily.com/search';
-
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const normalizeDomains = (domains?: string[]): string[] | undefined => {
   const normalized = domains?.map(domain => domain.trim()).filter(Boolean);
@@ -11,7 +10,7 @@ const normalizeDomains = (domains?: string[]): string[] | undefined => {
 };
 
 const normalizeResult = (value: unknown): Extract<WebSearchProviderResult, { type: 'ok' }>['results'][number] | null => {
-  if (!isRecord(value) || typeof value.title !== 'string' || typeof value.url !== 'string') {
+  if (!isJsonObject(value) || typeof value.title !== 'string' || typeof value.url !== 'string') {
     return null;
   }
 
@@ -91,7 +90,7 @@ export const createTavilyWebSearchProvider =
         }
 
         const payload = await response.json();
-        const results = isRecord(payload) && Array.isArray(payload.results) ? payload.results.map(normalizeResult).filter((entry): entry is NonNullable<typeof entry> => entry !== null) : [];
+        const results = isJsonObject(payload) && Array.isArray(payload.results) ? payload.results.map(normalizeResult).filter((entry): entry is NonNullable<typeof entry> => entry !== null) : [];
 
         return {
           type: 'ok',

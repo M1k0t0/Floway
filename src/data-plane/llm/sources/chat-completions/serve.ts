@@ -1,8 +1,7 @@
 import type { Context } from 'hono';
 
-import { planChatRequest } from './plan.ts';
 import { respondChatCompletions } from './respond.ts';
-import { getModelCapabilities } from '../../../providers/capabilities.ts';
+import { getModelCapabilities, type ModelCapabilities } from '../../../providers/capabilities.ts';
 import { resolveModelForRequest } from '../../../providers/registry.ts';
 import type { ProviderModelRecord } from '../../../providers/types.ts';
 import type { ChatCompletionChunk, ChatCompletionsPayload } from '../../../shared/protocol/chat-completions.ts';
@@ -52,6 +51,13 @@ export const serveChatCompletions = async (c: Context): Promise<Response> => {
   // Chat SSE exposes usage only when the caller requested `include_usage`.
   let includeUsageChunk = false;
 
+  const pickTarget = (c: ModelCapabilities): LlmTargetApi | null => {
+    if (c.supportsChatCompletions) return 'chat-completions';
+    if (c.supportsMessages) return 'messages';
+    if (c.supportsResponses) return 'responses';
+    return null;
+  };
+
   try {
     const payload = await c.req.json<ChatCompletionsPayload>();
     includeUsageChunk = payload.stream_options?.include_usage === true;
@@ -69,10 +75,10 @@ export const serveChatCompletions = async (c: Context): Promise<Response> => {
         const attemptPayload = structuredClone(payload);
         attemptPayload.model = model;
         const capabilities = getModelCapabilities(binding.upstreamModel);
-        const plan = planChatRequest(capabilities);
-        if (!plan) continue;
+        const target = pickTarget(capabilities);
+        if (!target) continue;
 
-        const invocation: ChatCompletionsInvocation = chatInvocation(binding, plan.target, model, attemptPayload);
+        const invocation: ChatCompletionsInvocation = chatInvocation(binding, target, model, attemptPayload);
 
         const emits: Record<LlmTargetApi, SourceEmit<ChatCompletionsPayload, ChatCompletionChunk>> = {
           'chat-completions': async srcPayload => rememberPerformance(await emitToChatCompletions({ ...invocation, payload: srcPayload }, request)),
@@ -83,7 +89,7 @@ export const serveChatCompletions = async (c: Context): Promise<Response> => {
         };
 
         result = await runInterceptors(invocation, request, chatSourceInterceptorsForProvider(binding), () =>
-          emits[plan.target](invocation.payload, { model, wantsStream, capabilities }));
+          emits[target](invocation.payload, { model, wantsStream, capabilities }));
         break;
       }
 

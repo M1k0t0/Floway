@@ -4,12 +4,9 @@ import { translateToSourceEvents } from './events.ts';
 import { assertEquals, assertRejects } from '../../../../test-assert.ts';
 import type { MessagesStreamEventData } from '../../../shared/protocol/messages.ts';
 import type { ResponsesResult, ResponseStreamEvent } from '../../../shared/protocol/responses.ts';
+import type { ResponsesStreamEvent } from '../../shared/protocol/responses.ts';
 import { eventFrame, type ProtocolFrame } from '../../shared/stream/types.ts';
 import { responsesResultToEvents } from '../../targets/responses/events/from-result.ts';
-
-type UpstreamResponseStreamEvent = ResponseStreamEvent & {
-  sequence_number?: number;
-};
 
 const makeResponse = (status: ResponsesResult['status']): ResponsesResult => ({
   id: 'resp_123',
@@ -31,7 +28,7 @@ const makeResponse = (status: ResponsesResult['status']): ResponsesResult => ({
   },
 });
 
-const toProtocolFrame = (event: ResponseStreamEvent): ProtocolFrame<UpstreamResponseStreamEvent> => eventFrame({ ...event, sequence_number: 0 });
+const toProtocolFrame = (event: ResponseStreamEvent): ProtocolFrame<ResponsesStreamEvent> => eventFrame({ ...event, sequence_number: 0 });
 
 const drain = async <T>(frames: AsyncIterable<T>): Promise<void> => {
   for await (const _frame of frames) {

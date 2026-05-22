@@ -149,6 +149,9 @@ const drainSSEFrames = async (
   } finally {
     if (!completed) {
       const stopped = iterator.return?.();
+      // Downstream already cancelled; cleanup errors from the upstream
+      // iterator have nowhere to surface to. Awaiting the rejection would
+      // leak it as an unhandled rejection.
       if (stoppedByDownstream) stopped?.catch(() => {});
       else await stopped;
     }

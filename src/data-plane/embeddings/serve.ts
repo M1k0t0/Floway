@@ -5,6 +5,7 @@ import type { Context } from 'hono';
 
 import type { BackgroundScheduler } from '../../runtime/background.ts';
 import { backgroundSchedulerFromContext } from '../../runtime/background.ts';
+import { toInternalDebugError } from '../llm/shared/errors/internal-debug-error.ts';
 import { getModelCapabilities } from '../providers/capabilities.ts';
 import { resolveModelForRequest } from '../providers/registry.ts';
 import type { ProviderModelRecord } from '../providers/types.ts';
@@ -56,9 +57,10 @@ const modelsLoadErrorResponse = (error: unknown): Response | null =>
       })
     : null;
 
-const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+const apiErrorResponse = (c: Context, message: string, status: 400 | 404): Response => c.json({ error: { message, type: 'api_error' } }, status);
 
-const apiErrorResponse = (c: Context, message: string, status: 400 | 404 | 502): Response => c.json({ error: { message, type: 'api_error' } }, status);
+const internalDebugErrorResponse = (c: Context, error: unknown): Response =>
+  c.json({ error: toInternalDebugError(error, 'embeddings') }, 502);
 
 const proxyJsonResponse = (resp: Response): Response =>
   new Response(resp.body, {
@@ -148,11 +150,11 @@ export const embeddings = async (c: Context): Promise<Response> => {
     }
 
     return apiErrorResponse(c, `Model ${modelId} does not support the /embeddings endpoint.`, 400);
-  } catch (e: unknown) {
+  } catch (e) {
     const response = modelsLoadErrorResponse(e);
     if (response) return response;
 
     recordRequestPerformance(lastPerformance, true, performance.now() - requestStartedAt);
-    return apiErrorResponse(c, errorMessage(e), 502);
+    return internalDebugErrorResponse(c, e);
   }
 };

@@ -3,24 +3,27 @@ import type { ChatCompletionChunk } from '../../../../shared/protocol/chat-compl
 import { doneFrame, eventFrame, type ProtocolFrame, type SseFrame } from '../../../shared/stream/types.ts';
 import { parseTargetStreamFrames } from '../../events/from-stream.ts';
 
-const chatCompletionsSseJsonToEvent = (parsed: unknown): ChatCompletionChunk => {
+// Probes for OpenAI-style streamed error payloads before the unknown body is
+// committed to the ChatCompletionChunk shape. Receives unknown (not the
+// generic `ChatCompletionChunk`) because the inspection runs on the raw
+// upstream JSON.
+const guardChatCompletionsError = (parsed: unknown): void => {
   const errorMessage = chatCompletionsErrorPayloadMessage(parsed);
   if (errorMessage) {
     throw new Error(`Upstream Chat Completions SSE error: ${errorMessage}`);
   }
-
-  return parsed as ChatCompletionChunk;
 };
 
 export const chatCompletionsStreamFramesToEvents = (frames: AsyncIterable<SseFrame>): AsyncGenerator<ProtocolFrame<ChatCompletionChunk>> =>
   (async function* () {
-    for await (const frame of parseTargetStreamFrames(frames, {
+    for await (const frame of parseTargetStreamFrames<ChatCompletionChunk>(frames, {
       protocol: 'Chat Completions',
     })) {
       if (frame.type === 'done') {
         yield doneFrame();
       } else {
-        yield eventFrame(chatCompletionsSseJsonToEvent(frame.data));
+        guardChatCompletionsError(frame.data);
+        yield eventFrame(frame.data);
       }
     }
   })();

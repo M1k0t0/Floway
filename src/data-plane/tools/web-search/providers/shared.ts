@@ -1,8 +1,7 @@
+import { isJsonObject } from '../../../../shared/json-helpers.ts';
 import type { WebSearchProviderResult } from '../types.ts';
 
 const MAX_WEB_SEARCH_QUERY_LENGTH = 1000;
-
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 export type ValidatedWebSearchQuery = { type: 'ok'; query: string } | { type: 'error'; result: WebSearchProviderResult };
 
@@ -44,7 +43,7 @@ export const extractWebSearchProviderErrorMessage = async (response: Response): 
 
   try {
     const parsed = JSON.parse(text);
-    if (!isRecord(parsed)) {
+    if (!isJsonObject(parsed)) {
       return text;
     }
 
@@ -54,7 +53,7 @@ export const extractWebSearchProviderErrorMessage = async (response: Response): 
     if (typeof parsed.error === 'string') {
       return parsed.error;
     }
-    if (isRecord(parsed.error) && typeof parsed.error.message === 'string') {
+    if (isJsonObject(parsed.error) && typeof parsed.error.message === 'string') {
       return parsed.error.message;
     }
     if (typeof parsed.message === 'string') {

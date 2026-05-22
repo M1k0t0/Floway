@@ -1,3 +1,4 @@
+import { isJsonObject } from '../../../../shared/json-helpers.ts';
 import type { GeminiContent, GeminiFunctionCallingConfig, GeminiFunctionDeclaration, GeminiGenerateContentRequest, GeminiPart, GeminiThinkingConfig } from '../../../shared/protocol/gemini.ts';
 
 export type GeminiToolCallIds = Record<string, string[]>;
@@ -154,8 +155,6 @@ export const signGeminiPart = (state: GeminiThoughtSignatureState, part: GeminiP
 
 export const flushGeminiThoughtSignature = (state: GeminiThoughtSignatureState): GeminiPart[] => (state.pendingThoughtSignature === undefined ? [] : [signGeminiPart(state, { text: '' })]);
 
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
-
 export const parseStrictJsonObject = (json: string, subject: string): Record<string, unknown> => {
   if (!json) return {};
 
@@ -168,7 +167,7 @@ export const parseStrictJsonObject = (json: string, subject: string): Record<str
     });
   }
 
-  if (!isRecord(parsed)) {
+  if (!isJsonObject(parsed)) {
     throw new Error(`Upstream ${subject} must be a JSON object.`);
   }
 

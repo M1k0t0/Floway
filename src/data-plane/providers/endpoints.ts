@@ -1,9 +1,8 @@
 import type { ModelEndpoint } from './types.ts';
 import type { EndpointKey } from '../../repo/types.ts';
+import type { LlmTargetApi } from '../llm/interceptors.ts';
 
 export type { ModelEndpoint };
-
-export type LlmTargetApi = 'messages' | 'responses' | 'chat-completions';
 
 export const llmTargetApiToModelEndpoint = (target: LlmTargetApi): ModelEndpoint => {
   switch (target) {

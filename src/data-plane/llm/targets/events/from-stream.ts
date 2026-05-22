@@ -5,9 +5,13 @@ export interface ParseTargetStreamFramesOptions {
   malformedJsonEventName?: string;
 }
 
-export type ParsedTargetStreamFrame = { type: 'done' } | { type: 'sse-json'; data: unknown; frame: SseFrame };
+export type ParsedTargetStreamFrame<TEvent> = { type: 'done' } | { type: 'sse-json'; data: TEvent; frame: SseFrame };
 
-export const parseTargetStreamFrames = async function* (frames: AsyncIterable<SseFrame>, options: ParseTargetStreamFramesOptions): AsyncGenerator<ParsedTargetStreamFrame> {
+// The unknown JSON payload becomes the target protocol's event type at this
+// boundary; each protocol's stream parser names its event type when calling
+// in. Runtime narrowing happens upstream (parse error -> Error with cause)
+// and downstream (per-event handling in target events/from-stream.ts).
+export const parseTargetStreamFrames = async function* <TEvent>(frames: AsyncIterable<SseFrame>, options: ParseTargetStreamFramesOptions): AsyncGenerator<ParsedTargetStreamFrame<TEvent>> {
   for await (const frame of frames) {
     const data = frame.data.trim();
     if (!data) continue;
@@ -25,6 +29,6 @@ export const parseTargetStreamFrames = async function* (frames: AsyncIterable<Ss
       throw new Error(`Malformed upstream ${options.protocol} SSE JSON${eventContext}: ${data}`, { cause: error });
     }
 
-    yield { type: 'sse-json', data: parsed, frame };
+    yield { type: 'sse-json', data: parsed as TEvent, frame };
   }
 };

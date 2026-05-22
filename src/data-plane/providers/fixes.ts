@@ -15,7 +15,12 @@
 // vendor-specific protocol extension to emit. With no vendor flag set,
 // behavior defaults to the OpenAI standard (no extensions).
 
-export type FixEndpoint = 'messages' | 'responses' | 'chat_completions';
+import type { ModelEndpoint } from './types.ts';
+
+// LLM generation endpoints in the snake_case spelling that
+// upstream_configs.enabled_fixes / supported_endpoints already use. Equivalent
+// to LlmTargetApi after the LlmTargetApi <-> ModelEndpoint mapping.
+export type FixEndpoint = Exclude<ModelEndpoint, 'messages_count_tokens' | 'embeddings'>;
 
 export interface Flag {
   id: string;

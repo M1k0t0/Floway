@@ -1,3 +1,4 @@
+import { isJsonObject } from '../../../../../shared/json-helpers.ts';
 import { MESSAGES_WEB_SEARCH_ERROR_CODES } from '../../../../shared/protocol/messages.ts';
 import type {
   MessagesAssistantContentBlock,
@@ -16,10 +17,10 @@ import type {
   MessagesWebSearchResultBlock,
   MessagesWebSearchToolResultError,
 } from '../../../../shared/protocol/messages.ts';
-import { resolveConfiguredWebSearchProvider, type WebSearchProvider } from '../../../../tools/web-search/provider.ts';
+import { resolveConfiguredWebSearchProvider } from '../../../../tools/web-search/provider.ts';
 import { loadSearchConfig } from '../../../../tools/web-search/search-config.ts';
 import { searchWebAndRecordUsage, searchWebWithoutRecordingUsage } from '../../../../tools/web-search/search.ts';
-import type { WebSearchProviderName, WebSearchProviderRequest, WebSearchProviderResult } from '../../../../tools/web-search/types.ts';
+import type { WebSearchProvider, WebSearchProviderName, WebSearchProviderRequest, WebSearchProviderResult } from '../../../../tools/web-search/types.ts';
 import type { MessagesInterceptor } from '../../../interceptors.ts';
 import { toInternalDebugError } from '../../../shared/errors/internal-debug-error.ts';
 import { internalErrorResult } from '../../../shared/errors/result.ts';
@@ -28,8 +29,6 @@ import { eventFrame, type ProtocolFrame } from '../../../shared/stream/types.ts'
 const MAX_QUERY_LENGTH = 1000;
 const WEB_SEARCH_TOOL_NAME = 'web_search';
 const PAYLOAD_PREFIX = 'cgws1';
-
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 type SearchResultOwnership = 'owned' | 'foreign';
 
@@ -183,7 +182,7 @@ const isShimWebSearchResultPayload = (value: unknown): value is ShimWebSearchRes
 };
 
 const isShimWebSearchCitationPayload = (value: unknown): value is ShimWebSearchCitationPayload => {
-  if (!isRecord(value)) {
+  if (!isJsonObject(value)) {
     return false;
   }
 
@@ -222,7 +221,7 @@ const messagesWebSearchErrorCodeSet = new Set<string>(MESSAGES_WEB_SEARCH_ERROR_
 const isMessagesWebSearchErrorCode = (value: unknown): value is MessagesWebSearchErrorCode => typeof value === 'string' && messagesWebSearchErrorCodeSet.has(value);
 
 const isWebSearchToolResultError = (value: unknown): value is MessagesWebSearchToolResultError =>
-  isRecord(value) && value.type === 'web_search_tool_result_error' && isMessagesWebSearchErrorCode(value.error_code);
+  isJsonObject(value) && value.type === 'web_search_tool_result_error' && isMessagesWebSearchErrorCode(value.error_code);
 
 const toUpstreamToolUseId = (toolUseId: string): string => (toolUseId.startsWith('srvtoolu_') ? `toolu_${toolUseId.slice('srvtoolu_'.length)}` : toolUseId);
 
@@ -728,7 +727,7 @@ const runWebSearchStopHandler = async function* (
     if (block.inputJson === '') return null;
     try {
       const parsed = JSON.parse(block.inputJson);
-      return isRecord(parsed) ? parsed : null;
+      return isJsonObject(parsed) ? parsed : null;
     } catch {
       return null;
     }

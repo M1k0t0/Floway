@@ -24,9 +24,8 @@ import type {
   MessagesToolResultContentBlock,
   MessagesUserContentBlock,
 } from '../../../../shared/protocol/messages.ts';
-import { type WebSearchProvider } from '../../../../tools/web-search/provider.ts';
 import { DEFAULT_SEARCH_CONFIG } from '../../../../tools/web-search/search-config.ts';
-import type { WebSearchProviderResult } from '../../../../tools/web-search/types.ts';
+import type { WebSearchProvider, WebSearchProviderResult } from '../../../../tools/web-search/types.ts';
 import type { MessagesInvocation, RequestContext } from '../../../interceptors.ts';
 import { type ProtocolFrame, eventFrame } from '../../../shared/stream/types.ts';
 import { messagesProtocolFrameToSSEFrame } from '../events/to-sse.ts';

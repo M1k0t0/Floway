@@ -1,6 +1,16 @@
 import type { ResponsesPayload } from '../../../../shared/protocol/responses.ts';
 import type { ResponsesInterceptor } from '../../../interceptors.ts';
 
+// Vendor flags that some non-OpenAI Responses-compatible upstreams understand
+// to disable internal "thinking". Not part of the OpenAI Responses contract,
+// so they ride alongside the typed payload instead of being declared on it.
+interface ResponsesVendorReasoningDisableFields {
+  thinking?: { type: 'disabled' };
+  enable_thinking?: false;
+}
+
+type ResponsesPayloadWithVendorReasoningDisable = Omit<ResponsesPayload, 'reasoning'> & ResponsesVendorReasoningDisableFields;
+
 // Opt-in workaround for upstreams where forced `tool_choice` and enabled
 // reasoning do not compose. By default this strips OpenAI `reasoning` rather
 // than inventing a `none` effort, because upstreams differ on whether `none` is
@@ -16,9 +26,9 @@ const hasForcedToolChoice = (payload: ResponsesPayload): boolean => {
   return true;
 };
 
-const disableResponsesReasoning = (payload: ResponsesPayload, enabledFixes: ReadonlySet<string>): ResponsesPayload => {
+const disableResponsesReasoning = (payload: ResponsesPayload, enabledFixes: ReadonlySet<string>): ResponsesPayloadWithVendorReasoningDisable => {
   const { reasoning: _reasoning, ...rest } = payload;
-  const out: ResponsesPayload & Record<string, unknown> = { ...rest };
+  const out: ResponsesPayloadWithVendorReasoningDisable = rest;
   if (enabledFixes.has('vendor-deepseek')) {
     out.thinking = { type: 'disabled' };
   }
@@ -30,6 +40,6 @@ const disableResponsesReasoning = (payload: ResponsesPayload, enabledFixes: Read
 
 export const withReasoningDisabledOnForcedToolChoice: ResponsesInterceptor = async (ctx, _request, run) => {
   if (!hasForcedToolChoice(ctx.payload)) return await run();
-  ctx.payload = disableResponsesReasoning(ctx.payload, ctx.enabledFixes);
+  ctx.payload = disableResponsesReasoning(ctx.payload, ctx.enabledFixes) as ResponsesPayload;
   return await run();
 };

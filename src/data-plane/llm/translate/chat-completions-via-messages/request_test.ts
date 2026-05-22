@@ -1,6 +1,6 @@
 import { test } from 'vitest';
 
-import { type RemoteImageLoader, translateChatCompletionsToMessages } from './request.ts';
+import { translateChatCompletionsToMessages } from './request.ts';
 import { assertEquals, assertExists, assertRejects } from '../../../../test-assert.ts';
 import type { ChatCompletionsPayload } from '../../../shared/protocol/chat-completions.ts';
 import {
@@ -15,6 +15,7 @@ import {
   type MessagesToolUseBlock,
   type MessagesUserContentBlock,
 } from '../../../shared/protocol/messages.ts';
+import type { RemoteImageLoader } from '../shared/remote-images.ts';
 
 // ── Helpers ──
 

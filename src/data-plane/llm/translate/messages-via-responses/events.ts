@@ -1,9 +1,10 @@
 import type { MessagesAssistantContentBlock, MessagesResponse, MessagesStreamEventData } from '../../../shared/protocol/messages.ts';
 import type { ResponseOutputContentBlock, ResponseOutputItem, ResponsesResult, ResponseStreamEvent } from '../../../shared/protocol/responses.ts';
+import type { ResponsesStreamEvent } from '../../shared/protocol/responses.ts';
 import { eventFrame, type ProtocolFrame } from '../../shared/stream/types.ts';
 import { packReasoningSignature, responsesReasoningToMessagesBlock } from '../shared/messages-responses-signature.ts';
 import { createResponsesOutputOrderState, recordResponseOutputOrderEvent, type ResponsesOutputOrderState, shouldDeferForEarlierResponseOutput } from '../shared/responses-stream-order.ts';
-import { type ResponseEvent, responsePartKey, type UpstreamResponseStreamEvent } from '../shared/responses-stream.ts';
+import { type ResponseEvent, responsePartKey } from '../shared/responses-stream.ts';
 import { checkWhitespaceOverflow, parseToolArgumentsObject } from '../shared/tool-arguments.ts';
 
 const combineMessageTextContent = (content: ResponseOutputContentBlock[] | undefined): string => {
@@ -92,7 +93,7 @@ export const translateResponsesToMessagesResponse = (response: ResponsesResult):
 
 const UPSTREAM_RESPONSES_MISSING_TERMINAL_MESSAGE = 'Upstream Responses stream ended without a terminal event.';
 
-const upstreamResponsesEventsUntilTerminal = async function* (frames: AsyncIterable<ProtocolFrame<UpstreamResponseStreamEvent>>): AsyncGenerator<UpstreamResponseStreamEvent> {
+const upstreamResponsesEventsUntilTerminal = async function* (frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>): AsyncGenerator<ResponsesStreamEvent> {
   for await (const frame of frames) {
     if (frame.type === 'done') continue;
 
@@ -547,7 +548,7 @@ export const translateResponsesStreamEventToMessagesEvents = (event: ResponseStr
   return events;
 };
 
-export const translateToSourceEvents = async function* (frames: AsyncIterable<ProtocolFrame<UpstreamResponseStreamEvent>>): AsyncGenerator<ProtocolFrame<MessagesStreamEventData>> {
+export const translateToSourceEvents = async function* (frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>): AsyncGenerator<ProtocolFrame<MessagesStreamEventData>> {
   const state = createResponsesToMessagesStreamState();
 
   for await (const event of upstreamResponsesEventsUntilTerminal(frames)) {

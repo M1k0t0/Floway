@@ -1,10 +1,9 @@
 import { makeResponsesReasoningId } from './reasoning.ts';
 import type { ChatReasoningItem } from '../../../shared/protocol/chat-completions.ts';
-import type { ResponseInputItem, ResponseInputReasoning, ResponseOutputReasoning } from '../../../shared/protocol/responses.ts';
+import type { ResponseInputItem, ResponseOutputReasoning } from '../../../shared/protocol/responses.ts';
+import type { ResponsesReasoningItem } from '../../shared/protocol/responses.ts';
 
 export type ChatReasoningSourceItem = Extract<ResponseInputItem, { type: 'reasoning' }> | ResponseOutputReasoning;
-
-export type ResponseReasoningItem = ResponseInputReasoning | ResponseOutputReasoning;
 
 export interface ChatReasoningProjection {
   items: ChatReasoningItem[];
@@ -40,7 +39,7 @@ export const chatReasoningProjectionFields = (projection: ChatReasoningProjectio
   ...(projection.items.length > 0 ? { reasoning_items: projection.items } : {}),
 });
 
-export const toResponseReasoningItem = <T extends ResponseReasoningItem>(item: ChatReasoningItem, fallbackId: string): T =>
+export const toResponseReasoningItem = <T extends ResponsesReasoningItem>(item: ChatReasoningItem, fallbackId: string): T =>
   ({
     type: 'reasoning',
     id: item.id ?? fallbackId,
@@ -48,7 +47,7 @@ export const toResponseReasoningItem = <T extends ResponseReasoningItem>(item: C
     ...(item.encrypted_content !== undefined ? { encrypted_content: item.encrypted_content } : {}),
   } as T);
 
-export const scalarToResponseReasoningItem = <T extends ResponseReasoningItem>(reasoningText: string | null | undefined, reasoningOpaque: string | null | undefined, id: string): T | null => {
+export const scalarToResponseReasoningItem = <T extends ResponsesReasoningItem>(reasoningText: string | null | undefined, reasoningOpaque: string | null | undefined, id: string): T | null => {
   const hasReasoningOpaque = reasoningOpaque !== undefined && reasoningOpaque !== null;
   if (!reasoningText && !hasReasoningOpaque) return null;
 
@@ -60,7 +59,7 @@ export const scalarToResponseReasoningItem = <T extends ResponseReasoningItem>(r
   } as T;
 };
 
-export const translateChatReasoningItems = <T extends ResponseReasoningItem>(reasoningItems: ChatReasoningItem[] | null | undefined, nextIdIndex: () => number): T[] | null => {
+export const translateChatReasoningItems = <T extends ResponsesReasoningItem>(reasoningItems: ChatReasoningItem[] | null | undefined, nextIdIndex: () => number): T[] | null => {
   if (!reasoningItems?.length) return null;
 
   // `reasoning_items[]` is a LiteLLM-inspired compatibility workaround for

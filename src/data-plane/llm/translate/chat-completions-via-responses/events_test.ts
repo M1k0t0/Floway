@@ -3,13 +3,10 @@ import { test } from 'vitest';
 import { translateToSourceEvents } from './events.ts';
 import { assertEquals, assertRejects } from '../../../../test-assert.ts';
 import type { ResponsesResult, ResponseStreamEvent } from '../../../shared/protocol/responses.ts';
+import type { ResponsesStreamEvent } from '../../shared/protocol/responses.ts';
 import { eventFrame, type ProtocolFrame } from '../../shared/stream/types.ts';
 import { chatProtocolFrameToSSEFrame } from '../../sources/chat-completions/events/to-sse.ts';
 import { responsesResultToEvents } from '../../targets/responses/events/from-result.ts';
-
-type UpstreamResponseStreamEvent = ResponseStreamEvent & {
-  sequence_number?: number;
-};
 
 const makeResponse = (status: ResponsesResult['status']): ResponsesResult => ({
   id: 'resp_123',
@@ -31,18 +28,18 @@ const makeResponse = (status: ResponsesResult['status']): ResponsesResult => ({
   },
 });
 
-const toProtocolFrame = (event: ResponseStreamEvent): ProtocolFrame<UpstreamResponseStreamEvent> => eventFrame({ ...event, sequence_number: 0 });
+const toProtocolFrame = (event: ResponseStreamEvent): ProtocolFrame<ResponsesStreamEvent> => eventFrame({ ...event, sequence_number: 0 });
 
 const includeUsageChunk = { includeUsageChunk: true };
 
-const chatSseFrames = async function* (frames: AsyncIterable<ProtocolFrame<UpstreamResponseStreamEvent>>) {
+const chatSseFrames = async function* (frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>) {
   for await (const frame of translateToSourceEvents(frames)) {
     const sse = chatProtocolFrameToSSEFrame(frame, includeUsageChunk);
     if (sse) yield sse;
   }
 };
 
-const countDoneSentinels = async (frames: ProtocolFrame<UpstreamResponseStreamEvent>[]): Promise<number> => {
+const countDoneSentinels = async (frames: ProtocolFrame<ResponsesStreamEvent>[]): Promise<number> => {
   let doneCount = 0;
 
   async function* stream() {
@@ -56,7 +53,7 @@ const countDoneSentinels = async (frames: ProtocolFrame<UpstreamResponseStreamEv
   return doneCount;
 };
 
-const countAssistantStartChunksAndDone = async (frames: ProtocolFrame<UpstreamResponseStreamEvent>[]): Promise<{ assistantStartCount: number; doneCount: number }> => {
+const countAssistantStartChunksAndDone = async (frames: ProtocolFrame<ResponsesStreamEvent>[]): Promise<{ assistantStartCount: number; doneCount: number }> => {
   let assistantStartCount = 0;
   let doneCount = 0;
 

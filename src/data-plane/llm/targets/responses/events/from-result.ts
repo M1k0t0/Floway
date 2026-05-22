@@ -1,9 +1,6 @@
 import type { ResponseOutputFunctionCall, ResponseOutputItem, ResponseOutputMessage, ResponseOutputReasoning, ResponsesResult, ResponseStreamEvent } from '../../../../shared/protocol/responses.ts';
+import type { SequencedResponsesStreamEvent } from '../../../shared/protocol/responses.ts';
 import { type EventFrame, eventFrame } from '../../../shared/stream/types.ts';
-
-export type SequencedResponseStreamEvent = ResponseStreamEvent & {
-  sequence_number: number;
-};
 
 const getTerminalEventName = (response: ResponsesResult): string => {
   if (response.status === 'failed') return 'response.failed';
@@ -207,7 +204,7 @@ const responseOutputItemEvents = (item: ResponseOutputItem, outputIndex: number)
   return responseFunctionCallEvents(item, outputIndex);
 };
 
-export const responsesResultToEvents = (response: ResponsesResult): EventFrame<SequencedResponseStreamEvent>[] => {
+export const responsesResultToEvents = (response: ResponsesResult): EventFrame<SequencedResponsesStreamEvent>[] => {
   const started = responseStartSnapshot(response);
   const events: ResponseStreamEvent[] = [
     { type: 'response.created', response: started },

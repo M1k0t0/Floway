@@ -1,3 +1,4 @@
+import { isObjectLike } from '../../../../../shared/json-helpers.ts';
 import type { ResponsesResult } from '../../../../shared/protocol/responses.ts';
 import type { RequestContext, ResponsesInterceptor, ResponsesInvocation } from '../../../interceptors.ts';
 import type { ExecuteResult } from '../../../shared/errors/result.ts';
@@ -8,8 +9,6 @@ const CYBER_POLICY_ERROR_CODE = 'cyber_policy';
 const MAX_CYBER_POLICY_RETRIES = 10;
 
 type ResponsesResultFrames = ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>;
-
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
 interface FailurePayload {
   error: {
@@ -40,7 +39,7 @@ const debugFieldsFrom = (value: Record<string, unknown>) => ({
 });
 
 const cyberPolicyErrorFrom = (value: unknown): FailurePayload['error'] | undefined => {
-  if (!isRecord(value) || value.code !== CYBER_POLICY_ERROR_CODE) {
+  if (!isObjectLike(value) || value.code !== CYBER_POLICY_ERROR_CODE) {
     return undefined;
   }
 
@@ -52,11 +51,11 @@ const cyberPolicyErrorFrom = (value: unknown): FailurePayload['error'] | undefin
 };
 
 const cyberPolicyPayloadFrom = (value: unknown): FailurePayload | undefined => {
-  if (!isRecord(value)) return undefined;
+  if (!isObjectLike(value)) return undefined;
   const error = cyberPolicyErrorFrom(value.error);
   if (error) return { error };
 
-  if (!isRecord(value.response)) return undefined;
+  if (!isObjectLike(value.response)) return undefined;
   const responseError = cyberPolicyErrorFrom(value.response.error);
   return responseError ? { error: responseError, response: value.response } : undefined;
 };
@@ -82,12 +81,12 @@ const failurePayloadFromUpstreamError = (result: Extract<ResponsesResultFrames, 
 
   try {
     const parsed = JSON.parse(bodyText);
-    if (isRecord(parsed)) {
-      if (isRecord(parsed.response)) {
+    if (isObjectLike(parsed)) {
+      if (isObjectLike(parsed.response)) {
         response = parsed.response;
-        if (isRecord(response.error)) error = response.error;
+        if (isObjectLike(response.error)) error = response.error;
       }
-      if (!error && isRecord(parsed.error)) error = parsed.error;
+      if (!error && isObjectLike(parsed.error)) error = parsed.error;
     }
   } catch {
     // Raw upstream error bodies are still useful as streamed failure messages.
@@ -141,7 +140,7 @@ const failureFrameFromResult = (invocation: ResponsesInvocation, result: Failure
 };
 
 const isCyberPolicyResponse = (response: unknown): response is ResponsesResult =>
-  isRecord(response) && response.status === 'failed' && isRecord(response.error) && response.error.code === CYBER_POLICY_ERROR_CODE;
+  isObjectLike(response) && response.status === 'failed' && isObjectLike(response.error) && response.error.code === CYBER_POLICY_ERROR_CODE;
 
 const isCyberPolicyEvent = (event: ResponsesStreamEvent): boolean => isCyberPolicyPayload(event) || isCyberPolicyResponse((event as { response?: unknown }).response);
 

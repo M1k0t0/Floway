@@ -1,5 +1,8 @@
-type SourceApi = 'messages' | 'responses' | 'chat-completions' | 'gemini';
-type TargetApi = 'messages' | 'responses' | 'chat-completions';
+import type { LlmSourceApi, LlmTargetApi } from '../../interceptors.ts';
+
+// Embeddings is not part of the LLM source-routing graph but uses the same
+// debug envelope when its handler fails; widen at this boundary only.
+type DebugSourceApi = LlmSourceApi | 'embeddings';
 
 export interface InternalDebugError {
   type: 'internal_error';
@@ -7,8 +10,8 @@ export interface InternalDebugError {
   message: string;
   stack?: string;
   cause?: unknown;
-  source_api: SourceApi;
-  target_api?: TargetApi;
+  source_api: DebugSourceApi;
+  target_api?: LlmTargetApi;
 }
 
 const serializeCause = (cause: unknown): unknown => {
@@ -22,7 +25,7 @@ const serializeCause = (cause: unknown): unknown => {
   };
 };
 
-export const toInternalDebugError = (error: unknown, sourceApi: SourceApi, targetApi?: TargetApi): InternalDebugError => {
+export const toInternalDebugError = (error: unknown, sourceApi: DebugSourceApi, targetApi?: LlmTargetApi): InternalDebugError => {
   const known = error instanceof Error ? error : new Error(String(error));
 
   return {

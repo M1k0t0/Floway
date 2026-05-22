@@ -186,8 +186,8 @@ const fetchUpstreamModels = async (upstream: Upstream): Promise<CachedModelsResp
   let data: unknown;
   try {
     data = await resp.json();
-  } catch {
-    throw new Error('Invalid upstream /models response');
+  } catch (error) {
+    throw new Error('Invalid upstream /models response', { cause: error });
   }
   if (!isModelsResponse(data)) {
     throw new Error('Invalid upstream /models response');

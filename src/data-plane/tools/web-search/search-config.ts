@@ -1,7 +1,6 @@
 import type { SearchConfig } from './types.ts';
 import { getRepo } from '../../../repo/index.ts';
-
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+import { isJsonObject } from '../../../shared/json-helpers.ts';
 
 export const DEFAULT_SEARCH_CONFIG: SearchConfig = {
   provider: 'disabled',
@@ -12,9 +11,9 @@ export const DEFAULT_SEARCH_CONFIG: SearchConfig = {
 export const FIXED_SEARCH_CONFIG_TEST_QUERY = 'React documentation';
 
 export const normalizeSearchConfig = (input: unknown): SearchConfig => {
-  const record = isRecord(input) ? input : {};
-  const tavily = isRecord(record.tavily) ? record.tavily : {};
-  const microsoftGrounding = isRecord(record.microsoftGrounding) ? record.microsoftGrounding : {};
+  const record = isJsonObject(input) ? input : {};
+  const tavily = isJsonObject(record.tavily) ? record.tavily : {};
+  const microsoftGrounding = isJsonObject(record.microsoftGrounding) ? record.microsoftGrounding : {};
 
   return {
     provider: record.provider === 'tavily' || record.provider === 'microsoft-grounding' ? record.provider : 'disabled',

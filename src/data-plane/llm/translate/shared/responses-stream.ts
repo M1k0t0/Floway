@@ -1,9 +1,5 @@
 import type { ResponseStreamEvent } from '../../../shared/protocol/responses.ts';
 
-export type UpstreamResponseStreamEvent = ResponseStreamEvent & {
-  sequence_number?: number;
-};
-
 export type ResponseEvent<TType extends ResponseStreamEvent['type']> = Extract<ResponseStreamEvent, { type: TType }>;
 
 export type ResponseCompletionEvent = ResponseEvent<'response.completed' | 'response.incomplete'>;

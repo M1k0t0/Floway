@@ -1,6 +1,6 @@
-import { responsesResultToEvents, type SequencedResponseStreamEvent } from './from-result.ts';
+import { responsesResultToEvents } from './from-result.ts';
 import type { ResponsesResult, ResponseStreamEvent } from '../../../../shared/protocol/responses.ts';
-import { isResponsesTerminalEvent } from '../../../shared/protocol/responses.ts';
+import { isResponsesTerminalEvent, type SequencedResponsesStreamEvent } from '../../../shared/protocol/responses.ts';
 import { doneFrame, type EventFrame, eventFrame, type ProtocolFrame, type SseFrame } from '../../../shared/stream/types.ts';
 import { parseTargetStreamFrames } from '../../events/from-stream.ts';
 
@@ -16,10 +16,11 @@ const isStructuredResponsesEvent = (event: { type: string }): boolean =>
   && event.type !== 'ping'
   && !isResponsesTerminalEvent(event as ResponseStreamEvent);
 
-const projectSseJsonEvent = (data: unknown, eventName: string | undefined): SequencedResponseStreamEvent => {
-  const event = data as ResponseStreamEvent;
-  return eventName && !(event as { type?: string }).type ? ({ ...event, type: eventName } as SequencedResponseStreamEvent) : (event as SequencedResponseStreamEvent);
-};
+// Some Responses upstreams emit the event type only via the SSE `event:`
+// header and leave it off the JSON body; re-attach it so downstream sees a
+// consistent shape.
+const projectSseJsonEvent = (event: ResponseStreamEvent, eventName: string | undefined): SequencedResponsesStreamEvent =>
+  eventName && !(event as { type?: string }).type ? ({ ...event, type: eventName } as SequencedResponsesStreamEvent) : (event as SequencedResponsesStreamEvent);
 
 // Some Responses upstreams (notably Copilot for short prompts) take a
 // "fast-path": they only emit `response.created` / `response.in_progress` and a
@@ -30,12 +31,12 @@ const projectSseJsonEvent = (data: unknown, eventName: string | undefined): Sequ
 // so downstream consumers always observe one canonical full event sequence.
 // `error` terminals carry no `response` payload, so we cannot expand them;
 // they continue to surface as their original frame for downstream handlers.
-export const responsesStreamFramesToEvents = (frames: AsyncIterable<SseFrame>): AsyncGenerator<ProtocolFrame<SequencedResponseStreamEvent>> =>
+export const responsesStreamFramesToEvents = (frames: AsyncIterable<SseFrame>): AsyncGenerator<ProtocolFrame<SequencedResponsesStreamEvent>> =>
   (async function* () {
     let sawStructured = false;
-    const pending: EventFrame<SequencedResponseStreamEvent>[] = [];
+    const pending: EventFrame<SequencedResponsesStreamEvent>[] = [];
 
-    for await (const frame of parseTargetStreamFrames(frames, {
+    for await (const frame of parseTargetStreamFrames<ResponseStreamEvent>(frames, {
       protocol: 'Responses',
       malformedJsonEventName: 'response',
     })) {

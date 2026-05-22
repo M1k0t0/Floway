@@ -4,6 +4,7 @@ import { getModelCapabilities } from '../../../../providers/capabilities.ts';
 import { resolveModelForRequest } from '../../../../providers/registry.ts';
 import { ModelsFetchError } from '../../../../providers/upstream-model-cache.ts';
 import type { MessagesPayload } from '../../../../shared/protocol/messages.ts';
+import { toInternalDebugError } from '../../../shared/errors/internal-debug-error.ts';
 import { bodyAnthropicBetaResponse, bodyBetaParam, parseAnthropicBeta } from '../serve.ts';
 
 const modelsLoadErrorResponse = (error: ModelsFetchError): Response =>
@@ -65,19 +66,9 @@ export const countTokens = async (c: Context) => {
         'content-type': resp.headers.get('content-type') ?? 'application/json',
       },
     });
-  } catch (e: unknown) {
+  } catch (e) {
     if (e instanceof ModelsFetchError) return modelsLoadErrorResponse(e);
 
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error('Error counting tokens:', msg);
-    return c.json(
-      {
-        error: {
-          type: 'invalid_request_error',
-          message: `Failed to count tokens: ${msg}`,
-        },
-      },
-      400,
-    );
+    return c.json({ error: toInternalDebugError(e, 'messages') }, 502);
   }
 };

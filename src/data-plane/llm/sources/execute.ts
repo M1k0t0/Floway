@@ -6,7 +6,6 @@ import { type PerformanceTelemetryContext, recordRequestPerformanceForApiKey, ru
 import { recordUsageForApiKey } from '../../shared/telemetry/usage.ts';
 import type { RequestContext } from '../interceptors.ts';
 import { toInternalDebugError } from '../shared/errors/internal-debug-error.ts';
-import { modelLoadErrorResult } from '../shared/errors/model-load-error.ts';
 import { internalErrorResult, type ExecuteResult, type UpstreamErrorResult } from '../shared/errors/result.ts';
 import { thrownUpstreamErrorResult } from '../shared/errors/upstream-error.ts';
 import type { ProtocolFrame } from '../shared/stream/types.ts';
@@ -54,13 +53,6 @@ export const sourceErrorResult = <TEvent>(
     lastPerformance?: PerformanceTelemetryContext;
   },
 ): ExecuteResult<ProtocolFrame<TEvent>> => {
-  try {
-    return modelLoadErrorResult(error, options.lastPerformance);
-  } catch {
-    // modelLoadErrorResult rethrows non-model-load errors; the source boundary
-    // still needs to test other request-boundary error shapes before 5xx.
-  }
-
   const upstreamError = thrownUpstreamErrorResult(error, options.lastPerformance);
   if (upstreamError) return upstreamError;
 

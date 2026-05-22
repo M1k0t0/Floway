@@ -1,9 +1,8 @@
 import type { Context } from 'hono';
 
 import { messagesSourceInterceptors } from './interceptors/index.ts';
-import { planMessagesRequest } from './plan.ts';
 import { respondMessages } from './respond.ts';
-import { getModelCapabilities } from '../../../providers/capabilities.ts';
+import { getModelCapabilities, type ModelCapabilities } from '../../../providers/capabilities.ts';
 import { resolveModelForRequest } from '../../../providers/registry.ts';
 import type { ProviderModelRecord } from '../../../providers/types.ts';
 import type { ChatCompletionsPayload } from '../../../shared/protocol/chat-completions.ts';
@@ -80,6 +79,13 @@ export const serveMessages = async (c: Context): Promise<Response> => {
   let request = createRequestContext(c, undefined, false);
   let downstreamAbortController: AbortController | undefined;
 
+  const pickTarget = (c: ModelCapabilities): LlmTargetApi | null => {
+    if (c.supportsMessages) return 'messages';
+    if (c.supportsResponses) return 'responses';
+    if (c.supportsChatCompletions) return 'chat-completions';
+    return null;
+  };
+
   try {
     const payload = await c.req.json<MessagesPayload>();
     const rejectedBetaParam = bodyBetaParam(payload);
@@ -100,10 +106,10 @@ export const serveMessages = async (c: Context): Promise<Response> => {
         const attemptPayload = structuredClone(payload);
         attemptPayload.model = model;
         const capabilities = getModelCapabilities(binding.upstreamModel);
-        const plan = planMessagesRequest(capabilities);
-        if (!plan) continue;
+        const target = pickTarget(capabilities);
+        if (!target) continue;
 
-        const invocation: MessagesInvocation = messagesInvocation(binding, plan.target, model, attemptPayload, anthropicBeta);
+        const invocation: MessagesInvocation = messagesInvocation(binding, target, model, attemptPayload, anthropicBeta);
 
         const emits: Record<LlmTargetApi, SourceEmit<MessagesPayload, MessagesStreamEventData>> = {
           messages: async srcPayload => rememberPerformance(await emitToMessages({ ...invocation, payload: srcPayload }, request)),
@@ -114,7 +120,7 @@ export const serveMessages = async (c: Context): Promise<Response> => {
         };
 
         result = await runInterceptors(invocation, request, messagesSourceInterceptorsForProvider(binding), () =>
-          emits[plan.target](invocation.payload, { model, wantsStream, capabilities }));
+          emits[target](invocation.payload, { model, wantsStream, capabilities }));
         break;
       }
 

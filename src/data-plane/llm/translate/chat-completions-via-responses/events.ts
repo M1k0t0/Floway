@@ -1,9 +1,11 @@
+import { isObjectLike } from '../../../../shared/json-helpers.ts';
 import type { ChatCompletionChunk, ChatCompletionResponse, ChatReasoningItem, Delta } from '../../../shared/protocol/chat-completions.ts';
 import type { ResponseOutputItem, ResponsesResult, ResponseStreamEvent } from '../../../shared/protocol/responses.ts';
+import type { ResponsesStreamEvent } from '../../shared/protocol/responses.ts';
 import { doneFrame, eventFrame, type ProtocolFrame } from '../../shared/stream/types.ts';
 import { toChatReasoningItem } from '../shared/chat-responses-reasoning.ts';
 import { createResponsesOutputOrderState, recordResponseOutputOrderEvent, type ResponsesOutputOrderState, shouldDeferForEarlierResponseOutput } from '../shared/responses-stream-order.ts';
-import { type ResponseEvent, responsePartKey, type UpstreamResponseStreamEvent } from '../shared/responses-stream.ts';
+import { type ResponseEvent, responsePartKey } from '../shared/responses-stream.ts';
 
 const mapResponsesFinishReasonToChatCompletionsFinishReason = (response: ResponsesResult): ChatCompletionResponse['choices'][0]['finish_reason'] =>
   response.status === 'incomplete' && response.incomplete_details?.reason === 'max_output_tokens'
@@ -14,7 +16,7 @@ const mapResponsesFinishReasonToChatCompletionsFinishReason = (response: Respons
 
 const UPSTREAM_RESPONSES_MISSING_TERMINAL_MESSAGE = 'Upstream Responses stream ended without a terminal event.';
 
-const upstreamResponsesEventsUntilTerminal = async function* (frames: AsyncIterable<ProtocolFrame<UpstreamResponseStreamEvent>>): AsyncGenerator<UpstreamResponseStreamEvent> {
+const upstreamResponsesEventsUntilTerminal = async function* (frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>): AsyncGenerator<ResponsesStreamEvent> {
   for await (const frame of frames) {
     if (frame.type === 'done') continue;
 
@@ -361,8 +363,6 @@ interface ChatErrorPayload {
   };
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
-
 const stringField = (value: unknown, fallback: string): string => (typeof value === 'string' && value.length > 0 ? value : fallback);
 
 const debugFieldsFrom = (value: Record<string, unknown>) => ({
@@ -388,7 +388,7 @@ const chatErrorPayloadFromResponsesError = (event: ResponseEvent<'error'>): Chat
 
 const chatErrorPayloadFromResponsesFailure = (event: ResponseEvent<'response.failed'>): ChatErrorPayload => {
   const response = event.response as ResponsesResult;
-  const error = isRecord(response.error) ? response.error : undefined;
+  const error = isObjectLike(response.error) ? response.error : undefined;
 
   return {
     error: {
@@ -414,7 +414,7 @@ const chatErrorFrameFromResponsesFatalEvent = (event: ResponseStreamEvent): Prot
   return undefined;
 };
 
-export const translateToSourceEvents = async function* (frames: AsyncIterable<ProtocolFrame<UpstreamResponseStreamEvent>>): AsyncGenerator<ProtocolFrame<ChatCompletionChunk>> {
+export const translateToSourceEvents = async function* (frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>): AsyncGenerator<ProtocolFrame<ChatCompletionChunk>> {
   const state = createResponsesToChatCompletionsStreamState();
 
   for await (const event of upstreamResponsesEventsUntilTerminal(frames)) {

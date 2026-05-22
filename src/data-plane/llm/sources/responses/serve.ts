@@ -1,9 +1,8 @@
 import type { Context } from 'hono';
 
 import { responsesSourceInterceptors } from './interceptors/index.ts';
-import { planResponsesRequest } from './plan.ts';
 import { respondResponses } from './respond.ts';
-import { getModelCapabilities } from '../../../providers/capabilities.ts';
+import { getModelCapabilities, type ModelCapabilities } from '../../../providers/capabilities.ts';
 import { resolveModelForRequest } from '../../../providers/registry.ts';
 import type { ProviderModelRecord } from '../../../providers/types.ts';
 import type { ChatCompletionsPayload } from '../../../shared/protocol/chat-completions.ts';
@@ -97,6 +96,13 @@ export const serveResponses = async (c: Context): Promise<Response> => {
   let request = createRequestContext(c, undefined, false);
   let downstreamAbortController: AbortController | undefined;
 
+  const pickTarget = (c: ModelCapabilities): LlmTargetApi | null => {
+    if (c.supportsResponses) return 'responses';
+    if (c.supportsMessages) return 'messages';
+    if (c.supportsChatCompletions) return 'chat-completions';
+    return null;
+  };
+
   try {
     const payload = rewriteResponsesEntryModelAlias(await c.req.json<ResponsesPayload>());
     // previous_response_id and item_reference require stateful server-side
@@ -121,10 +127,10 @@ export const serveResponses = async (c: Context): Promise<Response> => {
         const attemptPayload = structuredClone(payload);
         attemptPayload.model = model;
         const capabilities = getModelCapabilities(binding.upstreamModel);
-        const plan = planResponsesRequest(capabilities);
-        if (!plan) continue;
+        const target = pickTarget(capabilities);
+        if (!target) continue;
 
-        const invocation: ResponsesInvocation = responsesInvocation(binding, plan.target, model, attemptPayload);
+        const invocation: ResponsesInvocation = responsesInvocation(binding, target, model, attemptPayload);
 
         const emits: Record<LlmTargetApi, SourceEmit<ResponsesPayload, ResponsesStreamEvent>> = {
           responses: async srcPayload => rememberPerformance(await emitToResponses({ ...invocation, payload: srcPayload }, request)),
@@ -135,7 +141,7 @@ export const serveResponses = async (c: Context): Promise<Response> => {
         };
 
         result = await runInterceptors(invocation, request, responsesSourceInterceptorsForProvider(binding), () =>
-          emits[plan.target](invocation.payload, { model, wantsStream, capabilities }));
+          emits[target](invocation.payload, { model, wantsStream, capabilities }));
         break;
       }
 

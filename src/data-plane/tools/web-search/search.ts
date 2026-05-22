@@ -1,5 +1,4 @@
-import type { WebSearchProvider } from './provider.ts';
-import type { WebSearchProviderName, WebSearchProviderRequest, WebSearchProviderResult } from './types.ts';
+import type { WebSearchProvider, WebSearchProviderName, WebSearchProviderRequest, WebSearchProviderResult } from './types.ts';
 import { recordWebSearchUsage } from './usage.ts';
 
 export const searchWebAndRecordUsage = async (opts: {

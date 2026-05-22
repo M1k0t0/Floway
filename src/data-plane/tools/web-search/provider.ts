@@ -2,32 +2,7 @@ import { createMicrosoftGroundingWebSearchProvider } from './providers/microsoft
 import { createTavilyWebSearchProvider } from './providers/tavily.ts';
 import { FIXED_SEARCH_CONFIG_TEST_QUERY } from './search-config.ts';
 import { searchWebWithoutRecordingUsage } from './search.ts';
-import type { SearchConfig, WebSearchPreviewResult, WebSearchProviderName, WebSearchProviderRequest, WebSearchProviderResult } from './types.ts';
-
-export type WebSearchProvider = (request: WebSearchProviderRequest) => Promise<WebSearchProviderResult>;
-
-export type ConfiguredWebSearchProvider =
-  | { type: 'disabled' }
-  | { type: 'missing-credential'; provider: WebSearchProviderName }
-  | {
-    type: 'enabled';
-    provider: WebSearchProviderName;
-    search: WebSearchProvider;
-  };
-
-export type SearchConfigConnectionTestResult =
-  | {
-    ok: true;
-    provider: SearchConfig['provider'];
-    query: string;
-    results: WebSearchPreviewResult[];
-  }
-  | {
-    ok: false;
-    provider: SearchConfig['provider'];
-    query: string;
-    error: { code: string; message: string };
-  };
+import type { ConfiguredWebSearchProvider, SearchConfig, SearchConfigConnectionTestResult } from './types.ts';
 
 const toPreviewText = (content: Array<{ type: 'text'; text: string }>): string =>
   content

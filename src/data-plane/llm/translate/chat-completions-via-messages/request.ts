@@ -5,8 +5,6 @@ import { messagesThinkingBlockFromChatScalarReasoning } from '../shared/messages
 import { fetchRemoteImage, type RemoteImageLoader, resolveImageUrlToMessagesImage } from '../shared/remote-images.ts';
 import { parseToolArgumentsObject } from '../shared/tool-arguments.ts';
 
-export type { RemoteImageLoader } from '../shared/remote-images.ts';
-
 interface TranslateChatCompletionsToMessagesOptions {
   loadRemoteImage?: RemoteImageLoader;
   /**

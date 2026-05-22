@@ -1,3 +1,4 @@
+import { isJsonObject } from '../../../../../shared/json-helpers.ts';
 import type {
   MessagesAssistantContentBlock,
   MessagesRedactedThinkingBlock,
@@ -11,10 +12,8 @@ import type {
   MessagesWebSearchToolResultBlock,
 } from '../../../../shared/protocol/messages.ts';
 
-const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-
 const normalizeMessagesTextCitation = (value: unknown): MessagesTextCitation | null => {
-  if (!isRecord(value) || typeof value.type !== 'string') {
+  if (!isJsonObject(value) || typeof value.type !== 'string') {
     return null;
   }
 
@@ -166,6 +165,11 @@ const finalizeToolUseInput = (block: BlockAccumulator | undefined): void => {
   try {
     block.input = JSON.parse(block.inputJson);
   } catch {
+    // Anthropic Messages requires `input` to be an object even when the
+    // upstream streamed malformed JSON for a tool call. Failing the whole
+    // response on a partial/garbage tool_use is more hostile to clients than
+    // surfacing an empty object; the broken arguments stay observable via
+    // the original SSE frames.
     block.input = {};
   }
 };

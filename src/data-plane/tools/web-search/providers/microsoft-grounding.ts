@@ -1,11 +1,10 @@
 import { DEFAULT_WEB_SEARCH_RESULT_COUNT, type WebSearchProviderRequest, type WebSearchProviderResult } from '../types.ts';
 import { extractWebSearchProviderErrorMessage, toWebSearchTextBlocks, validateWebSearchQuery } from './shared.ts';
+import { isJsonObject } from '../../../../shared/json-helpers.ts';
 
 const MICROSOFT_GROUNDING_SEARCH_URL = 'https://api.microsoft.ai/v3/search/web';
 const MICROSOFT_GROUNDING_429_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000] as const;
 const DOMAIN_PATTERN = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))+$/i;
-
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const sleep = (delayMs: number): Promise<void> => new Promise(resolve => setTimeout(resolve, delayMs));
 
@@ -26,7 +25,7 @@ const toMicrosoftRegion = (userLocation: WebSearchProviderRequest['userLocation'
 };
 
 const normalizeResult = (value: unknown): Extract<WebSearchProviderResult, { type: 'ok' }>['results'][number] | null => {
-  if (!isRecord(value) || typeof value.title !== 'string' || typeof value.url !== 'string') {
+  if (!isJsonObject(value) || typeof value.title !== 'string' || typeof value.url !== 'string') {
     return null;
   }
 
@@ -76,7 +75,7 @@ export const createMicrosoftGroundingWebSearchProvider =
 
           if (response.ok) {
             const payload = await response.json();
-            const results = isRecord(payload) && Array.isArray(payload.webResults) ? payload.webResults.map(normalizeResult).filter((entry): entry is NonNullable<typeof entry> => entry !== null) : [];
+            const results = isJsonObject(payload) && Array.isArray(payload.webResults) ? payload.webResults.map(normalizeResult).filter((entry): entry is NonNullable<typeof entry> => entry !== null) : [];
 
             return {
               type: 'ok',
