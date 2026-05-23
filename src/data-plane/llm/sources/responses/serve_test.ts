@@ -54,9 +54,10 @@ test('/v1/responses rejects previous_response_id at the entrypoint', async () =>
 
       assertEquals(response.status, 400);
       const body = await response.json();
+      assertEquals(body.error.message, "Previous response with id 'resp_previous' not found.");
       assertEquals(body.error.type, 'invalid_request_error');
-      assertStringIncludes(body.error.message, 'previous_response_id');
-      assertStringIncludes(body.error.message, 'full input');
+      assertEquals(body.error.param, 'previous_response_id');
+      assertEquals(body.error.code, 'previous_response_not_found');
     },
   );
 
@@ -89,11 +90,12 @@ test('/v1/responses rejects item_reference at the entrypoint', async () => {
         }),
       });
 
-      assertEquals(response.status, 400);
+      assertEquals(response.status, 404);
       const body = await response.json();
+      assertEquals(body.error.message, "Item with id 'item_previous' not found.");
       assertEquals(body.error.type, 'invalid_request_error');
-      assertStringIncludes(body.error.message, 'item_reference');
-      assertStringIncludes(body.error.message, 'full input');
+      assertEquals(body.error.param, 'input');
+      assertEquals(body.error.code, null);
     },
   );
 

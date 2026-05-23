@@ -6,7 +6,7 @@ import { resolveModelForRequest } from '../../../providers/registry.ts';
 import type { ModelEndpoint, ProviderModelRecord } from '../../../providers/types.ts';
 import type { ChatCompletionsPayload } from '../../../shared/protocol/chat-completions.ts';
 import type { MessagesPayload } from '../../../shared/protocol/messages.ts';
-import type { ResponsesPayload } from '../../../shared/protocol/responses.ts';
+import type { ResponseItemReference, ResponsesPayload } from '../../../shared/protocol/responses.ts';
 import { type LlmTargetApi, type ResponsesInterceptor, type ResponsesInvocation, runInterceptors } from '../../interceptors.ts';
 import type { ExecuteResult } from '../../shared/errors/result.ts';
 import type { ResponsesStreamEvent } from '../../shared/protocol/responses.ts';
@@ -22,31 +22,53 @@ import { createRequestContext, openAiMissingModelResult, openAiUnsupportedEndpoi
 const CODEX_AUTO_REVIEW_ALIAS = 'codex-auto-review';
 const CODEX_AUTO_REVIEW_TARGET = 'gpt-5.4';
 
-type UnsupportedStatefulContinuationField = 'previous_response_id' | 'item_reference';
+const isItemReferenceInput = (item: unknown): item is ResponseItemReference =>
+  typeof item === 'object' && item !== null && (item as { type?: unknown }).type === 'item_reference';
 
-const isItemReferenceInput = (item: unknown): boolean => typeof item === 'object' && item !== null && (item as { type?: unknown }).type === 'item_reference';
-
-const unsupportedStatefulContinuationField = (payload: ResponsesPayload): UnsupportedStatefulContinuationField | undefined => {
+// previous_response_id and item_reference rely on stateful server-side conversation history
+// that this gateway does not hold, so any such reference is "not found" from our perspective.
+// We return OpenAI's exact "not found" envelopes (status, message, param, code) rather than
+// a custom "unsupported" error so that clients which key fallback off this contract — codex,
+// cline, openai-agents-python, etc., matching `code: previous_response_not_found` or the
+// `"Previous response with id" ... "not found"` / `"Item with id" ... "not found"` substrings —
+// transparently retry with the full input.
+// Verbatim payloads cross-verified from real upstream captures:
+// - https://github.com/cline/cline/issues/9399
+// - https://github.com/microsoft/semantic-kernel/issues/13128
+// - https://github.com/router-for-me/CLIProxyAPI/issues/999
+// - https://github.com/openai/openai-agents-python/issues/2020
+const statefulContinuationNotFoundResponse = (payload: ResponsesPayload): Response | undefined => {
   if (payload.previous_response_id !== undefined && payload.previous_response_id !== null) {
-    return 'previous_response_id';
+    return Response.json(
+      {
+        error: {
+          message: `Previous response with id '${payload.previous_response_id}' not found.`,
+          type: 'invalid_request_error',
+          param: 'previous_response_id',
+          code: 'previous_response_not_found',
+        },
+      },
+      { status: 400 },
+    );
   }
-  if (Array.isArray(payload.input) && payload.input.some(isItemReferenceInput)) {
-    return 'item_reference';
+  if (Array.isArray(payload.input)) {
+    const itemRef = payload.input.find(isItemReferenceInput);
+    if (itemRef) {
+      return Response.json(
+        {
+          error: {
+            message: `Item with id '${itemRef.id}' not found.`,
+            type: 'invalid_request_error',
+            param: 'input',
+            code: null,
+          },
+        },
+        { status: 404 },
+      );
+    }
   }
   return undefined;
 };
-
-const unsupportedStatefulContinuationResponse = (field: UnsupportedStatefulContinuationField): Response =>
-  Response.json(
-    {
-      error: {
-        message: `Responses API ${field} is not supported by this gateway. Send the full input instead of using server-side conversation state references.`,
-        type: 'invalid_request_error',
-        param: field,
-      },
-    },
-    { status: 400 },
-  );
 
 const responsesSourceInterceptorsForProvider = (binding: ProviderModelRecord): readonly ResponsesInterceptor[] => [...responsesSourceInterceptors, ...(binding.sourceInterceptors?.responses ?? [])];
 
@@ -97,14 +119,8 @@ export const serveResponses = async (c: Context): Promise<Response> => {
 
   try {
     const payload = rewriteResponsesEntryModelAlias(await c.req.json<ResponsesPayload>());
-    // previous_response_id and item_reference require stateful server-side
-    // continuation. We cannot reliably preserve that semantic across provider
-    // fallback and translated targets, so reject it at the Responses
-    // source boundary and make clients resend the full input instead.
-    const unsupportedField = unsupportedStatefulContinuationField(payload);
-    if (unsupportedField) {
-      return unsupportedStatefulContinuationResponse(unsupportedField);
-    }
+    const notFound = statefulContinuationNotFoundResponse(payload);
+    if (notFound) return notFound;
     const wantsStream = payload.stream === true;
     downstreamAbortController = wantsStream ? new AbortController() : undefined;
     request = createRequestContext(c, downstreamAbortController?.signal, wantsStream);
