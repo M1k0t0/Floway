@@ -20,7 +20,7 @@ const encodeShimPayloadForTest = (payload: unknown): string => {
     binary += String.fromCharCode(byte);
   }
 
-  return `cgws1.${btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')}`;
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 };
 
 const encodeWebSearchResultPayloadForTest = (payload: { content: Array<{ type: 'text'; text: string }> }) => encodeShimPayloadForTest({ content: payload.content });

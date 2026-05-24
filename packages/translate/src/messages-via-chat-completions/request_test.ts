@@ -83,7 +83,7 @@ test('translateMessagesToChatCompletions drops filtered-native tool_choice and r
                 type: 'web_search_result',
                 url: 'https://react.dev',
                 title: 'React',
-                encrypted_content: 'cgws1.payload',
+                encrypted_content: 'opaque-payload',
               },
             ],
           },
@@ -112,7 +112,7 @@ test('translateMessagesToChatCompletions drops filtered-native tool_choice and r
     {
       role: 'tool',
       tool_call_id: 'st_1',
-      content: '[{"type":"web_search_result","url":"https://react.dev","title":"React","encrypted_content":"cgws1.payload"}]',
+      content: '[{"type":"web_search_result","url":"https://react.dev","title":"React","encrypted_content":"opaque-payload"}]',
     },
   ]);
 });

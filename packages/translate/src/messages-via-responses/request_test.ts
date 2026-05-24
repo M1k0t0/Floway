@@ -76,7 +76,7 @@ test('translateMessagesToResponses drops filtered-native tool_choice and rewrite
                 type: 'web_search_result',
                 url: 'https://react.dev',
                 title: 'React',
-                encrypted_content: 'cgws1.payload',
+                encrypted_content: 'opaque-payload',
               },
             ],
           },
@@ -98,7 +98,7 @@ test('translateMessagesToResponses drops filtered-native tool_choice and rewrite
     {
       type: 'function_call_output',
       call_id: 'st_1',
-      output: '[{"type":"web_search_result","url":"https://react.dev","title":"React","encrypted_content":"cgws1.payload"}]',
+      output: '[{"type":"web_search_result","url":"https://react.dev","title":"React","encrypted_content":"opaque-payload"}]',
       status: 'completed',
     },
   ]);

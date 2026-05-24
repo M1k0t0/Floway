@@ -55,7 +55,7 @@ const requestContext = (apiKeyId?: string): RequestContext => ({
   ...(apiKeyId !== undefined ? { apiKeyId } : {}),
 });
 
-const encodeUnsignedPayload = (payload: unknown): string => `cgws1.${btoa(JSON.stringify(payload)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')}`;
+const encodeUnsignedPayload = (payload: unknown): string => btoa(JSON.stringify(payload)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 
 const makeNativeReplayPayload = (): MessagesPayload => ({
   model: 'claude-test',
@@ -224,7 +224,7 @@ const messagesResponseToUpstreamFrames = (response: MessagesResponse): ProtocolF
   return frames;
 };
 
-test('web search shim payload codecs use minimal cgws1 payloads', () => {
+test('web search shim payload codecs reject foreign payloads and unknown-shape payloads', () => {
   const encryptedContent = encodeWebSearchResultPayload({
     content: [{ type: 'text', text: 'Claude Shannon was born in 1916.' }],
   });

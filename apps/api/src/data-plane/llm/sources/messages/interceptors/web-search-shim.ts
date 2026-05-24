@@ -28,7 +28,6 @@ import { MESSAGES_WEB_SEARCH_ERROR_CODES } from '@copilot-gateway/protocols/mess
 
 const MAX_QUERY_LENGTH = 1000;
 const WEB_SEARCH_TOOL_NAME = 'web_search';
-const PAYLOAD_PREFIX = 'cgws1';
 
 type SearchResultOwnership = 'owned' | 'foreign';
 
@@ -140,15 +139,15 @@ const base64UrlToBytes = (value: string): Uint8Array | null => {
   }
 };
 
-const encodePayload = (payload: unknown): string => `${PAYLOAD_PREFIX}.${bytesToBase64Url(new TextEncoder().encode(JSON.stringify(payload)))}`;
+// Payload is base64url-encoded JSON with no envelope or prefix marker. Replay
+// detection is purely structural: a foreign upstream's opaque
+// `encrypted_content` / `encrypted_index` will fail base64url+JSON decoding or
+// fail the strict exact-keys schema validators below, so it round-trips through
+// the shim untouched.
+const encodePayload = (payload: unknown): string => bytesToBase64Url(new TextEncoder().encode(JSON.stringify(payload)));
 
 const decodePayload = (value: string): unknown | null => {
-  const [prefix, encoded, ...rest] = value.split('.');
-  if (prefix !== PAYLOAD_PREFIX || !encoded || rest.length > 0) {
-    return null;
-  }
-
-  const bytes = base64UrlToBytes(encoded);
+  const bytes = base64UrlToBytes(value);
   if (!bytes) {
     return null;
   }
@@ -364,7 +363,7 @@ const decodeOwnedReplayToolResult = (block: Extract<MessagesAssistantContentBloc
     // `web_search_tool_result_error` history. Copilot upstream accepts the
     // Anthropic API-reference error-code payloads directly, and downstream-
     // supplied native error history is downstream-owned. This shim only
-    // rewrites result arrays that carry our unsigned cgws1 replay payload.
+    // rewrites result arrays that carry our unsigned replay payload.
     return null;
   }
 
