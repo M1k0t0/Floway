@@ -189,6 +189,8 @@ const translateResponsesInput = async (input: string | ResponseInputItem[], load
       // translator runs. Reaching here means the reverse path was
       // skipped.
       throw new Error('Responses → Messages translator does not accept web_search_call input items; their reverse-path translation must happen before this translator runs.');
+    case 'image_generation_call':
+      throw new Error('Responses → Messages translator does not accept image_generation_call input items until item-by-id image storage is available.');
     default:
       // Exhaustiveness guard: a future ResponseInputItem variant must
       // explicitly opt into translator behavior.

@@ -172,3 +172,64 @@ test('responsesResultToEvents expands a web_search_call with the full 5-event li
     ],
   );
 });
+
+test('responsesResultToEvents expands a completed image_generation_call lifecycle', () => {
+  const frames = Array.from(
+    responsesResultToEvents({
+      id: 'resp_img',
+      object: 'response',
+      model: 'gpt-test',
+      status: 'completed',
+      output_text: '',
+      output: [
+        {
+          type: 'image_generation_call',
+          id: 'ig_1',
+          status: 'completed',
+          result: 'ZmFrZQ==',
+          revised_prompt: 'a cube',
+        },
+      ],
+      error: null,
+      incomplete_details: null,
+    }),
+  );
+
+  assertEquals(
+    frames.map(frame => frame.event.type),
+    [
+      'response.created',
+      'response.in_progress',
+      'response.output_item.added',
+      'response.image_generation_call.in_progress',
+      'response.image_generation_call.generating',
+      'response.image_generation_call.completed',
+      'response.output_item.done',
+      'response.completed',
+    ],
+  );
+});
+
+test('responsesResultToEvents omits image_generation_call completed event for failed items', () => {
+  const frames = Array.from(
+    responsesResultToEvents({
+      id: 'resp_img_failed',
+      object: 'response',
+      model: 'gpt-test',
+      status: 'completed',
+      output_text: '',
+      output: [
+        {
+          type: 'image_generation_call',
+          id: 'ig_1',
+          status: 'failed',
+          error: { message: 'failed', code: 'server_error' },
+        },
+      ],
+      error: null,
+      incomplete_details: null,
+    }),
+  );
+
+  assertEquals(frames.map(frame => frame.event.type).includes('response.image_generation_call.completed'), false);
+});

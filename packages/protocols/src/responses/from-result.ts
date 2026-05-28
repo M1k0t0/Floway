@@ -1,4 +1,5 @@
-import type { ResponseOutputCustomToolCall, ResponseOutputFunctionCall, ResponseOutputItem, ResponseOutputMessage, ResponseOutputReasoning, ResponseOutputWebSearchCall, ResponsesResult, ResponseStreamEvent, SequencedResponsesStreamEvent } from './index.ts';
+import { imageGenerationCallLifecycleEvents } from './image-generation-lifecycle.ts';
+import type { ResponseOutputCustomToolCall, ResponseOutputFunctionCall, ResponseOutputImageGenerationCall, ResponseOutputItem, ResponseOutputMessage, ResponseOutputReasoning, ResponseOutputWebSearchCall, ResponsesResult, ResponseStreamEvent, SequencedResponsesStreamEvent } from './index.ts';
 import { webSearchCallLifecycleEvents } from './web-search-lifecycle.ts';
 import { type EventFrame, eventFrame } from '../common/index.ts';
 
@@ -240,6 +241,11 @@ const responseWebSearchCallEvents = (item: ResponseOutputWebSearchCall, outputIn
   return [...startFrames, ...endFrames];
 };
 
+const responseImageGenerationCallEvents = (item: ResponseOutputImageGenerationCall, outputIndex: number): ResponseStreamEvent[] => {
+  const { startFrames, endFrames } = imageGenerationCallLifecycleEvents(item, outputIndex);
+  return [...startFrames, ...endFrames];
+};
+
 const responseOutputItemEvents = (item: ResponseOutputItem, outputIndex: number): ResponseStreamEvent[] => {
   switch (item.type) {
   case 'message': return responseMessageEvents(item, outputIndex);
@@ -247,6 +253,7 @@ const responseOutputItemEvents = (item: ResponseOutputItem, outputIndex: number)
   case 'function_call': return responseFunctionCallEvents(item, outputIndex);
   case 'custom_tool_call': return responseCustomToolCallEvents(item, outputIndex);
   case 'web_search_call': return responseWebSearchCallEvents(item, outputIndex);
+  case 'image_generation_call': return responseImageGenerationCallEvents(item, outputIndex);
   }
 };
 

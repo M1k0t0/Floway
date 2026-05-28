@@ -203,6 +203,10 @@ export const translateResponsesToChatCompletions = (payload: ResponsesPayload): 
         throw new Error('Responses → Chat Completions translator does not accept web_search_call input items; their reverse-path translation must happen before this translator runs.');
       }
 
+      if (item.type === 'image_generation_call') {
+        throw new Error('Responses → Chat Completions translator does not accept image_generation_call input items until item-by-id image storage is available.');
+      }
+
       if (item.role === 'assistant') {
         assistant = appendAssistantText(assistant, responsesContentToText(item.content));
         continue;

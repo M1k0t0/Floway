@@ -1,4 +1,5 @@
-import { withResponsesWebSearchShim } from './web-search-shim.ts';
+import { withResponsesServerToolShim } from './server-tool-shim.ts';
+import { webSearchServerTool } from './server-tools/web-search.ts';
 import type { ResponsesInterceptor } from '../../../interceptors.ts';
 
 // Source-side Responses interceptors. Every entry is attached to every
@@ -8,5 +9,7 @@ import type { ResponsesInterceptor } from '../../../interceptors.ts';
 // behaviors that must observe the source-side payload (e.g., the
 // `web_search` hosted tool the shim rewrites before upstream sees it).
 export const responsesSourceInterceptors: readonly ResponsesInterceptor[] = [
-  withResponsesWebSearchShim,
+  withResponsesServerToolShim([
+    webSearchServerTool,
+  ]),
 ];
