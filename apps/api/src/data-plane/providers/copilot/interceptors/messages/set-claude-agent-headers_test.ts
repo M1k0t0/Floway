@@ -84,3 +84,14 @@ test('Claude agent headers absent when metadata is not provided', async () => {
   assertEquals('user-agent' in ctx.headers, false);
   assertEquals('copilot-integration-id' in ctx.headers, false);
 });
+
+test('Claude agent headers skipped on claude-opus-4-8 even with full fingerprint', async () => {
+  const ctx = invocation({ ...basePayload(JSON.stringify({ device_id: 'dev-1', session_id: 'sess-1' })), model: 'claude-opus-4-8' });
+
+  await withClaudeAgentHeadersSet(ctx, stubRequest, okEvents);
+
+  assertEquals('user-agent' in ctx.headers, false);
+  assertEquals('openai-intent' in ctx.headers, false);
+  assertEquals('x-interaction-type' in ctx.headers, false);
+  assertEquals('copilot-integration-id' in ctx.headers, false);
+});

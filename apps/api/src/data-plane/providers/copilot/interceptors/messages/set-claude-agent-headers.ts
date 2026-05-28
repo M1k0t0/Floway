@@ -25,13 +25,28 @@ import type { MessagesInterceptor } from '../../../../llm/interceptors.ts';
  * Chat endpoint treats the full messages-proxy + Claude Code UA + no-integration
  * shape as `integrator: claude-code`, which can hide non-Claude Chat models.
  *
+ * `claude-opus-4-8` is currently excluded: that model's upstream WAF returns
+ * a generic 403 ("Access to this endpoint is forbidden") whenever a request
+ * carries the Claude-Code-style user-agent without a `copilot-integration-id`
+ * header. The same header set is accepted on `claude-opus-4-7`, so the gate
+ * is a model-id rollout gap on Copilot's side, not a policy choice on ours.
+ * Skipping the rewrite for 4-8 keeps the default Copilot identity (vscode-chat
+ * integration id + GitHubCopilotChat UA + conversation-agent intent) in
+ * place; that path is 200. TODO: remove this skip once Copilot's upstream
+ * accepts the Claude-Code identity on 4-8. Probed 2026-05-29.
+ *
  * References:
  * - https://github.com/microsoft/vscode-copilot-chat/blob/5863f5a7088958050792b5dccbe8b46c6e13eccc/src/extension/chatSessions/claude/node/claudeLanguageModelServer.ts#L479-L516
  * - https://github.com/caozhiyuan/copilot-api/blob/88840ed80000635902b90a35989b1e795d289fdf/src/services/copilot/create-messages.ts#L110-L116
  * - https://github.com/caozhiyuan/copilot-api/blob/88840ed80000635902b90a35989b1e795d289fdf/src/services/copilot/create-chat-completions.ts#L45-L61
  */
+const UPSTREAM_REJECTS_CLAUDE_AGENT_IDENTITY = new Set(['claude-opus-4-8']);
+
 export const withClaudeAgentHeadersSet: MessagesInterceptor = async (ctx, _request, run) => {
   if (ctx.targetApi !== 'messages') {
+    return await run();
+  }
+  if (UPSTREAM_REJECTS_CLAUDE_AGENT_IDENTITY.has(ctx.model)) {
     return await run();
   }
 
