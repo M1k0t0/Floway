@@ -4,6 +4,7 @@ import { pricingForCopilotModelKey, pricingForCopilotPublicModelId } from './pri
 import { assertEquals } from '../../../test-assert.ts';
 
 test('pricingForCopilotPublicModelId resolves Claude family by regex', () => {
+  assertEquals(pricingForCopilotPublicModelId('claude-opus-4-8'), { input: 5, cache_read: 0.5, cache_write: 6.25, output: 25 });
   assertEquals(pricingForCopilotPublicModelId('claude-opus-4-7'), { input: 5, cache_read: 0.5, cache_write: 6.25, output: 25 });
   assertEquals(pricingForCopilotPublicModelId('claude-opus-4-5'), { input: 5, cache_read: 0.5, cache_write: 6.25, output: 25 });
   assertEquals(pricingForCopilotPublicModelId('claude-sonnet-4-5'), { input: 3, cache_read: 0.3, cache_write: 3.75, output: 15 });

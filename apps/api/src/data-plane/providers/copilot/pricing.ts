@@ -9,8 +9,11 @@
 //
 // Source of truth for Copilot pricing updates:
 // https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing
-// When that page changes, mirror the new numbers here AND in
-// migrations/0011_usage_cost_snapshot.sql (its inline backfill table).
+// This table is the single source of truth going forward; edit it here when
+// pricing changes. migrations/0011_usage_cost_snapshot.sql holds a frozen
+// snapshot for one-shot historical cleanup and is deliberately not kept in
+// sync — historical rows for newly-priced models are recovered by re-running
+// the cost backfill against live D1, not by editing that migration.
 import { copilotPublicModelId } from './model-name.ts';
 import type { ModelPricing } from '@floway-dev/protocols/common';
 
@@ -18,7 +21,7 @@ type PricingRule = readonly [key: string | RegExp, pricing: ModelPricing];
 
 const COPILOT_MODEL_PRICING: readonly PricingRule[] = [
   [
-    /^claude-opus-4-[567]$/,
+    /^claude-opus-4-[5678]$/,
     {
       input: 5,
       cache_read: 0.5,
