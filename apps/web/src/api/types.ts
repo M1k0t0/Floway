@@ -15,12 +15,16 @@ export interface CustomUpstreamConfig {
   bearerTokenSet?: boolean;
 }
 
+// USD per million tokens, keyed by billing dimension. Mirrors
+// @floway-dev/protocols ModelPricing; every key is optional.
+export type ModelPricing = Partial<Record<'input' | 'input_cache_read' | 'input_cache_write' | 'input_image' | 'output' | 'output_image', number>>;
+
 export interface AzureDeployment {
   deployment: string;
   publicModelId?: string;
   supportedEndpoints: string[];
   display_name?: string;
-  cost?: { input: number; output: number; cache_read?: number; cache_write?: number };
+  cost?: ModelPricing;
   flagOverrides?: { enabled: boolean; values: Record<string, boolean> };
   limits?: { max_context_window_tokens?: number; max_prompt_tokens?: number; max_output_tokens?: number };
 }
@@ -88,7 +92,7 @@ export interface PublicModel {
   display_name?: string;
   limits?: ModelLimits;
   endpoints?: Record<string, ModelEndpointInfo>;
-  cost?: { input: number; output: number; cache_read?: number; cache_write?: number };
+  cost?: ModelPricing;
   kind?: 'chat' | 'embedding' | 'image';
 }
 

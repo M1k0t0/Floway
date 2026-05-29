@@ -195,10 +195,7 @@ test('/api/token-usage is visible to any authenticated user and includes all key
     modelKey: 'claude-sonnet-4',
     hour: '2026-03-15T10',
     requests: 2,
-    inputTokens: 10,
-    outputTokens: 5,
-    cacheReadTokens: 4,
-    cacheCreationTokens: 1,
+    tokens: { input: 10, output: 5, input_cache_read: 4, input_cache_write: 1 },
     cost: null,
   });
   await repo.usage.set({
@@ -208,10 +205,7 @@ test('/api/token-usage is visible to any authenticated user and includes all key
     modelKey: 'gpt-5',
     hour: '2026-03-15T11',
     requests: 1,
-    inputTokens: 20,
-    outputTokens: 8,
-    cacheReadTokens: 6,
-    cacheCreationTokens: 2,
+    tokens: { input: 20, output: 8, input_cache_read: 6, input_cache_write: 2 },
     cost: null,
   });
 
@@ -230,10 +224,10 @@ test('/api/token-usage is visible to any authenticated user and includes all key
   const otherRecord = body.find((record: { keyId: string }) => record.keyId === 'key_other');
   assertExists(ownRecord);
   assertExists(otherRecord);
-  assertEquals(ownRecord.cacheReadTokens, 4);
-  assertEquals(ownRecord.cacheCreationTokens, 1);
-  assertEquals(otherRecord.cacheReadTokens, 6);
-  assertEquals(otherRecord.cacheCreationTokens, 2);
+  assertEquals(ownRecord.tokens.input_cache_read, 4);
+  assertEquals(ownRecord.tokens.input_cache_write, 1);
+  assertEquals(otherRecord.tokens.input_cache_read, 6);
+  assertEquals(otherRecord.tokens.input_cache_write, 2);
 });
 
 test('/api/token-usage can include all key metadata for stable dashboard color slots', async () => {
@@ -252,8 +246,7 @@ test('/api/token-usage can include all key metadata for stable dashboard color s
     modelKey: 'gpt-5',
     hour: '2026-03-16T10',
     requests: 1,
-    inputTokens: 20,
-    outputTokens: 8,
+    tokens: { input: 20, output: 8 },
     cost: null,
   });
 
@@ -297,10 +290,7 @@ test('/api/token-usage merges Claude variants into backend base model records', 
     hour: '2026-03-17T10',
     upstream: 'copilot:1',
     requests: 1,
-    inputTokens: 10,
-    outputTokens: 5,
-    cacheReadTokens: 2,
-    cacheCreationTokens: 1,
+    tokens: { input: 10, output: 5, input_cache_read: 2, input_cache_write: 1 },
   };
 
   await repo.usage.set({
@@ -325,10 +315,7 @@ test('/api/token-usage merges Claude variants into backend base model records', 
     ...shared,
     model: 'gpt-5.3-codex',
     modelKey: 'gpt-5.3-codex',
-    inputTokens: 3,
-    outputTokens: 4,
-    cacheReadTokens: 0,
-    cacheCreationTokens: 0,
+    tokens: { input: 3, output: 4 },
     cost: null,
   });
 
@@ -342,8 +329,8 @@ test('/api/token-usage merges Claude variants into backend base model records', 
   assertExists(opus);
   assertExists(gpt);
   assertEquals(opus.requests, 3);
-  assertEquals(opus.inputTokens, 30);
-  assertEquals(opus.outputTokens, 15);
-  assertEquals(opus.cacheReadTokens, 6);
-  assertEquals(opus.cacheCreationTokens, 3);
+  assertEquals(opus.tokens.input, 30);
+  assertEquals(opus.tokens.output, 15);
+  assertEquals(opus.tokens.input_cache_read, 6);
+  assertEquals(opus.tokens.input_cache_write, 3);
 });

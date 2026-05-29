@@ -41,7 +41,7 @@ const handleImportFile = async (event: Event) => {
   try {
     const text = await file.text();
     const json = JSON.parse(text) as ExportPayload;
-    if (json.version !== 2 || !json.data) throw new Error('Unsupported export file: expected version 2 with a `data` field');
+    if (json.version !== 3 || !json.data) throw new Error('Unsupported export file: expected version 3 with a `data` field');
     importPayload.value = json;
   } catch (e: unknown) {
     importError.value = e instanceof Error ? e.message : String(e);
@@ -71,7 +71,7 @@ const doImport = async () => {
   importStatus.value = null;
   const { error } = await callApi(
     () => api.api.import.$post({
-      json: { version: 2 as const, mode: importMode.value, data: importPayload.value!.data },
+      json: { version: 3 as const, mode: importMode.value, data: importPayload.value!.data },
     }),
   );
   importLoading.value = false;

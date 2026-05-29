@@ -167,7 +167,7 @@ test('/v1/images/generations forwards a JSON request through a custom upstream a
   assertEquals(forwarded.model, 'gpt-image-2');
   assertEquals(forwarded.prompt, 'a shiba in space');
   const usageRows = await repo.usage.listAll();
-  assertEquals(usageRows.some(row => row.model === 'gpt-image-2' && row.inputTokens === 10 && row.outputTokens === 50), true);
+  assertEquals(usageRows.some(row => row.model === 'gpt-image-2' && row.tokens.input === 10 && row.tokens.output === 50), true);
 });
 
 test('/v1/images/edits forwards a multipart request through an Azure deployment and records usage', async () => {
@@ -233,5 +233,5 @@ test('/v1/images/edits forwards a multipart request through an Azure deployment 
   assertEquals(observedUrl?.endsWith('?api-version=preview'), true);
   assertEquals(observedForm?.get('model'), 'gpt-image-2');
   const usageRows = await repo.usage.listAll();
-  assertEquals(usageRows.some(row => row.model === 'gpt-image-2' && row.inputTokens === 7 && row.outputTokens === 11), true);
+  assertEquals(usageRows.some(row => row.model === 'gpt-image-2' && row.tokens.input === 7 && row.tokens.output === 11), true);
 });

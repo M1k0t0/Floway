@@ -122,7 +122,7 @@ test('/v1/embeddings records usage under request model when upstream omits model
   const usage = await repo.usage.listAll();
   assertEquals(usage.length, 1);
   assertEquals(usage[0].model, 'text-embedding-real');
-  assertEquals(usage[0].inputTokens, 1);
+  assertEquals(usage[0].tokens.input, 1);
 
   const performanceRows = await repo.performance.listAll();
   const requestTotal = performanceRows.find(row => row.metricScope === 'request_total');

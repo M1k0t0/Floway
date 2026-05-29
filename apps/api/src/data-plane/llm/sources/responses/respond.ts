@@ -17,11 +17,17 @@ import { isResponsesTerminalEvent, type ResponsesResult, type ResponsesStreamEve
 type RE = ResponseStreamEvent;
 type RR = ResponsesResult;
 
+// OpenAI Responses reports input_tokens inclusive of cached tokens; subtract
+// the cached split to recover the disjoint bare input.
 export const tokenUsageFromResponsesResult = (r: RR) => {
   const u = r.usage;
   if (!u) return null;
-  const read = u.input_tokens_details?.cached_tokens ?? 0;
-  return tokenUsage(u.input_tokens, u.output_tokens, read);
+  const cacheRead = u.input_tokens_details?.cached_tokens ?? 0;
+  return tokenUsage({
+    input: u.input_tokens - cacheRead,
+    input_cache_read: cacheRead,
+    output: u.output_tokens,
+  });
 };
 
 export const tokenUsageFromResponsesFrame = (f: ProtocolFrame<RE>) => (f.type === 'event' && 'response' in f.event ? tokenUsageFromResponsesResult((f.event as { response: RR }).response) : null);

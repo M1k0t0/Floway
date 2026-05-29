@@ -1,40 +1,80 @@
 import { getRepo } from '../../../repo/index.ts';
 import type { TelemetryModelIdentity, TokenUsage } from '../../../repo/types.ts';
+import type { BillingDimension } from '@floway-dev/protocols/common';
 
 const currentHour = (): string => new Date().toISOString().slice(0, 13);
 
-export const hasTokenUsage = (usage: TokenUsage): boolean => usage.inputTokens > 0 || usage.outputTokens > 0 || usage.cacheReadTokens > 0 || usage.cacheCreationTokens > 0;
+const BILLING_DIMENSIONS: readonly BillingDimension[] = ['input', 'input_cache_read', 'input_cache_write', 'input_image', 'output', 'output_image'];
 
-export const tokenUsage = (inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, cacheCreationTokens = 0): TokenUsage => ({
-  inputTokens,
-  outputTokens,
-  cacheReadTokens,
-  cacheCreationTokens,
-});
+export const hasTokenUsage = (usage: TokenUsage): boolean => BILLING_DIMENSIONS.some(dimension => (usage[dimension] ?? 0) > 0);
+
+// Drop zero / undefined dimensions so a usage map only carries the dimensions
+// actually billed.
+export const tokenUsage = (counts: TokenUsage): TokenUsage => {
+  const out: TokenUsage = {};
+  for (const dimension of BILLING_DIMENSIONS) {
+    const value = counts[dimension] ?? 0;
+    if (value > 0) out[dimension] = value;
+  }
+  return out;
+};
 
 export const tokenUsageFromPromptTokenResponse = (usage: unknown): TokenUsage | null => {
   if (!usage || typeof usage !== 'object') return null;
   const promptTokens = (usage as { prompt_tokens?: unknown }).prompt_tokens;
-  return typeof promptTokens === 'number' ? tokenUsage(promptTokens) : null;
+  return typeof promptTokens === 'number' ? tokenUsage({ input: promptTokens }) : null;
 };
 
 // OpenAI Images responses report usage as
-// `{input_tokens, output_tokens, total_tokens, input_tokens_details, output_tokens_details}`.
-// We only track the totals — the per-modality split (text vs image) has
-// no column on the usage table and cost computation uses input/output
-// against the existing ModelPricing schema.
+// `{input_tokens, output_tokens, total_tokens, input_tokens_details, output_tokens_details}`,
+// where the details objects split each total into `text_tokens` and
+// `image_tokens`. We map that split onto the billing dimensions: bare
+// input/output for the text modality, input_image/output_image for the image
+// modality. The details splits are disjoint and sum to their respective total.
 //
-// Either field present as a non-number (e.g. a string "5") is treated as
-// a malformed upstream payload rather than silently coerced to 0. That
-// matches the project's anti-fallback rule in AGENTS.md: refuse to invent
-// numbers for shapes we did not expect.
+// When a details object is missing but its total is present, the whole total is
+// charged on the bare dimension rather than inventing a split. A present field
+// that is a non-number is treated as a malformed upstream payload (return
+// null) rather than silently coerced — matching the anti-fallback rule in
+// AGENTS.md.
 export const tokenUsageFromImagesResponse = (usage: unknown): TokenUsage | null => {
   if (!usage || typeof usage !== 'object') return null;
-  const { input_tokens: input, output_tokens: output } = usage as { input_tokens?: unknown; output_tokens?: unknown };
-  if (input !== undefined && typeof input !== 'number') return null;
-  if (output !== undefined && typeof output !== 'number') return null;
-  if (input === undefined && output === undefined) return null;
-  return tokenUsage(input ?? 0, output ?? 0);
+  const { input_tokens: inputTotal, output_tokens: outputTotal, input_tokens_details: inputDetails, output_tokens_details: outputDetails } = usage as ImagesUsageShape;
+
+  if (inputTotal !== undefined && typeof inputTotal !== 'number') return null;
+  if (outputTotal !== undefined && typeof outputTotal !== 'number') return null;
+  if (inputTotal === undefined && outputTotal === undefined) return null;
+
+  const input = splitModalityCounts('input', 'input_image', inputTotal, inputDetails);
+  if (input === null) return null;
+  const output = splitModalityCounts('output', 'output_image', outputTotal, outputDetails);
+  if (output === null) return null;
+
+  return tokenUsage({ ...input, ...output });
+};
+
+interface ImagesUsageShape {
+  input_tokens?: unknown;
+  output_tokens?: unknown;
+  input_tokens_details?: unknown;
+  output_tokens_details?: unknown;
+}
+
+const splitModalityCounts = (
+  textDimension: BillingDimension,
+  imageDimension: BillingDimension,
+  total: number | undefined,
+  details: unknown,
+): TokenUsage | null => {
+  if (total === undefined) return {};
+  if (details === undefined) return { [textDimension]: total };
+  if (!details || typeof details !== 'object') return null;
+  const { text_tokens: text, image_tokens: image } = details as { text_tokens?: unknown; image_tokens?: unknown };
+  if (text !== undefined && typeof text !== 'number') return null;
+  if (image !== undefined && typeof image !== 'number') return null;
+  // A details object that carries neither split is as good as absent.
+  if (text === undefined && image === undefined) return { [textDimension]: total };
+  return { [textDimension]: text ?? 0, [imageDimension]: image ?? 0 };
 };
 
 export const recordTokenUsage = async (keyId: string, modelIdentity: TelemetryModelIdentity, usage: TokenUsage): Promise<void> => {
@@ -46,10 +86,7 @@ export const recordTokenUsage = async (keyId: string, modelIdentity: TelemetryMo
       modelKey: modelIdentity.modelKey,
       hour: currentHour(),
       requests: 1,
-      inputTokens: usage.inputTokens,
-      outputTokens: usage.outputTokens,
-      cacheReadTokens: usage.cacheReadTokens,
-      cacheCreationTokens: usage.cacheCreationTokens,
+      tokens: usage,
       cost: modelIdentity.cost,
     }),
     (async () => {

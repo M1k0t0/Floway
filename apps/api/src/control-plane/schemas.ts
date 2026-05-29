@@ -47,10 +47,12 @@ const azureDeploymentSchema = z.object({
   supportedEndpoints: z.array(z.string()).min(1),
   display_name: z.string().optional(),
   cost: z.object({
-    input: z.number(),
-    output: z.number(),
-    cache_read: z.number().optional(),
-    cache_write: z.number().optional(),
+    input: z.number().optional(),
+    output: z.number().optional(),
+    input_cache_read: z.number().optional(),
+    input_cache_write: z.number().optional(),
+    input_image: z.number().optional(),
+    output_image: z.number().optional(),
   }).optional(),
   flagOverrides: z.object({
     enabled: z.boolean(),
@@ -175,7 +177,7 @@ export const searchConfigSchema = z.object({
 // --- data transfer ---
 
 export const importBody = z.object({
-  version: z.literal(2, { error: 'version must be 2' }),
+  version: z.literal(3, { error: 'version must be 3' }),
   mode: z.enum(['merge', 'replace'], { error: "mode must be 'merge' or 'replace'" }),
   data: z.unknown().optional(),
 });

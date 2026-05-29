@@ -15,31 +15,39 @@ import type { MessagesMessageDeltaEvent, MessagesStreamEventData, MessagesUsage 
 
 type MU = MessagesUsage | NonNullable<MessagesMessageDeltaEvent['usage']>;
 
-export const tokenUsageFromMessagesUsage = (u: MU) => {
-  const read = u.cache_read_input_tokens ?? 0;
-  const created = u.cache_creation_input_tokens ?? 0;
-  return tokenUsage((u.input_tokens ?? 0) + read + created, u.output_tokens, read, created);
-};
+// Anthropic already reports disjoint token counts: input_tokens excludes the
+// cache figures. Map them straight onto the billing dimensions without summing.
+export const tokenUsageFromMessagesUsage = (u: MU) =>
+  tokenUsage({
+    input: u.input_tokens ?? 0,
+    input_cache_read: u.cache_read_input_tokens ?? 0,
+    input_cache_write: u.cache_creation_input_tokens ?? 0,
+    output: u.output_tokens,
+  });
 
 export const createMessagesStreamUsageState = () => ({
-  current: tokenUsage(),
+  current: tokenUsage({}),
   gotInputFromStart: false,
 });
 
 type MessagesStreamUsageState = ReturnType<typeof createMessagesStreamUsageState>;
-const mergeMessagesUsage = (state: MessagesStreamUsageState, u: MU) => Object.assign(state.current, tokenUsageFromMessagesUsage(u));
+const mergeMessagesUsage = (state: MessagesStreamUsageState, u: MU) => (state.current = tokenUsageFromMessagesUsage(u));
 
 export const tokenUsageFromMessagesFrame = (frame: ProtocolFrame<MessagesStreamEventData>, state: MessagesStreamUsageState) => {
   if (frame.type !== 'event') return null;
   const { event } = frame;
   if (event.type === 'message_start') {
     const usage = mergeMessagesUsage(state, event.message.usage);
-    state.gotInputFromStart ||= usage.inputTokens > 0;
+    // A fully cache-hit prompt reports message_start with input=0 but non-zero
+    // cache reads; the input accounting still arrived, so the flag must reflect
+    // every input-side dimension, not bare input alone — otherwise a later
+    // delta carrying input_tokens re-merges and drops the cache counts.
+    state.gotInputFromStart ||= (usage.input ?? 0) + (usage.input_cache_read ?? 0) + (usage.input_cache_write ?? 0) > 0;
   }
   if (event.type === 'message_delta' && event.usage) {
     if (!state.gotInputFromStart && event.usage.input_tokens !== undefined) {
       mergeMessagesUsage(state, event.usage);
-    } else state.current.outputTokens = event.usage.output_tokens;
+    } else state.current.output = event.usage.output_tokens;
   }
   return event.type === 'message_stop' ? state.current : null;
 };

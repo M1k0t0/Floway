@@ -224,7 +224,7 @@ test('Custom provider projects display_name / created / limits / cost from a flo
         display_name: 'Rich Model',
         created_at: '2026-04-01T00:00:00Z',
         limits: { max_output_tokens: 8192, max_context_window_tokens: 200000 },
-        cost: { input: 3, output: 15, cache_read: 0.3 },
+        cost: { input: 3, output: 15, input_cache_read: 0.3 },
       }],
     }),
     async () => {
@@ -237,7 +237,7 @@ test('Custom provider projects display_name / created / limits / cost from a flo
       assertEquals(model.limits.max_context_window_tokens, 200000);
       assertEquals(model.cost?.input, 3);
       assertEquals(model.cost?.output, 15);
-      assertEquals(model.cost?.cache_read, 0.3);
+      assertEquals(model.cost?.input_cache_read, 0.3);
 
       const pricing = instance.provider.getPricingForModelKey('m-rich');
       assertEquals(pricing?.input, 3);

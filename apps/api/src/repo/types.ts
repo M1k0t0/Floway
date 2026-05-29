@@ -1,6 +1,6 @@
 import type { HistogramBucket } from '../shared/performance-histogram.ts';
 import type { WebSearchProviderName } from '../shared/web-search-providers.ts';
-import type { ModelPricing } from '@floway-dev/protocols/common';
+import type { BillingDimension, ModelPricing } from '@floway-dev/protocols/common';
 
 export interface ApiKey {
   id: string;
@@ -19,13 +19,12 @@ export interface UsageRecord {
   modelKey: string;
   hour: string;
   requests: number;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens?: number;
-  cacheCreationTokens?: number;
+  // Disjoint per-dimension token counts for this bucket (see TokenUsage).
+  tokens: TokenUsage;
   // Pricing snapshot taken at write time. null means the provider did not
   // resolve pricing for this model (Custom upstreams, unknown Copilot
-  // public id, etc.). Aggregation treats null as cost 0.
+  // public id, etc.). The repo derives per-dimension unit prices from it via
+  // unitPriceForDimension; aggregation treats a null snapshot as cost 0.
   cost: ModelPricing | null;
 }
 
@@ -39,12 +38,9 @@ export interface TelemetryModelIdentity {
   cost: ModelPricing | null;
 }
 
-export interface TokenUsage {
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheCreationTokens: number;
-}
+// Disjoint per-dimension token counts. Absent keys mean zero for that
+// dimension. No key's count overlaps another's.
+export type TokenUsage = Partial<Record<BillingDimension, number>>;
 
 export type SearchUsageAction = 'search' | 'fetch_page';
 

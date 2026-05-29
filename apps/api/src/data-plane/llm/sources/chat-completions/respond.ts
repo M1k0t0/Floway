@@ -18,9 +18,17 @@ import { type ProtocolFrame, sseCommentFrame, sseFrame } from '@floway-dev/proto
 type CC = ChatCompletionChunk;
 type CU = NonNullable<ChatCompletionResponse['usage']>;
 
+// OpenAI Chat usage reports prompt_tokens inclusive of cached and
+// cache-creation tokens; subtract them to recover the disjoint bare input.
 export const tokenUsageFromChatUsage = (u: CU) => {
-  const read = u.prompt_tokens_details?.cached_tokens ?? 0;
-  return tokenUsage(u.prompt_tokens, u.completion_tokens, read);
+  const cacheRead = u.prompt_tokens_details?.cached_tokens ?? 0;
+  const cacheWrite = u.prompt_tokens_details?.cache_creation_input_tokens ?? 0;
+  return tokenUsage({
+    input: u.prompt_tokens - cacheRead - cacheWrite,
+    input_cache_read: cacheRead,
+    input_cache_write: cacheWrite,
+    output: u.completion_tokens,
+  });
 };
 
 export const tokenUsageFromChatFrame = (f: ProtocolFrame<CC>) =>

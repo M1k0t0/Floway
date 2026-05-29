@@ -16,10 +16,16 @@ import type { GeminiErrorResponse, GeminiGenerateContentResponse, GeminiStreamEv
 type GE = GeminiStreamEvent;
 type GR = GeminiGenerateContentResponse;
 
+// Gemini reports promptTokenCount inclusive of cachedContentTokenCount
+// (verified against the Google GenAI SDK docs); subtract it for disjoint input.
+// Reasoning (thoughts) tokens are billed as output.
 export const tokenUsageFromGeminiUsageMetadata = (m: GeminiUsageMetadata) => {
-  const input = m.promptTokenCount ?? 0;
-  const output = (m.candidatesTokenCount ?? 0) + (m.thoughtsTokenCount ?? 0);
-  return tokenUsage(input, output, m.cachedContentTokenCount ?? 0);
+  const cacheRead = m.cachedContentTokenCount ?? 0;
+  return tokenUsage({
+    input: (m.promptTokenCount ?? 0) - cacheRead,
+    input_cache_read: cacheRead,
+    output: (m.candidatesTokenCount ?? 0) + (m.thoughtsTokenCount ?? 0),
+  });
 };
 
 export const tokenUsageFromGeminiResponse = (r: GR) => (r.usageMetadata ? tokenUsageFromGeminiUsageMetadata(r.usageMetadata) : null);

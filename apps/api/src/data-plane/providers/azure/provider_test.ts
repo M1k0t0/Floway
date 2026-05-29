@@ -324,7 +324,7 @@ test('createAzureProvider attaches cost field from deployment config', async () 
             deployment: 'gpt-prod',
             publicModelId: 'gpt-public',
             supportedEndpoints: ['/chat/completions'],
-            cost: { input: 2.5, output: 15, cache_read: 0.25 },
+            cost: { input: 2.5, output: 15, input_cache_read: 0.25 },
           },
           {
             deployment: 'gpt-small',
@@ -335,7 +335,7 @@ test('createAzureProvider attaches cost field from deployment config', async () 
     }),
   );
   const models = await instance.provider.getProvidedModels();
-  assertEquals(models[0].cost, { input: 2.5, output: 15, cache_read: 0.25 });
+  assertEquals(models[0].cost, { input: 2.5, output: 15, input_cache_read: 0.25 });
   assertEquals(models[1].cost, undefined);
 });
 

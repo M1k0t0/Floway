@@ -182,8 +182,8 @@ test('/v1/responses rewrites codex-auto-review to gpt-5.4 low reasoning at the e
   const usage = await repo.usage.listAll();
   assertEquals(usage.length, 1);
   assertEquals(usage[0].model, 'gpt-5.4');
-  assertEquals(usage[0].inputTokens, 3);
-  assertEquals(usage[0].outputTokens, 5);
+  assertEquals(usage[0].tokens.input, 3);
+  assertEquals(usage[0].tokens.output, 5);
 });
 
 test('/v1/responses direct mode preserves custom apply_patch and fixes mismatched stream item IDs', async () => {

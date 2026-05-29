@@ -194,22 +194,16 @@ const nonNegativeNumberField = (value: unknown, field: string): number => {
   return value;
 };
 
+const PRICING_DIMENSIONS: readonly (keyof ModelPricing)[] = ['input', 'input_cache_read', 'input_cache_write', 'input_image', 'output', 'output_image'];
+
 const pricingField = (value: unknown, field: string): ModelPricing | undefined => {
   const record = optionalMetadataRecord(value, field);
   if (!record) return undefined;
-  if (record.input === undefined && record.output === undefined && record.cache_read === undefined && record.cache_write === undefined) {
-    return undefined;
+  const pricing: ModelPricing = {};
+  for (const dimension of PRICING_DIMENSIONS) {
+    if (record[dimension] !== undefined) pricing[dimension] = nonNegativeNumberField(record[dimension], `${field}.${dimension}`);
   }
-  if (record.input === undefined || record.output === undefined) {
-    throw new Error(`Malformed azure upstream config: ${field}.input and ${field}.output must both be set when ${field} is provided`);
-  }
-  const pricing: ModelPricing = {
-    input: nonNegativeNumberField(record.input, `${field}.input`),
-    output: nonNegativeNumberField(record.output, `${field}.output`),
-  };
-  if (record.cache_read !== undefined) pricing.cache_read = nonNegativeNumberField(record.cache_read, `${field}.cache_read`);
-  if (record.cache_write !== undefined) pricing.cache_write = nonNegativeNumberField(record.cache_write, `${field}.cache_write`);
-  return pricing;
+  return Object.keys(pricing).length > 0 ? pricing : undefined;
 };
 
 const deploymentField = (value: unknown, index: number): AzureDeploymentConfig => {

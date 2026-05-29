@@ -101,10 +101,7 @@ const USAGE_1: UsageRecord = {
   modelKey: 'claude-opus-4.7',
   hour: '2026-01-01T10',
   requests: 5,
-  inputTokens: 1000,
-  outputTokens: 500,
-  cacheReadTokens: 120,
-  cacheCreationTokens: 80,
+  tokens: { input: 1000, output: 500, input_cache_read: 120, input_cache_write: 80 },
   cost: null,
 };
 
@@ -115,10 +112,7 @@ const USAGE_2: UsageRecord = {
   modelKey: 'gpt-prod',
   hour: '2026-01-01T11',
   requests: 3,
-  inputTokens: 2000,
-  outputTokens: 800,
-  cacheReadTokens: 200,
-  cacheCreationTokens: 50,
+  tokens: { input: 2000, output: 800, input_cache_read: 200, input_cache_write: 50 },
   cost: null,
 };
 
@@ -187,7 +181,7 @@ const doExport = async (app: Hono, includePerformance = false) => {
   return (await resp.json()) as Record<string, any>;
 };
 
-const doImport = async (app: Hono, mode: string, data: unknown, version: unknown = 2) => {
+const doImport = async (app: Hono, mode: string, data: unknown, version: unknown = 3) => {
   const resp = await app.request('/import', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -211,7 +205,7 @@ test('export emits latest v2 structure with upstreams only', async () => {
 
   const result = await doExport(app);
 
-  assertEquals(result.version, 2);
+  assertEquals(result.version, 3);
   assertEquals(typeof result.exportedAt, 'string');
   assertEquals(result.data.apiKeys, []);
   assertEquals(result.data.upstreams, []);
@@ -277,9 +271,9 @@ test('import rejects missing or mismatched version before deleting data', async 
   const missingVersion = { status: missingVersionResponse.status, body: (await missingVersionResponse.json()) as Record<string, any> };
 
   assertEquals(oldVersion.status, 400);
-  assertEquals(oldVersion.body.error, 'version must be 2');
+  assertEquals(oldVersion.body.error, 'version must be 3');
   assertEquals(missingVersion.status, 400);
-  assertEquals(missingVersion.body.error, 'version must be 2');
+  assertEquals(missingVersion.body.error, 'version must be 3');
   assertEquals(await repo.apiKeys.list(), [KEY_A]);
   assertEquals((await repo.upstreams.list()).map(upstream => upstream.id), ['up_custom_a']);
 });
@@ -538,14 +532,14 @@ test('import rejects missing latest-v2 arrays before clearing existing data', as
 test('import validates mode and data before mutating', async () => {
   const { app } = setup();
 
-  const invalidMode = await doImport(app, 'invalid', {}, 2);
+  const invalidMode = await doImport(app, 'invalid', {}, 3);
   const missingData = await app.request('/import', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mode: 'replace', version: 2 }),
+    body: JSON.stringify({ mode: 'replace', version: 3 }),
   });
-  const missingUpstreams = await doImport(app, 'merge', {}, 2);
-  const emptyMerge = await doImport(app, 'merge', latestImportData(), 2);
+  const missingUpstreams = await doImport(app, 'merge', {}, 3);
+  const emptyMerge = await doImport(app, 'merge', latestImportData(), 3);
 
   assertEquals(invalidMode.status, 400);
   assertEquals(invalidMode.body.error, "mode must be 'merge' or 'replace'");

@@ -99,15 +99,14 @@ const updateLimit = (i: number, key: 'max_context_window_tokens' | 'max_prompt_t
   updateAt(i, { limits: Object.keys(limits).length > 0 ? limits : undefined });
 };
 
-const updateCost = (i: number, key: 'input' | 'output' | 'cache_read' | 'cache_write', value: string) => {
+const updateCost = (i: number, key: 'input' | 'input_image' | 'output' | 'output_image' | 'input_cache_read' | 'input_cache_write', value: string) => {
   const cost = { ...(deployments.value[i]?.cost ?? {} as Partial<AzureDeployment['cost']> & object) };
   const num = value === '' ? undefined : Number(value);
   if (num === undefined || !Number.isFinite(num)) delete (cost as Record<string, unknown>)[key];
   else (cost as Record<string, unknown>)[key] = num;
-  // cost must include input + output for the server's pricingField check; if
-  // both are missing we drop the whole object so the row stores `cost:
-  // undefined` rather than a half-filled stub that fails validation.
-  const hasAny = ['input', 'output', 'cache_read', 'cache_write'].some(k => (cost as Record<string, unknown>)[k] !== undefined);
+  // Drop the whole object once every dimension is cleared so the row stores
+  // `cost: undefined` rather than a half-filled stub.
+  const hasAny = ['input', 'input_image', 'output', 'output_image', 'input_cache_read', 'input_cache_write'].some(k => (cost as Record<string, unknown>)[k] !== undefined);
   updateAt(i, { cost: hasAny ? (cost as AzureDeployment['cost']) : undefined });
 };
 
@@ -247,23 +246,31 @@ const apiTypeFor = (i: number): ApiType => apiTypeFromEndpoints(deployments.valu
           <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <label class="block space-y-1">
               <span class="block text-[11px] font-medium text-gray-500">Input ($/MTok)</span>
-              <Input type="number" :model-value="deployment.cost?.input" placeholder="e.g. 2.5" size="sm" class="font-mono" @update:model-value="v => updateCost(i, 'input', String(v))" />
+              <Input type="number" :model-value="deployment.cost?.input" placeholder="e.g. 5" size="sm" class="font-mono" @update:model-value="v => updateCost(i, 'input', String(v))" />
+            </label>
+            <label class="block space-y-1">
+              <span class="block text-[11px] font-medium text-gray-500">Image Input ($/MTok)</span>
+              <Input type="number" :model-value="deployment.cost?.input_image" placeholder="e.g. 8" size="sm" class="font-mono" @update:model-value="v => updateCost(i, 'input_image', String(v))" />
             </label>
             <label class="block space-y-1">
               <span class="block text-[11px] font-medium text-gray-500">Output ($/MTok)</span>
-              <Input type="number" :model-value="deployment.cost?.output" placeholder="e.g. 15" size="sm" class="font-mono" @update:model-value="v => updateCost(i, 'output', String(v))" />
+              <Input type="number" :model-value="deployment.cost?.output" placeholder="e.g. 10" size="sm" class="font-mono" @update:model-value="v => updateCost(i, 'output', String(v))" />
+            </label>
+            <label class="block space-y-1">
+              <span class="block text-[11px] font-medium text-gray-500">Image Output ($/MTok)</span>
+              <Input type="number" :model-value="deployment.cost?.output_image" placeholder="e.g. 30" size="sm" class="font-mono" @update:model-value="v => updateCost(i, 'output_image', String(v))" />
             </label>
             <label class="block space-y-1">
               <span class="block text-[11px] font-medium text-gray-500">Cache Read ($/MTok)</span>
-              <Input type="number" :model-value="deployment.cost?.cache_read" placeholder="e.g. 0.25" size="sm" class="font-mono" @update:model-value="v => updateCost(i, 'cache_read', String(v))" />
+              <Input type="number" :model-value="deployment.cost?.input_cache_read" placeholder="e.g. 0.25" size="sm" class="font-mono" @update:model-value="v => updateCost(i, 'input_cache_read', String(v))" />
             </label>
             <label class="block space-y-1">
               <span class="block text-[11px] font-medium text-gray-500">Cache Write ($/MTok)</span>
-              <Input type="number" :model-value="deployment.cost?.cache_write" placeholder="leave blank if not charged" size="sm" class="font-mono" @update:model-value="v => updateCost(i, 'cache_write', String(v))" />
+              <Input type="number" :model-value="deployment.cost?.input_cache_write" placeholder="leave blank if not charged" size="sm" class="font-mono" @update:model-value="v => updateCost(i, 'input_cache_write', String(v))" />
             </label>
           </div>
           <p class="text-[11px] leading-relaxed text-gray-500">
-            Per-million-token USD rates. Leave all four blank to omit pricing. <span class="text-gray-400">Input</span> and <span class="text-gray-400">Output</span> must both be filled or both blank; <span class="text-gray-400">Cache Read</span> / <span class="text-gray-400">Cache Write</span> are independently optional.
+            Per-million-token USD rates; every field is independently optional — leave all blank to omit pricing. <span class="text-gray-400">Image Input</span> / <span class="text-gray-400">Image Output</span> apply to image-token models (e.g. gpt-image) and fall back to <span class="text-gray-400">Input</span> / <span class="text-gray-400">Output</span> when blank.
           </p>
         </div>
 

@@ -251,7 +251,7 @@ test('/models returns the same superset payload as /v1/models', async () => {
             display_name: 'Claude Opus 4.7 XHigh',
             limits: {},
             kind: 'chat',
-            cost: { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
+            cost: { input: 5, output: 25, input_cache_read: 0.5, input_cache_write: 6.25 },
           },
           {
             id: 'embedding-only',

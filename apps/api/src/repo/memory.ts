@@ -21,6 +21,9 @@ import type {
 } from './types.ts';
 import { latencyBucketForMs } from '../shared/performance-histogram.ts';
 import { assertWebSearchProviderName } from '../shared/web-search-providers.ts';
+import { type BillingDimension, type ModelPricing, unitPriceForDimension } from '@floway-dev/protocols/common';
+
+const BILLING_DIMENSIONS: readonly BillingDimension[] = ['input', 'input_cache_read', 'input_cache_write', 'input_image', 'output', 'output_image'];
 
 class MemoryApiKeyRepo implements ApiKeyRepo {
   private store = new Map<string, ApiKey>();
@@ -55,36 +58,68 @@ class MemoryApiKeyRepo implements ApiKeyRepo {
   }
 }
 
+// Mirrors the D1 schema: one entry per (bucket, dimension) with a token count
+// and a per-dimension unit_price snapshot, plus a separate request count per
+// bucket. Records are reassembled into UsageRecord on read, folding the
+// per-dimension unit prices back into a ModelPricing snapshot.
+interface UsageBucketIdentity {
+  keyId: string;
+  model: string;
+  upstream: string | null;
+  modelKey: string;
+  hour: string;
+}
+
+interface UsageBucketState extends UsageBucketIdentity {
+  tokens: Partial<Record<BillingDimension, number>>;
+  unitPrices: Partial<Record<BillingDimension, number>>;
+  requests: number;
+}
+
 class MemoryUsageRepo implements UsageRepo {
-  private store = new Map<string, UsageRecord>();
+  private store = new Map<string, UsageBucketState>();
 
   private key(r: { keyId: string; model: string; upstream: string | null; modelKey: string; hour: string }): string {
     return [r.keyId, r.model, r.upstream ?? '', r.modelKey, r.hour].join('\0');
   }
 
-  private normalize(record: UsageRecord): UsageRecord {
-    return {
-      ...record,
-      upstream: record.upstream ?? null,
-      cacheReadTokens: record.cacheReadTokens ?? 0,
-      cacheCreationTokens: record.cacheCreationTokens ?? 0,
-      cost: record.cost ?? null,
-    };
+  private dimensionEntries(record: UsageRecord): { dimension: BillingDimension; tokens: number; unitPrice: number | null }[] {
+    return BILLING_DIMENSIONS.flatMap(dimension => {
+      const tokens = record.tokens[dimension] ?? 0;
+      return tokens > 0 ? [{ dimension, tokens, unitPrice: unitPriceForDimension(record.cost, dimension) }] : [];
+    });
+  }
+
+  private toRecord(state: UsageBucketState): UsageRecord {
+    const tokens: Partial<Record<BillingDimension, number>> = {};
+    let cost: ModelPricing | null = null;
+    for (const dimension of BILLING_DIMENSIONS) {
+      const count = state.tokens[dimension];
+      if (count !== undefined) tokens[dimension] = count;
+      const unitPrice = state.unitPrices[dimension];
+      if (unitPrice !== undefined) (cost ??= {})[dimension] = unitPrice;
+    }
+    return { keyId: state.keyId, model: state.model, upstream: state.upstream ?? null, modelKey: state.modelKey, hour: state.hour, requests: state.requests, tokens, cost };
+  }
+
+  private bucket(record: UsageRecord): UsageBucketState {
+    const k = this.key(record);
+    let state = this.store.get(k);
+    if (!state) {
+      state = { keyId: record.keyId, model: record.model, upstream: record.upstream ?? null, modelKey: record.modelKey, hour: record.hour, tokens: {}, unitPrices: {}, requests: 0 };
+      this.store.set(k, state);
+    }
+    return state;
   }
 
   record(record: UsageRecord): Promise<void> {
-    const k = this.key(record);
-    const existing = this.store.get(k);
-    if (existing) {
-      existing.requests += record.requests;
-      existing.inputTokens += record.inputTokens;
-      existing.outputTokens += record.outputTokens;
-      existing.cacheReadTokens = (existing.cacheReadTokens ?? 0) + (record.cacheReadTokens ?? 0);
-      existing.cacheCreationTokens = (existing.cacheCreationTokens ?? 0) + (record.cacheCreationTokens ?? 0);
-      // COALESCE: first-write-wins for the pricing snapshot.
-      existing.cost = existing.cost ?? record.cost ?? null;
-    } else {
-      this.store.set(k, this.normalize(record));
+    const state = this.bucket(record);
+    state.requests += record.requests;
+    for (const { dimension, tokens, unitPrice } of this.dimensionEntries(record)) {
+      state.tokens[dimension] = (state.tokens[dimension] ?? 0) + tokens;
+      // COALESCE(unit_price, excluded.unit_price): keep the existing snapshot
+      // once set, otherwise adopt the incoming price.
+      if (state.unitPrices[dimension] === undefined && unitPrice !== null) state.unitPrices[dimension] = unitPrice;
     }
     return Promise.resolve();
   }
@@ -96,17 +131,32 @@ class MemoryUsageRepo implements UsageRepo {
           if (opts.keyId && r.keyId !== opts.keyId) return false;
           return r.hour >= opts.start && r.hour < opts.end;
         })
-        .map(r => this.normalize(r))
+        .map(r => this.toRecord(r))
         .sort((a, b) => a.hour.localeCompare(b.hour)),
     );
   }
 
   listAll(): Promise<UsageRecord[]> {
-    return Promise.resolve([...this.store.values()].map(r => this.normalize(r)).sort((a, b) => a.hour.localeCompare(b.hour)));
+    return Promise.resolve([...this.store.values()].map(r => this.toRecord(r)).sort((a, b) => a.hour.localeCompare(b.hour)));
   }
 
   set(record: UsageRecord): Promise<void> {
-    this.store.set(this.key(record), this.normalize(record));
+    const k = this.key(record);
+    const state: UsageBucketState = {
+      keyId: record.keyId,
+      model: record.model,
+      upstream: record.upstream ?? null,
+      modelKey: record.modelKey,
+      hour: record.hour,
+      tokens: {},
+      unitPrices: {},
+      requests: record.requests,
+    };
+    for (const { dimension, tokens, unitPrice } of this.dimensionEntries(record)) {
+      state.tokens[dimension] = tokens;
+      if (unitPrice !== null) state.unitPrices[dimension] = unitPrice;
+    }
+    this.store.set(k, state);
     return Promise.resolve();
   }
 

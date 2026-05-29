@@ -66,19 +66,18 @@ const parseLimits = (value: unknown): CustomRawModel['limits'] => {
   return Object.keys(limits).length > 0 ? limits : undefined;
 };
 
+const PRICING_DIMENSIONS: readonly (keyof ModelPricing)[] = ['input', 'input_cache_read', 'input_cache_write', 'input_image', 'output', 'output_image'];
+
 const parseCost = (value: unknown): ModelPricing | undefined => {
-  // ModelPricing requires both `input` and `output`; cache_* are optional. We
-  // only admit a cost block that satisfies that minimum, otherwise drop it.
+  // Admit any subset of billing dimensions advertised on the upstream's
+  // /v1/models cost block; drop the whole block when none are present.
   if (!isRecord(value)) return undefined;
-  const input = optionalNumberField(value.input);
-  const output = optionalNumberField(value.output);
-  if (input === undefined || output === undefined) return undefined;
-  const cost: ModelPricing = { input, output };
-  const cache_read = optionalNumberField(value.cache_read);
-  if (cache_read !== undefined) cost.cache_read = cache_read;
-  const cache_write = optionalNumberField(value.cache_write);
-  if (cache_write !== undefined) cost.cache_write = cache_write;
-  return cost;
+  const cost: ModelPricing = {};
+  for (const dimension of PRICING_DIMENSIONS) {
+    const rate = optionalNumberField(value[dimension]);
+    if (rate !== undefined) cost[dimension] = rate;
+  }
+  return Object.keys(cost).length > 0 ? cost : undefined;
 };
 
 const parseKind = (value: unknown): ModelKind | undefined => {
