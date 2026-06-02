@@ -2,6 +2,7 @@
 // to its provider metadata, so generic source/target assembly does not need to
 // know which provider kind is running.
 
+import { withTopLevelCacheControlApplied } from './apply-top-level-cache-control.ts';
 import { withInlineImagesCompressed } from './compress-images.ts';
 import { withAnthropicBetaHeaderFiltered } from './filter-anthropic-beta-header.ts';
 import { withThinkingDisplayPromoted } from './promote-thinking-display.ts';
@@ -12,7 +13,7 @@ import { withInitiatorHeaderSet } from './set-initiator-header.ts';
 import { withInteractionIdHeaderSet } from './set-interaction-id-header.ts';
 import { withVisionHeaderSet } from './set-vision-header.ts';
 import { stripBillingAttribution } from './strip-billing-attribution.ts';
-import { withCacheControlScopeStripped } from './strip-cache-control-scope.ts';
+import { withCacheControlExtensionsStripped } from './strip-cache-control-extensions.ts';
 import { withEagerInputStreamingStripped } from './strip-eager-input-streaming.ts';
 import { withStructuredOutputFormatStripped } from './strip-structured-output-format.ts';
 import { withToolStrictStripped } from './strip-tool-strict.ts';
@@ -41,10 +42,15 @@ export const messagesCopilotSourceInterceptors = [
 // Order matters: payload-mutating interceptors run first so the header
 // interceptors see the final outgoing payload, then header interceptors
 // populate `invocation.headers` for the upstream call.
+//
+// `withTopLevelCacheControlApplied` runs before
+// `withCacheControlExtensionsStripped` so the ported marker on the last
+// cacheable block is cleaned in the same pass as the rest of the payload.
 export const messagesCopilotInterceptors = [
   withInlineImagesCompressed,
   withThinkingDisplayPromoted,
-  withCacheControlScopeStripped,
+  withTopLevelCacheControlApplied,
+  withCacheControlExtensionsStripped,
   withEagerInputStreamingStripped,
   withToolStrictStripped,
   withStructuredOutputFormatStripped,
@@ -65,10 +71,11 @@ export const messagesCopilotInterceptors = [
 // withInlineImagesCompressed runs first so count_tokens sizes the same
 // WebP-recompressed payload the chat path sends — and reuses its cached
 // transform — keeping the estimate consistent with the real request.
-// withThinkingDisplayPromoted / withCacheControlScopeStripped /
-// withEagerInputStreamingStripped are intentionally absent: pre-Path A they
-// also never ran on count_tokens (they lived in the messages target
-// interceptor list, not in the shared call() helper).
+// withThinkingDisplayPromoted / withTopLevelCacheControlApplied /
+// withCacheControlExtensionsStripped / withEagerInputStreamingStripped are
+// intentionally absent: pre-Path A they also never ran on count_tokens (they
+// lived in the messages target interceptor list, not in the shared call()
+// helper).
 export const messagesCountTokensCopilotInterceptors = [
   withInlineImagesCompressed,
   withVisionHeaderSet,
