@@ -26,6 +26,23 @@ test('the reserved private payload field round-trips through both inline and fil
   assertEquals(parsed?.private, { results: 'preserved' });
 });
 
+test('spilled payload file keys include the content hash to avoid overwrites', async () => {
+  const files = new MemoryFileProvider();
+  initFileProvider(files);
+  const createdAt = Date.UTC(2026, 4, 28, 12);
+
+  const first = await serializeStoredResponsesPayload('msg_same_id', 'key_a', createdAt, {
+    item: { type: 'message', id: 'msg_big', content: `a${'x'.repeat(600 * 1024)}` },
+  });
+  const second = await serializeStoredResponsesPayload('msg_same_id', 'key_a', createdAt, {
+    item: { type: 'message', id: 'msg_big', content: `b${'x'.repeat(600 * 1024)}` },
+  });
+
+  assertEquals((await files.listKeys('responses-items/v1/expires/')).length, 2);
+  assertEquals((await parseStoredResponsesPayload('msg_same_id', first))?.item, { type: 'message', id: 'msg_big', content: `a${'x'.repeat(600 * 1024)}` });
+  assertEquals((await parseStoredResponsesPayload('msg_same_id', second))?.item, { type: 'message', id: 'msg_big', content: `b${'x'.repeat(600 * 1024)}` });
+});
+
 test('sweepExpiredResponsesItemPayloadFiles deletes every elapsed hour bucket and leaves the current and future buckets intact', async () => {
   const files = new MemoryFileProvider();
   initFileProvider(files);

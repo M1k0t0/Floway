@@ -39,8 +39,8 @@ export const serializeStoredResponsesPayload = async (
   // `payload_json` column carries version, storage discriminator, key,
   // sha256, and byteLength; the body itself does not repeat them.
   const fileBody = encoder.encode(JSON.stringify(payload));
-  const key = await storedResponsesPayloadFileKey(id, apiKeyId, createdAt);
   const sha256 = await sha256Hex(fileBody);
+  const key = await storedResponsesPayloadFileKey(id, apiKeyId, createdAt, sha256);
   await getFileProvider().put(key, fileBody);
   return JSON.stringify({
     version: 1,
@@ -120,10 +120,11 @@ const storedResponsesPayloadFileKey = async (
   id: string,
   apiKeyId: string | null,
   createdAt: number,
+  sha256: string,
 ): Promise<string> => {
   const expires = new Date(createdAt + RESPONSES_ITEM_PAYLOAD_TTL_MS);
   const scope = (await sha256Hex(encoder.encode(apiKeyId ?? ''))).slice(0, 16);
-  return `${responsesItemsHourPrefix(expires.getTime())}${scope}/${id}.json`;
+  return `${responsesItemsHourPrefix(expires.getTime())}${scope}/${id}/${sha256}.json`;
 };
 
 // Files live under their expiry hour. A bucket whose hour is strictly before
