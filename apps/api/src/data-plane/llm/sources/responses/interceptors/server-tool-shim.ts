@@ -47,21 +47,31 @@ export interface InterceptedFunctionCall {
   arguments: Record<string, unknown> | null;
 }
 
+export interface ServerToolTerminal {
+  item: ServerToolOutputItem;
+  endEvents: ServerToolLifecycleEvent[];
+  /**
+   * Optional server-only blob registered on
+   * `request.statefulResponsesContext.privatePayload` under `slot.id` before
+   * the slot's wire item leaves materialize. The persistence layer stores it in
+   * `payload.private`; the replay-side `transformItems` reads it back to
+   * reconstruct the full IR.
+   */
+  privatePayload?: unknown;
+}
+
 export interface ServerToolResultSlot {
   id: string;
   startItem: ServerToolOutputItem;
   startEvents: ServerToolLifecycleEvent[];
-  result: Promise<{
-    item: ServerToolOutputItem;
-    endEvents: ServerToolLifecycleEvent[];
-    /**
-     * Optional server-only blob registered on `request.statefulResponsesContext.privatePayload`
-     * under `slot.id` before the slot's wire item leaves materialize. The
-     * persistence layer stores it in `payload.private`; the replay-side
-     * `transformItems` reads it back to reconstruct the full IR.
-     */
-    privatePayload?: unknown;
-  }>;
+  // The deferred portion of a slot's lifecycle, driven at materialization
+  // time. It yields any intermediate lifecycle events as they arrive — e.g.
+  // progressively-rendered `image_generation_call.partial_image` frames a
+  // streamed backend delivers over the course of the call — and returns the
+  // terminal item plus its closing events (and an optional server-only
+  // `privatePayload`). A tool with no progressive output simply yields nothing
+  // and returns immediately.
+  run: () => AsyncGenerator<ServerToolLifecycleEvent, ServerToolTerminal>;
 }
 
 export type ServerToolOutputItem = { type: string; id?: string; [key: string]: unknown };
@@ -98,7 +108,11 @@ export interface ServerToolHostedDispatch {
 
 export type ServerToolPrepareResult =
   | { type: 'inactive' }
-  | { type: 'invalid-request'; message: string; param: string }
+  // `code` overrides the envelope's `error.code` for tools that emulate a
+  // specific upstream's rejection vocabulary (e.g. `unknown_parameter` /
+  // `invalid_value` for the public Responses surface). Omitted falls back
+  // to the generic `invalid_request_error`.
+  | { type: 'invalid-request'; message: string; param: string; code?: string }
   | {
     type: 'active';
     baseToolName: string;
@@ -357,24 +371,22 @@ const stampServerToolEvent = (
     sequence_number: merge.sequenceNumber++,
   } as RawResponsesStreamEvent);
 
+// Builds a slot whose deferred lifecycle is driven by `run` at materialization:
+// `run` yields any intermediate frames as they arrive (e.g. image generation's
+// progressive partial_image previews) and returns the terminal item plus its
+// closing events. A one-shot tool whose terminal needs no preview frames (e.g.
+// web search: one backend round-trip, then the finished `web_search_call`)
+// passes a generator that yields nothing and returns the terminal directly.
 export const serverToolResultSlot = (args: {
   id: string;
   startItem: ServerToolOutputItem;
   startEvents: readonly ServerToolLifecycleEvent[];
-  result: Promise<{
-    item: ServerToolOutputItem;
-    endEvents: readonly ServerToolLifecycleEvent[];
-    privatePayload?: unknown;
-  }>;
+  run: () => AsyncGenerator<ServerToolLifecycleEvent, ServerToolTerminal>;
 }): ServerToolResultSlot => ({
   id: args.id,
   startItem: args.startItem,
   startEvents: [...args.startEvents],
-  result: args.result.then(result => ({
-    item: result.item,
-    endEvents: [...result.endEvents],
-    ...(result.privatePayload !== undefined ? { privatePayload: result.privatePayload } : {}),
-  })),
+  run: args.run,
 });
 
 const attachServerToolItemId = (item: ServerToolOutputItem, id: string): ResponsesOutputItem => ({ ...item, id } as ResponsesOutputItem);
@@ -397,7 +409,7 @@ const serverToolEndFrames = (
   merge: MergeState,
   outputIndex: number,
   slot: ServerToolResultSlot,
-  result: Awaited<ServerToolResultSlot['result']>,
+  result: ServerToolTerminal,
 ): ProtocolFrame<RawResponsesStreamEvent>[] => {
   const frames = [
     ...result.endEvents.map(event => stampServerToolEvent(merge, outputIndex, slot.id, event)),
@@ -723,13 +735,14 @@ export const buildErrorFromResult = (
 export const invalidRequestEnvelope = (
   message: string,
   param: string,
+  code = 'invalid_request_error',
 ): ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>> => {
   const body = JSON.stringify({
     error: {
       message,
       type: 'invalid_request_error',
       param,
-      code: 'invalid_request_error',
+      code,
     },
   });
   return {
@@ -800,7 +813,12 @@ async function* materializeServerToolItems(
 ): AsyncGenerator<ProtocolFrame<RawResponsesStreamEvent>, void> {
   for (const d of dispatched) {
     for (const { slot, outputIndex } of d.slots) {
-      const result = await slot.result;
+      const lifecycle = slot.run();
+      let step = await lifecycle.next();
+      while (!step.done) {
+        yield stampServerToolEvent(merge, outputIndex, slot.id, step.value);
+        step = await lifecycle.next();
+      }
       // The slot item is gateway-synthesized, not upstream-emitted; register
       // its id so persistence stores it with no upstream identity even on a
       // native Responses stream. The private payload (when the dispatcher
@@ -808,8 +826,8 @@ async function* materializeServerToolItems(
       // and the next loop turn's replay-side `transformItems` finds it by the
       // accumulated output item's id.
       statefulResponsesContext.newSyntheticIds.add(slot.id);
-      if (result.privatePayload !== undefined) statefulResponsesContext.privatePayload.set(slot.id, result.privatePayload);
-      yield* serverToolEndFrames(merge, outputIndex, slot, result);
+      if (step.value.privatePayload !== undefined) statefulResponsesContext.privatePayload.set(slot.id, step.value.privatePayload);
+      yield* serverToolEndFrames(merge, outputIndex, slot, step.value);
     }
   }
 }
@@ -922,7 +940,7 @@ export const withResponsesServerToolShim = (
   for (const prepareServerTool of registrations) {
     const prepared = await prepareServerTool(ctx, request);
     if (prepared.type === 'inactive') continue;
-    if (prepared.type === 'invalid-request') return invalidRequestEnvelope(prepared.message, prepared.param);
+    if (prepared.type === 'invalid-request') return invalidRequestEnvelope(prepared.message, prepared.param, prepared.code);
     const currentTools = Array.isArray(ctx.payload.tools) ? ctx.payload.tools : [];
     const toolName = resolveServerToolName(prepared.baseToolName, currentTools);
     const hasHostedTool = prepared.hosted !== undefined && currentTools.some(prepared.hosted.isHostedTool);

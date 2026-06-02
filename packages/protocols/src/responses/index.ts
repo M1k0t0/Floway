@@ -254,6 +254,8 @@ export interface ResponsesInputImageGenerationCall {
   status?: 'completed' | 'in_progress' | 'generating' | 'failed';
   result?: string;
   revised_prompt?: string;
+  output_format?: 'png' | 'jpeg';
+  error?: { message: string; code: string; type?: string };
 }
 
 export interface ResponsesFunctionTool {
@@ -489,7 +491,12 @@ export interface ResponsesOutputImageGenerationCall {
   status: 'in_progress' | 'generating' | 'completed' | 'failed';
   result?: string;
   revised_prompt?: string;
-  error?: { message: string; code: string };
+  action?: 'generate' | 'edit';
+  background?: 'transparent' | 'opaque';
+  output_format?: 'png' | 'jpeg';
+  quality?: 'low' | 'medium' | 'high';
+  size?: string;
+  error?: { message: string; code: string; type?: string };
 }
 
 // ── Stream event types ──
@@ -612,6 +619,10 @@ export type ResponsesStreamEvent =
     item_id: string;
     partial_image_index: number;
     partial_image_b64: string;
+    background?: 'transparent' | 'opaque';
+    output_format?: 'png' | 'jpeg';
+    quality?: 'low' | 'medium' | 'high';
+    size?: string;
   }
   | {
     type: 'response.image_generation_call.completed';

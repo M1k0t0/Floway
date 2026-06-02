@@ -1,6 +1,7 @@
 import { extractWebSearchProviderErrorMessage, toWebSearchTextBlocks, validateWebSearchQuery } from './shared.ts';
 import { truncateUtf8 } from './truncate.ts';
 import { isJsonObject } from '../../../../shared/json-helpers.ts';
+import { sleep } from '../../../../shared/sleep.ts';
 import { normalizeDomainList } from '../domain-normalize.ts';
 import {
   DEFAULT_WEB_SEARCH_RESULT_COUNT,
@@ -25,22 +26,6 @@ const MICROSOFT_GROUNDING_BROWSE_URL = 'https://api.microsoft.ai/v3/browse';
 // systemic issue, not transient.
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000] as const;
 const RETRYABLE_HTTP_STATUS: ReadonlySet<number> = new Set([429, 500, 502, 503, 504]);
-
-const sleep = (delayMs: number, signal?: AbortSignal): Promise<void> => new Promise((resolve, reject) => {
-  if (signal?.aborted) {
-    reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
-    return;
-  }
-  const handle = setTimeout(() => {
-    signal?.removeEventListener('abort', onAbort);
-    resolve();
-  }, delayMs);
-  const onAbort = (): void => {
-    clearTimeout(handle);
-    reject(signal?.reason ?? new DOMException('Aborted', 'AbortError'));
-  };
-  signal?.addEventListener('abort', onAbort, { once: true });
-});
 
 const fetchWithRetry = async (doFetch: () => Promise<Response>, signal?: AbortSignal): Promise<Response> => {
   let attempt = 0;

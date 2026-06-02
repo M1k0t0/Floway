@@ -1307,7 +1307,8 @@ export const webSearchServerTool: ServerToolRegistration = (ctx, request) => {
                   { type: 'response.web_search_call.in_progress' },
                   { type: 'response.web_search_call.searching' },
                 ],
-                result: slot.promise.then(ir => {
+                async *run() {
+                  const ir = await slot.promise;
                   // `results` is gated on the client's `include`
                   // opt-in to match native Responses' default wire
                   // shape; the IR keeps them either way for the
@@ -1325,7 +1326,7 @@ export const webSearchServerTool: ServerToolRegistration = (ctx, request) => {
                     endEvents: [{ type: 'response.web_search_call.completed' }],
                     privatePayload,
                   };
-                }),
+                },
               })];
             },
           },

@@ -1,4 +1,5 @@
 import { withResponsesServerToolShim } from './server-tool-shim.ts';
+import { imageGenerationServerTool } from './server-tools/image-generation.ts';
 import { webSearchServerTool } from './server-tools/web-search.ts';
 import type { ResponsesInterceptor } from '../../../interceptors.ts';
 
@@ -11,5 +12,6 @@ import type { ResponsesInterceptor } from '../../../interceptors.ts';
 export const responsesSourceInterceptors: readonly ResponsesInterceptor[] = [
   withResponsesServerToolShim([
     webSearchServerTool,
+    imageGenerationServerTool,
   ]),
 ];
