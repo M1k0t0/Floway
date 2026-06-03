@@ -16,7 +16,6 @@ import {
 import { SHIM_TOOL_NAME, webSearchServerTool } from './server-tools/web-search.ts';
 import { initRepo } from '../../../../../repo/index.ts';
 import { InMemoryRepo } from '../../../../../repo/memory.ts';
-import { assert, assertEquals, assertFalse } from '../../../../../test-assert.ts';
 import { resolveConfiguredWebSearchProvider } from '../../../../tools/web-search/provider.ts';
 import type {
   ConfiguredWebSearchProvider,
@@ -28,7 +27,6 @@ import type {
   WebSearchProviderResult,
 } from '../../../../tools/web-search/types.ts';
 import type { RequestContext, ResponsesInterceptor, ResponsesInvocation } from '../../../interceptors.ts';
-import type { EventResult, ExecuteResult } from '../../../shared/errors/result.ts';
 import { createHttpStatefulResponsesStore } from '../stateful-store.ts';
 import { eventFrame } from '@floway-dev/protocols/common';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
@@ -39,10 +37,11 @@ import type {
   ResponsesOutputWebSearchCall,
   ResponsesPayload,
   ResponsesResult,
-  RawResponsesStreamEvent,
   ResponsesStreamEvent,
   ResponsesWebSearchAction,
 } from '@floway-dev/protocols/responses';
+import type { EventResult, ExecuteResult } from '@floway-dev/provider';
+import { assert, assertEquals, assertFalse } from '@floway-dev/test-utils';
 
 const withResponsesWebSearchShim = withResponsesServerToolShim([webSearchServerTool]);
 
@@ -57,19 +56,19 @@ const emptyResult = (id: string, status: ResponsesResult['status']): ResponsesRe
   incomplete_details: null,
 });
 
-const mkResponseCreated = (responseId = 'upstream_test'): ProtocolFrame<RawResponsesStreamEvent> =>
+const mkResponseCreated = (responseId = 'upstream_test'): ProtocolFrame<ResponsesStreamEvent> =>
   eventFrame({
     type: 'response.created',
     response: emptyResult(responseId, 'in_progress'),
   });
 
-const mkResponseInProgress = (responseId = 'upstream_test'): ProtocolFrame<RawResponsesStreamEvent> =>
+const mkResponseInProgress = (responseId = 'upstream_test'): ProtocolFrame<ResponsesStreamEvent> =>
   eventFrame({
     type: 'response.in_progress',
     response: emptyResult(responseId, 'in_progress'),
   });
 
-const mkFunctionCallAdded = (outputIndex: number, callId: string, name: string): ProtocolFrame<RawResponsesStreamEvent> =>
+const mkFunctionCallAdded = (outputIndex: number, callId: string, name: string): ProtocolFrame<ResponsesStreamEvent> =>
   eventFrame({
     type: 'response.output_item.added',
     output_index: outputIndex,
@@ -82,7 +81,7 @@ const mkFunctionCallAdded = (outputIndex: number, callId: string, name: string):
     },
   });
 
-const mkFunctionCallArgsDone = (outputIndex: number, args: string, itemId = `fc_${outputIndex}`): ProtocolFrame<RawResponsesStreamEvent> =>
+const mkFunctionCallArgsDone = (outputIndex: number, args: string, itemId = `fc_${outputIndex}`): ProtocolFrame<ResponsesStreamEvent> =>
   eventFrame({
     type: 'response.function_call_arguments.done',
     item_id: itemId,
@@ -90,7 +89,7 @@ const mkFunctionCallArgsDone = (outputIndex: number, args: string, itemId = `fc_
     arguments: args,
   });
 
-const mkFunctionCallDone = (outputIndex: number, callId: string, name: string, args: string): ProtocolFrame<RawResponsesStreamEvent> =>
+const mkFunctionCallDone = (outputIndex: number, callId: string, name: string, args: string): ProtocolFrame<ResponsesStreamEvent> =>
   eventFrame({
     type: 'response.output_item.done',
     output_index: outputIndex,
@@ -103,7 +102,7 @@ const mkFunctionCallDone = (outputIndex: number, callId: string, name: string, a
     },
   });
 
-const mkCustomToolCallAdded = (outputIndex: number, callId: string, name: string): ProtocolFrame<RawResponsesStreamEvent> =>
+const mkCustomToolCallAdded = (outputIndex: number, callId: string, name: string): ProtocolFrame<ResponsesStreamEvent> =>
   eventFrame({
     type: 'response.output_item.added',
     output_index: outputIndex,
@@ -115,7 +114,7 @@ const mkCustomToolCallAdded = (outputIndex: number, callId: string, name: string
     },
   });
 
-const mkCustomToolCallInputDone = (outputIndex: number, input: string, itemId = `cti_${outputIndex}`): ProtocolFrame<RawResponsesStreamEvent> =>
+const mkCustomToolCallInputDone = (outputIndex: number, input: string, itemId = `cti_${outputIndex}`): ProtocolFrame<ResponsesStreamEvent> =>
   eventFrame({
     type: 'response.custom_tool_call_input.done',
     item_id: itemId,
@@ -123,7 +122,7 @@ const mkCustomToolCallInputDone = (outputIndex: number, input: string, itemId = 
     input,
   });
 
-const mkCustomToolCallDone = (outputIndex: number, callId: string, name: string, input: string): ProtocolFrame<RawResponsesStreamEvent> =>
+const mkCustomToolCallDone = (outputIndex: number, callId: string, name: string, input: string): ProtocolFrame<ResponsesStreamEvent> =>
   eventFrame({
     type: 'response.output_item.done',
     output_index: outputIndex,
@@ -135,7 +134,7 @@ const mkCustomToolCallDone = (outputIndex: number, callId: string, name: string,
     },
   });
 
-const mkMessageAdded = (outputIndex: number): ProtocolFrame<RawResponsesStreamEvent> =>
+const mkMessageAdded = (outputIndex: number): ProtocolFrame<ResponsesStreamEvent> =>
   eventFrame({
     type: 'response.output_item.added',
     output_index: outputIndex,
@@ -146,7 +145,7 @@ const mkMessageAdded = (outputIndex: number): ProtocolFrame<RawResponsesStreamEv
     },
   });
 
-const mkMessageDone = (outputIndex: number, text: string): ProtocolFrame<RawResponsesStreamEvent> =>
+const mkMessageDone = (outputIndex: number, text: string): ProtocolFrame<ResponsesStreamEvent> =>
   eventFrame({
     type: 'response.output_item.done',
     output_index: outputIndex,
@@ -157,14 +156,14 @@ const mkMessageDone = (outputIndex: number, text: string): ProtocolFrame<RawResp
     },
   });
 
-const mkReasoningAdded = (outputIndex: number, reasoningId: string): ProtocolFrame<RawResponsesStreamEvent> =>
+const mkReasoningAdded = (outputIndex: number, reasoningId: string): ProtocolFrame<ResponsesStreamEvent> =>
   eventFrame({
     type: 'response.output_item.added',
     output_index: outputIndex,
     item: { type: 'reasoning', id: reasoningId, summary: [] },
   });
 
-const mkReasoningDone = (outputIndex: number, reasoningId: string): ProtocolFrame<RawResponsesStreamEvent> =>
+const mkReasoningDone = (outputIndex: number, reasoningId: string): ProtocolFrame<ResponsesStreamEvent> =>
   eventFrame({
     type: 'response.output_item.done',
     output_index: outputIndex,
@@ -183,8 +182,8 @@ vi.mock('../../../../tools/web-search/provider.ts');
 const mkResponseCompleted = (
   usage?: ResponsesResult['usage'],
   responseId = 'upstream_test',
-): ProtocolFrame<RawResponsesStreamEvent> =>
-  eventFrame<RawResponsesStreamEvent>({
+): ProtocolFrame<ResponsesStreamEvent> =>
+  eventFrame<ResponsesStreamEvent>({
     type: 'response.completed',
     response: {
       ...emptyResult(responseId, 'completed'),
@@ -195,8 +194,8 @@ const mkResponseCompleted = (
 const mkResponseIncomplete = (
   incompleteDetails?: { reason: string },
   responseId = 'upstream_test',
-): ProtocolFrame<RawResponsesStreamEvent> =>
-  eventFrame<RawResponsesStreamEvent>({
+): ProtocolFrame<ResponsesStreamEvent> =>
+  eventFrame<ResponsesStreamEvent>({
     type: 'response.incomplete',
     response: {
       ...emptyResult(responseId, 'incomplete'),
@@ -353,13 +352,13 @@ const runShimAndDrain = async (
   shim: ResponsesInterceptor,
   inv: ResponsesInvocation,
   request: RequestContext,
-  run: () => Promise<ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>>,
+  run: () => Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>>,
 ): Promise<{
-  result: ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>;
-  frames: ProtocolFrame<RawResponsesStreamEvent>[];
+  result: ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>;
+  frames: ProtocolFrame<ResponsesStreamEvent>[];
 }> => {
   const result = await shim(inv, request, run);
-  const frames: ProtocolFrame<RawResponsesStreamEvent>[] = result.type === 'events'
+  const frames: ProtocolFrame<ResponsesStreamEvent>[] = result.type === 'events'
     ? await collectFrames(result.events)
     : [];
   return { result, frames };
@@ -367,10 +366,10 @@ const runShimAndDrain = async (
 
 // Drive run() N times with one scripted event array per call. Reaches past
 // the scripted length crashes the test — invariant violations stay loud.
-type ScriptedTurn = ProtocolFrame<RawResponsesStreamEvent>[];
+type ScriptedTurn = ProtocolFrame<ResponsesStreamEvent>[];
 
 interface ScriptedRun {
-  run: () => Promise<ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>>;
+  run: () => Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>>;
   callCount: () => number;
 }
 
@@ -380,10 +379,10 @@ const scriptedRun = (turns: ScriptedTurn[]): ScriptedRun => {
     run: async () => {
       if (i >= turns.length) throw new Error(`unexpected run() call ${i + 1}; only ${turns.length} turn(s) scripted`);
       const frames = turns[i++];
-      const iterable: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> = (async function* () {
+      const iterable: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> = (async function* () {
         for (const f of frames) yield f;
       })();
-      const result: EventResult<ProtocolFrame<RawResponsesStreamEvent>> = {
+      const result: EventResult<ProtocolFrame<ResponsesStreamEvent>> = {
         type: 'events',
         events: iterable,
         modelIdentity: testTelemetryModelIdentity,
@@ -427,10 +426,10 @@ const openCallTurn = (outputIndex: number, callId: string, url: string): Scripte
 const findCallTurn = (outputIndex: number, callId: string, url: string, pattern: string): ScriptedTurn =>
   fcTurn(outputIndex, callId, SHIM_TOOL_NAME, JSON.stringify({ find: [{ ref_id: url, pattern }] }));
 
-const eventPayloads = (frames: ProtocolFrame<RawResponsesStreamEvent>[]): RawResponsesStreamEvent[] =>
-  frames.filter(f => f.type === 'event').map(f => (f as { type: 'event'; event: RawResponsesStreamEvent }).event);
+const eventPayloads = (frames: ProtocolFrame<ResponsesStreamEvent>[]): ResponsesStreamEvent[] =>
+  frames.filter(f => f.type === 'event').map(f => (f as { type: 'event'; event: ResponsesStreamEvent }).event);
 
-const outputItemDoneEvents = (frames: ProtocolFrame<RawResponsesStreamEvent>[]): Array<Extract<ResponsesStreamEvent, { type: 'response.output_item.done' }>> =>
+const outputItemDoneEvents = (frames: ProtocolFrame<ResponsesStreamEvent>[]): Array<Extract<ResponsesStreamEvent, { type: 'response.output_item.done' }>> =>
   eventPayloads(frames)
     .filter((e): e is Extract<ResponsesStreamEvent, { type: 'response.output_item.done' }> => e.type === 'response.output_item.done');
 
@@ -1672,20 +1671,20 @@ test('multi-turn merge: output_index unique, sequence_number monotonic, response
 // served model — distinct from the client's payload.model so we can
 // prove the shim quotes upstream's served identity rather than the
 // requested literal.
-const mkResponseCreatedWithModel = (model: string, responseId = 'upstream_test'): ProtocolFrame<RawResponsesStreamEvent> =>
-  eventFrame<RawResponsesStreamEvent>({
+const mkResponseCreatedWithModel = (model: string, responseId = 'upstream_test'): ProtocolFrame<ResponsesStreamEvent> =>
+  eventFrame<ResponsesStreamEvent>({
     type: 'response.created',
     response: { id: responseId, object: 'response', model, output: [], output_text: '', status: 'in_progress', error: null, incomplete_details: null },
   });
 
-const mkResponseInProgressWithModel = (model: string, responseId = 'upstream_test'): ProtocolFrame<RawResponsesStreamEvent> =>
-  eventFrame<RawResponsesStreamEvent>({
+const mkResponseInProgressWithModel = (model: string, responseId = 'upstream_test'): ProtocolFrame<ResponsesStreamEvent> =>
+  eventFrame<ResponsesStreamEvent>({
     type: 'response.in_progress',
     response: { id: responseId, object: 'response', model, output: [], output_text: '', status: 'in_progress', error: null, incomplete_details: null },
   });
 
-const mkResponseCompletedWithModel = (model: string, responseId = 'upstream_test'): ProtocolFrame<RawResponsesStreamEvent> =>
-  eventFrame<RawResponsesStreamEvent>({
+const mkResponseCompletedWithModel = (model: string, responseId = 'upstream_test'): ProtocolFrame<ResponsesStreamEvent> =>
+  eventFrame<ResponsesStreamEvent>({
     type: 'response.completed',
     response: { id: responseId, object: 'response', model, output: [], output_text: '', status: 'completed', error: null, incomplete_details: null },
   });
@@ -1739,10 +1738,10 @@ test('synthesized response.failed (upstream error mid-stream) quotes the upstrea
   const inv = makeInvocation({ payload: { model: 'gpt-5' } });
 
   let runCalls = 0;
-  const run = async (): Promise<ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>> => {
+  const run = async (): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => {
     runCalls += 1;
     if (runCalls === 1) {
-      const frames: ProtocolFrame<RawResponsesStreamEvent>[] = [
+      const frames: ProtocolFrame<ResponsesStreamEvent>[] = [
         mkResponseCreatedWithModel(SERVED_MODEL),
         mkResponseInProgressWithModel(SERVED_MODEL),
         mkFunctionCallAdded(0, 'call_1', SHIM_TOOL_NAME),
@@ -1750,7 +1749,7 @@ test('synthesized response.failed (upstream error mid-stream) quotes the upstrea
         mkFunctionCallDone(0, 'call_1', SHIM_TOOL_NAME, JSON.stringify({ search_query: [{ q: 'hi' }] })),
         mkResponseCompletedWithModel(SERVED_MODEL),
       ];
-      const iterable: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> = (async function* () {
+      const iterable: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> = (async function* () {
         for (const f of frames) yield f;
       })();
       return { type: 'events', events: iterable, modelIdentity: testTelemetryModelIdentity };
@@ -1782,7 +1781,7 @@ test('shim refuses to synthesize a response envelope when upstream response.crea
   const shim = withResponsesWebSearchShim;
   const inv = makeInvocation({ payload: { model: 'gpt-5' } });
 
-  const modelless = eventFrame<RawResponsesStreamEvent>({
+  const modelless = eventFrame<ResponsesStreamEvent>({
     type: 'response.created',
     response: { id: 'upstream_x', object: 'response', output: [], output_text: '', status: 'in_progress' } as never,
   });
@@ -1811,7 +1810,7 @@ test('upstream response.created with no `id` field is tolerated (downstream uses
   const shim = withResponsesWebSearchShim;
   const inv = makeInvocation({ payload: { model: 'gpt-5' } });
 
-  const idless = eventFrame<RawResponsesStreamEvent>({
+  const idless = eventFrame<ResponsesStreamEvent>({
     type: 'response.created',
     response: { model: 'gpt-5', object: 'response', output: [], output_text: '', status: 'in_progress' } as never,
   });
@@ -2080,7 +2079,7 @@ test('upstream sends bare `error` frame BEFORE any response.created: shim throws
   const shim = withResponsesWebSearchShim;
   const inv = makeInvocation();
   const errorOnlyTurn: ScriptedTurn = [
-    eventFrame<RawResponsesStreamEvent>({
+    eventFrame<ResponsesStreamEvent>({
       type: 'error',
       message: 'upstream dropped before response shell',
     }),
@@ -2106,7 +2105,7 @@ test('upstream sends bare `error` frame AFTER response.created: shim emits respo
   makeStubDeps();
   const shim = withResponsesWebSearchShim;
   const inv = makeInvocation();
-  const createdWith = eventFrame<RawResponsesStreamEvent>({
+  const createdWith = eventFrame<ResponsesStreamEvent>({
     type: 'response.created',
     response: {
       id: 'resp_captured_id_xyz',
@@ -2120,7 +2119,7 @@ test('upstream sends bare `error` frame AFTER response.created: shim emits respo
   });
   const script = scriptedRun([[
     createdWith,
-    eventFrame<RawResponsesStreamEvent>({
+    eventFrame<ResponsesStreamEvent>({
       type: 'error',
       message: 'mid-stream upstream blew up',
       code: 'server_error',
@@ -2154,11 +2153,11 @@ test('upstream iterator rejects before yielding any frame: shim surfaces the thr
   makeStubDeps();
   const shim = withResponsesWebSearchShim;
   const inv = makeInvocation();
-  const failingIterator: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> = (async function* () {
+  const failingIterator: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> = (async function* () {
     throw new Error('malformed SSE JSON at byte 42');
     yield undefined as never;
   })();
-  const run = async (): Promise<ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>> => ({
+  const run = async (): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => ({
     type: 'events',
     events: failingIterator,
     modelIdentity: testTelemetryModelIdentity,
@@ -2188,16 +2187,16 @@ test('pathological upstream emitting frames without response.created: shim event
   makeStubDeps();
   const shim = withResponsesWebSearchShim;
   const inv = makeInvocation();
-  const noisyIterator: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> = (async function* () {
+  const noisyIterator: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> = (async function* () {
     for (let i = 0; i < 5; i++) {
-      yield eventFrame<RawResponsesStreamEvent>({
+      yield eventFrame<ResponsesStreamEvent>({
         type: 'response.unknown_future_call.in_progress',
         output_index: i,
         item_id: `unk_${i}`,
-      } as unknown as RawResponsesStreamEvent);
+      } as unknown as ResponsesStreamEvent);
     }
   })();
-  const run = async (): Promise<ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>> => ({
+  const run = async (): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => ({
     type: 'events',
     events: noisyIterator,
     modelIdentity: testTelemetryModelIdentity,
@@ -2222,11 +2221,11 @@ test('turn-1 iterator throws AFTER response.created: synthesizes response.failed
   makeStubDeps();
   const shim = withResponsesWebSearchShim;
   const inv = makeInvocation();
-  const failingMidStream: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> = (async function* () {
+  const failingMidStream: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> = (async function* () {
     yield mkResponseCreated('upstream_mid');
     throw new Error('connection reset by peer');
   })();
-  const run = async (): Promise<ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>> => ({
+  const run = async (): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => ({
     type: 'events',
     events: failingMidStream,
     modelIdentity: testTelemetryModelIdentity,
@@ -2258,16 +2257,16 @@ test('turn-2 iterator throws: synthesizes response.failed with captured id/model
   const inv = makeInvocation();
 
   let runCalls = 0;
-  const run = async (): Promise<ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>> => {
+  const run = async (): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => {
     runCalls += 1;
     if (runCalls === 1) {
       const turn1 = searchCallTurn(0, 'call_1', 'q1');
-      const frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> = (async function* () {
+      const frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> = (async function* () {
         for (const f of turn1) yield f;
       })();
       return { type: 'events', events: frames, modelIdentity: testTelemetryModelIdentity };
     }
-    const failingTurn2: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> = (async function* () {
+    const failingTurn2: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> = (async function* () {
       yield mkResponseCreated('upstream_test');
       throw new Error('upstream parser exploded');
     })();
@@ -2296,10 +2295,10 @@ test('consume-turn finishes without identity AND without bare-error-pre-shell: s
   makeStubDeps();
   const shim = withResponsesWebSearchShim;
   const inv = makeInvocation();
-  const malformed: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> = (async function* () {
+  const malformed: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> = (async function* () {
     yield mkResponseCompleted();
   })();
-  const run = async (): Promise<ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>> => ({
+  const run = async (): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => ({
     type: 'events',
     events: malformed,
     modelIdentity: testTelemetryModelIdentity,
@@ -2350,11 +2349,11 @@ test('snapshot pass-through: upstream tools/tool_choice/temperature/parallel_too
     error: null,
     incomplete_details: null,
   };
-  const createdWith = eventFrame<RawResponsesStreamEvent>({
+  const createdWith = eventFrame<ResponsesStreamEvent>({
     type: 'response.created',
     response: upstreamSnapshot as ResponsesResult,
   });
-  const completedWith = eventFrame<RawResponsesStreamEvent>({
+  const completedWith = eventFrame<ResponsesStreamEvent>({
     type: 'response.completed',
     response: {
       ...upstreamSnapshot,
@@ -2412,7 +2411,7 @@ test('snapshot pass-through: synthesized response.failed (mid-stream upstream er
     error: null,
     incomplete_details: null,
   };
-  const createdWith = eventFrame<RawResponsesStreamEvent>({
+  const createdWith = eventFrame<ResponsesStreamEvent>({
     type: 'response.created',
     response: upstreamSnapshot as ResponsesResult,
   });
@@ -2421,16 +2420,16 @@ test('snapshot pass-through: synthesized response.failed (mid-stream upstream er
   const inv = makeInvocation();
 
   let runCalls = 0;
-  const run = async (): Promise<ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>> => {
+  const run = async (): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => {
     runCalls += 1;
     if (runCalls === 1) {
       const wsArgs = JSON.stringify({ search_query: [{ q: 'q' }] });
-      const frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> = (async function* () {
+      const frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> = (async function* () {
         yield createdWith;
         yield mkFunctionCallAdded(0, 'call_1', SHIM_TOOL_NAME);
         yield mkFunctionCallArgsDone(0, wsArgs);
         yield mkFunctionCallDone(0, 'call_1', SHIM_TOOL_NAME, wsArgs);
-        yield eventFrame<RawResponsesStreamEvent>({
+        yield eventFrame<ResponsesStreamEvent>({
           type: 'response.completed',
           response: { ...upstreamSnapshot, status: 'completed' } as ResponsesResult,
         });
@@ -2473,11 +2472,11 @@ test('snapshot pass-through: snapshot fields like completed_at flow through verb
     error: null,
     incomplete_details: null,
   };
-  const turn1Created = eventFrame<RawResponsesStreamEvent>({
+  const turn1Created = eventFrame<ResponsesStreamEvent>({
     type: 'response.created',
     response: turn1Snapshot as ResponsesResult,
   });
-  const turn1Completed = eventFrame<RawResponsesStreamEvent>({
+  const turn1Completed = eventFrame<ResponsesStreamEvent>({
     type: 'response.completed',
     response: {
       ...turn1Snapshot,
@@ -2490,11 +2489,11 @@ test('snapshot pass-through: snapshot fields like completed_at flow through verb
   const inv = makeInvocation();
 
   let runCalls = 0;
-  const run = async (): Promise<ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>> => {
+  const run = async (): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => {
     runCalls += 1;
     if (runCalls === 1) {
       const wsArgs = JSON.stringify({ search_query: [{ q: 'q' }] });
-      const frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> = (async function* () {
+      const frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> = (async function* () {
         yield turn1Created;
         yield mkFunctionCallAdded(0, 'call_1', SHIM_TOOL_NAME);
         yield mkFunctionCallArgsDone(0, wsArgs);
@@ -2537,11 +2536,11 @@ test('snapshot strip: emitFinalCompleted re-adds completed_at when upstream supp
     error: null,
     incomplete_details: null,
   };
-  const turn1Created = eventFrame<RawResponsesStreamEvent>({
+  const turn1Created = eventFrame<ResponsesStreamEvent>({
     type: 'response.created',
     response: upstreamSnapshot as ResponsesResult,
   });
-  const turn1Completed = eventFrame<RawResponsesStreamEvent>({
+  const turn1Completed = eventFrame<ResponsesStreamEvent>({
     type: 'response.completed',
     response: {
       ...upstreamSnapshot,
@@ -2584,11 +2583,11 @@ test('snapshot pass-through: incomplete_details: null on the captured snapshot p
     error: null,
     incomplete_details: null,
   };
-  const turn1Created = eventFrame<RawResponsesStreamEvent>({
+  const turn1Created = eventFrame<ResponsesStreamEvent>({
     type: 'response.created',
     response: upstreamSnapshot as ResponsesResult,
   });
-  const turn1Completed = eventFrame<RawResponsesStreamEvent>({
+  const turn1Completed = eventFrame<ResponsesStreamEvent>({
     type: 'response.completed',
     response: {
       ...upstreamSnapshot,
@@ -2660,8 +2659,8 @@ test('shim rebuilds `output_text` on terminal envelopes from the accumulated mes
   // would desync from the cross-turn aggregated `output`. The shim
   // rebuilds the alias from `accumulatedOutput` and overrides the
   // snapshot's value on the terminal envelope.
-  const omitOutputText = (responseId = 'upstream_test'): ProtocolFrame<RawResponsesStreamEvent> =>
-    eventFrame<RawResponsesStreamEvent>({
+  const omitOutputText = (responseId = 'upstream_test'): ProtocolFrame<ResponsesStreamEvent> =>
+    eventFrame<ResponsesStreamEvent>({
       type: 'response.completed',
       response: {
         id: responseId,
@@ -2673,8 +2672,8 @@ test('shim rebuilds `output_text` on terminal envelopes from the accumulated mes
         incomplete_details: null,
       },
     });
-  const omitOutputTextCreated = (responseId = 'upstream_test'): ProtocolFrame<RawResponsesStreamEvent> =>
-    eventFrame<RawResponsesStreamEvent>({
+  const omitOutputTextCreated = (responseId = 'upstream_test'): ProtocolFrame<ResponsesStreamEvent> =>
+    eventFrame<ResponsesStreamEvent>({
       type: 'response.created',
       response: {
         id: responseId,
@@ -2712,7 +2711,7 @@ test('upstream-emitted `output_text` on in-progress envelopes flows through verb
   // value — terminal envelopes get a separately-rebuilt
   // `output_text` aggregated across turns (covered by the dedicated
   // rebuildOutputText test below).
-  const createdWithStaleText = eventFrame<RawResponsesStreamEvent>({
+  const createdWithStaleText = eventFrame<ResponsesStreamEvent>({
     type: 'response.created',
     response: {
       id: 'resp_stale',
@@ -2725,7 +2724,7 @@ test('upstream-emitted `output_text` on in-progress envelopes flows through verb
       incomplete_details: null,
     } as ResponsesResult,
   });
-  const inProgressWithStaleText = eventFrame<RawResponsesStreamEvent>({
+  const inProgressWithStaleText = eventFrame<ResponsesStreamEvent>({
     type: 'response.in_progress',
     response: {
       id: 'resp_stale',
@@ -2738,7 +2737,7 @@ test('upstream-emitted `output_text` on in-progress envelopes flows through verb
       incomplete_details: null,
     } as ResponsesResult,
   });
-  const completedFrame = eventFrame<RawResponsesStreamEvent>({
+  const completedFrame = eventFrame<ResponsesStreamEvent>({
     type: 'response.completed',
     response: {
       id: 'resp_stale',
@@ -2790,12 +2789,12 @@ test('finalMetadata resolves with the LATEST turn modelIdentity, not turn 1', as
   const inv = makeInvocation();
 
   let runCalls = 0;
-  const run = async (): Promise<ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>> => {
+  const run = async (): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => {
     runCalls += 1;
     const frames = runCalls === 1
       ? searchCallTurn(0, 'call_1', 'q1')
       : messageTurn('done', 0);
-    const iterable: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> = (async function* () {
+    const iterable: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> = (async function* () {
       for (const f of frames) yield f;
     })();
     return {
@@ -3487,10 +3486,10 @@ test('shim yields first turn frames BEFORE later turns resolve', async () => {
   });
 
   let runCalls = 0;
-  const run = async (): Promise<ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>> => {
+  const run = async (): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => {
     runCalls += 1;
     if (runCalls === 1) {
-      const frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> = (async function* () {
+      const frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> = (async function* () {
         for (const f of searchCallTurn(0, 'call_1', 'q1')) yield f;
       })();
       return {
@@ -3501,7 +3500,7 @@ test('shim yields first turn frames BEFORE later turns resolve', async () => {
     }
     if (runCalls === 2) {
       await turn2Gate;
-      const frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> = (async function* () {
+      const frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> = (async function* () {
         for (const f of messageTurn('summary', 0)) yield f;
       })();
       return {
@@ -3561,12 +3560,12 @@ test('turn 1 pure-text response streams BEFORE upstream terminal (no TTFT regres
   const terminalGate = new Promise<void>(resolve => {
     releaseTerminal = resolve;
   });
-  const run = async (): Promise<ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>> => {
-    const frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> = (async function* () {
+  const run = async (): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => {
+    const frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> = (async function* () {
       yield mkResponseCreated();
       yield mkResponseInProgress();
       yield mkMessageAdded(0);
-      yield eventFrame<RawResponsesStreamEvent>({
+      yield eventFrame<ResponsesStreamEvent>({
         type: 'response.output_text.delta',
         item_id: 'msg_upstream',
         output_index: 0,
@@ -3612,10 +3611,10 @@ test('mid-stream upstream error yields response.failed and closes the SSE stream
   const inv = makeInvocation();
 
   let runCalls = 0;
-  const run = async (): Promise<ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>> => {
+  const run = async (): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => {
     runCalls += 1;
     if (runCalls === 1) {
-      const frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> = (async function* () {
+      const frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> = (async function* () {
         for (const f of searchCallTurn(0, 'call_1', 'q1')) yield f;
       })();
       return {
@@ -3661,10 +3660,10 @@ test('mid-stream 429 pass-through: code reflects upstream HTTP status (no spec-e
   const inv = makeInvocation();
 
   let runCalls = 0;
-  const run = async (): Promise<ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>> => {
+  const run = async (): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => {
     runCalls += 1;
     if (runCalls === 1) {
-      const frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> = (async function* () {
+      const frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> = (async function* () {
         for (const f of searchCallTurn(0, 'call_1', 'q1')) yield f;
       })();
       return { type: 'events', events: frames, modelIdentity: testTelemetryModelIdentity };
@@ -3694,10 +3693,10 @@ test('mid-stream 400 with non-OpenAI body falls back to upstream_400 code (no sp
   const inv = makeInvocation();
 
   let runCalls = 0;
-  const run = async (): Promise<ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>> => {
+  const run = async (): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => {
     runCalls += 1;
     if (runCalls === 1) {
-      const frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> = (async function* () {
+      const frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> = (async function* () {
         for (const f of searchCallTurn(0, 'call_1', 'q1')) yield f;
       })();
       return { type: 'events', events: frames, modelIdentity: testTelemetryModelIdentity };
@@ -3731,10 +3730,10 @@ test('mid-stream upstream error with OpenAI-shaped JSON body forwards code/type/
   const inv = makeInvocation();
 
   let runCalls = 0;
-  const run = async (): Promise<ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>> => {
+  const run = async (): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => {
     runCalls += 1;
     if (runCalls === 1) {
-      const frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> = (async function* () {
+      const frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> = (async function* () {
         for (const f of searchCallTurn(0, 'call_1', 'q1')) yield f;
       })();
       return { type: 'events', events: frames, modelIdentity: testTelemetryModelIdentity };
@@ -4082,10 +4081,10 @@ test('final-turn text deltas stream as they arrive, not buffered until response.
   });
 
   let runCalls = 0;
-  const run = async (): Promise<ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>> => {
+  const run = async (): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => {
     runCalls += 1;
     if (runCalls === 1) {
-      const frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> = (async function* () {
+      const frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> = (async function* () {
         for (const f of searchCallTurn(0, 'call_1', 'q1')) yield f;
       })();
       return { type: 'events', events: frames, modelIdentity: testTelemetryModelIdentity };
@@ -4094,11 +4093,11 @@ test('final-turn text deltas stream as they arrive, not buffered until response.
       // Emit message.added + first delta immediately, gate the rest. A
       // buffered implementation would hide the first delta until
       // response.completed.
-      const frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> = (async function* () {
+      const frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> = (async function* () {
         yield mkResponseCreated();
         yield mkResponseInProgress();
         yield mkMessageAdded(0);
-        yield eventFrame<RawResponsesStreamEvent>({
+        yield eventFrame<ResponsesStreamEvent>({
           type: 'response.output_text.delta',
           item_id: 'msg_upstream',
           output_index: 0,
@@ -4106,7 +4105,7 @@ test('final-turn text deltas stream as they arrive, not buffered until response.
           delta: 'first',
         });
         await restOfTurn2Gate;
-        yield eventFrame<RawResponsesStreamEvent>({
+        yield eventFrame<ResponsesStreamEvent>({
           type: 'response.output_text.delta',
           item_id: 'msg_upstream',
           output_index: 0,
@@ -4157,7 +4156,7 @@ test('mixed turn (reasoning + message_partial + function_call) preserves the mes
     mkReasoningAdded(0, 'rs_1'),
     mkReasoningDone(0, 'rs_1'),
     mkMessageAdded(1),
-    eventFrame<RawResponsesStreamEvent>({
+    eventFrame<ResponsesStreamEvent>({
       type: 'response.output_text.delta',
       item_id: 'msg_upstream',
       output_index: 1,
@@ -4296,7 +4295,7 @@ test('lifecycle start frames yield BEFORE backend resolves, giving searching rea
   // searching must arrive but completed / done must NOT.
   let sawSearching = false;
   let sawCompleted = false;
-  const drainedSoFar: RawResponsesStreamEvent[] = [];
+  const drainedSoFar: ResponsesStreamEvent[] = [];
   for (let i = 0; i < 64 && !sawSearching; i++) {
     const next = await iter.next();
     if (next.done) break;
@@ -4513,7 +4512,7 @@ test('downstream AbortSignal threads through to provider search / fetchPage and 
 
 // ── consumeTurnStreaming: single-turn stream consumption mechanics ──
 
-const mkFunctionCallArgsDelta = (outputIndex: number, delta: string, itemId = `fc_${outputIndex}`): ProtocolFrame<RawResponsesStreamEvent> =>
+const mkFunctionCallArgsDelta = (outputIndex: number, delta: string, itemId = `fc_${outputIndex}`): ProtocolFrame<ResponsesStreamEvent> =>
   eventFrame({
     type: 'response.function_call_arguments.delta',
     item_id: itemId,
@@ -4521,7 +4520,7 @@ const mkFunctionCallArgsDelta = (outputIndex: number, delta: string, itemId = `f
     delta,
   });
 
-const mkCustomToolCallInputDelta = (outputIndex: number, delta: string, itemId = `cti_${outputIndex}`): ProtocolFrame<RawResponsesStreamEvent> =>
+const mkCustomToolCallInputDelta = (outputIndex: number, delta: string, itemId = `cti_${outputIndex}`): ProtocolFrame<ResponsesStreamEvent> =>
   eventFrame({
     type: 'response.custom_tool_call_input.delta',
     item_id: itemId,
@@ -4529,11 +4528,11 @@ const mkCustomToolCallInputDelta = (outputIndex: number, delta: string, itemId =
     delta,
   });
 
-const framesOf = (...frames: ProtocolFrame<RawResponsesStreamEvent>[]): AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> => (async function* () {
+const framesOf = (...frames: ProtocolFrame<ResponsesStreamEvent>[]): AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> => (async function* () {
   yield* frames;
 })();
 
-const eventTypesOf = (frames: ProtocolFrame<RawResponsesStreamEvent>[]): string[] =>
+const eventTypesOf = (frames: ProtocolFrame<ResponsesStreamEvent>[]): string[] =>
   frames.flatMap(f => (f.type === 'event' ? [f.event.type] : []));
 
 interface DispatchRecord {
@@ -4548,16 +4547,16 @@ const recordingDispatcher = (records: DispatchRecord[]) => ({ intercepted }: { i
 };
 
 type DrainResult = {
-  downstreamFrames: ProtocolFrame<RawResponsesStreamEvent>[];
+  downstreamFrames: ProtocolFrame<ResponsesStreamEvent>[];
   summary: TurnSummary;
   records: DispatchRecord[];
 };
 
 const drain = async (
-  iter: AsyncGenerator<ProtocolFrame<RawResponsesStreamEvent>, TurnSummary>,
+  iter: AsyncGenerator<ProtocolFrame<ResponsesStreamEvent>, TurnSummary>,
   records: DispatchRecord[],
 ): Promise<DrainResult> => {
-  const downstreamFrames: ProtocolFrame<RawResponsesStreamEvent>[] = [];
+  const downstreamFrames: ProtocolFrame<ResponsesStreamEvent>[] = [];
   let summary: TurnSummary | undefined;
   while (true) {
     const next = await iter.next();
@@ -4588,7 +4587,7 @@ test('parseServerToolArguments returns empty object for empty args', () => {
 });
 
 const consumeTurn = async (
-  frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>>,
+  frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>,
   state: Parameters<typeof consumeTurnStreaming>[1],
   isFirstTurn: boolean,
 ): Promise<DrainResult> => {
@@ -4610,7 +4609,7 @@ test('consumeTurn first turn synthesizes response.created with the once-per-requ
   assertEquals(eventTypesOf(result.downstreamFrames), ['response.created', 'response.in_progress']);
   const created = result.downstreamFrames[0];
   assert(created.type === 'event');
-  const createdEv = created.event as Extract<RawResponsesStreamEvent, { type: 'response.created' }>;
+  const createdEv = created.event as Extract<ResponsesStreamEvent, { type: 'response.created' }>;
   // Downstream id is the shim-synthesized value (stable cross-turn);
   // upstream's id is captured nowhere and never exposed downstream.
   assertEquals(createdEv.response.id, state.synthesizedResponseId);
@@ -4621,7 +4620,7 @@ test('consumeTurn synthesizes response.created with the upstream-reported model 
   const state = createMergeState();
   const result = await consumeTurn(
     framesOf(
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'response.created',
         response: {
           id: 'r', object: 'response', model: 'gpt-5.4-2025-01-20', output: [], output_text: '', status: 'in_progress',
@@ -4635,7 +4634,7 @@ test('consumeTurn synthesizes response.created with the upstream-reported model 
   );
   const created = result.downstreamFrames.find(f => f.type === 'event' && f.event.type === 'response.created');
   assert(created?.type === 'event');
-  const ev = created.event as Extract<RawResponsesStreamEvent, { type: 'response.created' }>;
+  const ev = created.event as Extract<ResponsesStreamEvent, { type: 'response.created' }>;
   assertEquals(ev.response.model, 'gpt-5.4-2025-01-20');
   assertEquals(state.lastSeenModel, 'gpt-5.4-2025-01-20');
 });
@@ -4644,7 +4643,7 @@ test('consumeTurn throws when upstream response.created has no model field (no c
   const state = createMergeState();
   const iter = consumeTurnStreaming(
     framesOf(
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'response.created',
         response: {
           id: 'r', object: 'response', output: [], output_text: '', status: 'in_progress',
@@ -4673,7 +4672,7 @@ test('consumeTurn captures upstream-reported model and writes it into MergeState
   const state = createMergeState();
   await consumeTurn(
     framesOf(
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'response.created',
         response: {
           id: 'r', object: 'response', model: 'gpt-5.5-2025-09-01', output: [], output_text: '', status: 'in_progress',
@@ -4696,7 +4695,7 @@ test('consumeTurn re-captures upstream-reported model when later turns change it
   state.lastSeenModel = 'gpt-5.5-2025-09-01';
   await consumeTurn(
     framesOf(
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'response.created',
         response: {
           id: 'r2', object: 'response', model: 'gpt-5.6-2025-12-01', output: [], output_text: '', status: 'in_progress',
@@ -4721,7 +4720,7 @@ test('consumeTurn does NOT capture upstream response.id (downstream uses the shi
   state.lastSeenModel = 'gpt-5';
   await consumeTurn(
     framesOf(
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'response.created',
         response: {
           id: 'resp_turn2_rotated', object: 'response', model: 'gpt-5', output: [], output_text: '', status: 'in_progress',
@@ -4744,7 +4743,7 @@ test('consumeTurn keeps previous upstream-reported model when a later turn omits
   state.lastSeenModel = 'gpt-5.5-2025-09-01';
   await consumeTurn(
     framesOf(
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'response.created',
         response: {
           id: 'r2', object: 'response', output: [], output_text: '', status: 'in_progress',
@@ -4883,7 +4882,7 @@ test('consumeTurn live-forwards non-shim function_calls and sets sawClientToolCa
   const result = await consumeTurn(
     framesOf(
       mkResponseCreated(),
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'response.output_item.added',
         output_index: 0,
         item: {
@@ -4915,7 +4914,7 @@ test('consumeTurn live-forwards non-shim function_calls and sets sawClientToolCa
   const added = result.downstreamFrames.find(f =>
     f.type === 'event' && f.event.type === 'response.output_item.added');
   assert(added?.type === 'event');
-  const addedEv = added.event as Extract<RawResponsesStreamEvent, { type: 'response.output_item.added' }>;
+  const addedEv = added.event as Extract<ResponsesStreamEvent, { type: 'response.output_item.added' }>;
   assertEquals(addedEv.output_index, 0);
   assertEquals(addedEv.item.type, 'function_call');
   const argsDone = result.downstreamFrames.find(f =>
@@ -4966,7 +4965,7 @@ test('consumeTurn forwards reasoning items with rewritten output_index', async (
   const added = result.downstreamFrames.find(f =>
     f.type === 'event' && f.event.type === 'response.output_item.added');
   assert(added?.type === 'event');
-  const ev = added.event as Extract<RawResponsesStreamEvent, { type: 'response.output_item.added' }>;
+  const ev = added.event as Extract<ResponsesStreamEvent, { type: 'response.output_item.added' }>;
   assertEquals(ev.output_index, 0);
   assertEquals(ev.item.type, 'reasoning');
   assertEquals(state.accumulatedOutput.size, 1);
@@ -5037,21 +5036,21 @@ test('consumeTurn forwards content_part / output_text / annotation events live w
       mkResponseCreated(),
       mkResponseInProgress(),
       mkMessageAdded(0),
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'response.content_part.added',
         item_id: 'msg_upstream',
         output_index: 0,
         content_index: 0,
         part: { type: 'output_text', text: '' },
       }),
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'response.output_text.delta',
         item_id: 'msg_upstream',
         output_index: 0,
         content_index: 0,
         delta: 'hello ',
       }),
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'response.output_text.annotation.added',
         item_id: 'msg_upstream',
         output_index: 0,
@@ -5065,14 +5064,14 @@ test('consumeTurn forwards content_part / output_text / annotation events live w
           end_index: 5,
         },
       }),
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'response.output_text.done',
         item_id: 'msg_upstream',
         output_index: 0,
         content_index: 0,
         text: 'hello world',
       }),
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'response.content_part.done',
         item_id: 'msg_upstream',
         output_index: 0,
@@ -5116,12 +5115,12 @@ test('consumeTurn rewrites any structurally indexed child event without an event
     framesOf(
       mkResponseCreated(),
       mkMessageAdded(0),
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'response.future_child.delta',
         item_id: 'msg_upstream',
         output_index: 0,
         delta: 'future',
-      } as unknown as RawResponsesStreamEvent),
+      } as unknown as ResponsesStreamEvent),
       mkMessageDone(0, 'future'),
       mkResponseCompleted(),
     ),
@@ -5142,12 +5141,12 @@ test('consumeTurn swallows future indexed events attached to an intercepted serv
     framesOf(
       mkResponseCreated(),
       mkFunctionCallAdded(0, 'cc_1', SHIM_TOOL_NAME),
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'response.future_function_call_arguments.delta',
         item_id: 'fc_hidden',
         output_index: 0,
         delta: 'hidden',
-      } as unknown as RawResponsesStreamEvent),
+      } as unknown as ResponsesStreamEvent),
       mkFunctionCallDone(0, 'cc_1', SHIM_TOOL_NAME, '{"search_query":[{"q":"q"}]}'),
       mkResponseCompleted(),
     ),
@@ -5170,7 +5169,7 @@ test('consumeTurn preserves upstream message item.id (no fabrication) when upstr
   const result = await consumeTurn(
     framesOf(
       mkResponseCreated(),
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'response.output_item.added',
         output_index: 0,
         item: {
@@ -5181,7 +5180,7 @@ test('consumeTurn preserves upstream message item.id (no fabrication) when upstr
           id: 'msg_xyz_real_id',
         } as never,
       }),
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'response.output_text.delta',
         item_id: 'msg_xyz_real_id',
         output_index: 0,
@@ -5216,7 +5215,7 @@ test('consumeTurn forwards message text events live even when mixed with an inte
       mkFunctionCallAdded(0, 'cc_1', SHIM_TOOL_NAME),
       mkFunctionCallDone(0, 'cc_1', SHIM_TOOL_NAME, '{"search_query":[{"q":"q"}]}'),
       mkMessageAdded(1),
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'response.output_text.delta',
         item_id: 'msg_upstream',
         output_index: 1,
@@ -5353,7 +5352,7 @@ test('consumeTurn surfaces upstream response.failed as terminalStatus.failed wit
   const result = await consumeTurn(
     framesOf(
       mkResponseCreated(),
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'response.failed',
         response: failedResponse,
       }),
@@ -5381,7 +5380,7 @@ test('consumeTurn surfaces upstream response.incomplete as terminalStatus.incomp
   const result = await consumeTurn(
     framesOf(
       mkResponseCreated(),
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'response.incomplete',
         response: incompleteResponse,
       }),
@@ -5397,7 +5396,7 @@ test('consumeTurn surfaces bare `error` event as terminalStatus.failed with a sy
   const result = await consumeTurn(
     framesOf(
       mkResponseCreated(),
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'error',
         message: 'upstream blew up',
         code: 'server_error',
@@ -5429,7 +5428,7 @@ test('consumeTurn defaults missing `error.code` to spec-defined `server_error` (
   const result = await consumeTurn(
     framesOf(
       mkResponseCreated(),
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'error',
         message: 'upstream blew up without a code',
       }),
@@ -5456,7 +5455,7 @@ test('consumeTurn treats empty-string `error.code` as missing (same fallback as 
   const result = await consumeTurn(
     framesOf(
       mkResponseCreated(),
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'error',
         message: 'upstream blew up with empty code',
         code: '',
@@ -5483,7 +5482,7 @@ test('consumeTurn surfaces bare `error` event arriving BEFORE response.created a
   const state = createMergeState();
   const result = await consumeTurn(
     framesOf(
-      eventFrame<RawResponsesStreamEvent>({
+      eventFrame<ResponsesStreamEvent>({
         type: 'error',
         message: 'upstream dropped before response shell',
       }),
@@ -5504,13 +5503,13 @@ test('consumeTurnStreaming yields forwarded frames before upstream completes', a
   const state = createMergeState();
 
   let upstreamPullCount = 0;
-  const upstream: ProtocolFrame<RawResponsesStreamEvent>[] = [
+  const upstream: ProtocolFrame<ResponsesStreamEvent>[] = [
     mkResponseCreated(),
     mkReasoningAdded(0, 'rs_1'),
     mkReasoningDone(0, 'rs_1'),
     mkResponseCompleted(),
   ];
-  const countedFrames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> = (async function* () {
+  const countedFrames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> = (async function* () {
     for (const f of upstream) {
       upstreamPullCount += 1;
       yield f;
@@ -5591,11 +5590,11 @@ test('shim call output_index is reserved at output_item.added so interleaved ite
   const state = createMergeState();
   const dispatcher = () => [] as ServerToolResultSlot[];
 
-  const interleaved = eventFrame<RawResponsesStreamEvent>({
+  const interleaved = eventFrame<ResponsesStreamEvent>({
     type: 'response.image_generation_call.in_progress',
     output_index: 5,
     item_id: 'ig_x',
-  } as unknown as RawResponsesStreamEvent);
+  } as unknown as ResponsesStreamEvent);
 
   const records: DispatchRecord[] = [];
   const result = await drain(
@@ -5623,12 +5622,12 @@ test('shim call output_index is reserved at output_item.added so interleaved ite
 
 test('consumeTurn live-forwards indexed progress events without hardcoded event-type lists', async () => {
   const state = createMergeState();
-  const inProgress = eventFrame<RawResponsesStreamEvent>({
+  const inProgress = eventFrame<ResponsesStreamEvent>({
     type: 'response.image_generation_call.in_progress',
     output_index: 0,
     item_id: 'ig_1',
   });
-  const completed = eventFrame<RawResponsesStreamEvent>({
+  const completed = eventFrame<ResponsesStreamEvent>({
     type: 'response.image_generation_call.completed',
     output_index: 0,
     item_id: 'ig_1',
@@ -5655,8 +5654,8 @@ test('consumeTurn keeps swallowing keepalive/ping-shape events that lack output_
   const result = await consumeTurn(
     framesOf(
       mkResponseCreated(),
-      eventFrame<RawResponsesStreamEvent>({ type: 'keepalive' } as unknown as RawResponsesStreamEvent),
-      eventFrame<RawResponsesStreamEvent>({ type: 'ping' }),
+      eventFrame<ResponsesStreamEvent>({ type: 'keepalive' } as unknown as ResponsesStreamEvent),
+      eventFrame<ResponsesStreamEvent>({ type: 'ping' }),
       mkResponseCompleted(),
     ),
     state,

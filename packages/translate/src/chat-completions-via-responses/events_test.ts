@@ -4,7 +4,7 @@ import { translateToSourceEvents } from './events.ts';
 import { assertEquals, assertRejects } from '../test-assert.ts';
 import type { ChatCompletionsStreamEvent } from '@floway-dev/protocols/chat-completions';
 import { eventFrame, type ProtocolFrame, type SseFrame, sseFrame } from '@floway-dev/protocols/common';
-import { responsesResultToEvents, type ResponsesResult, type RawResponsesStreamEvent, type ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import { responsesResultToEvents, type ResponsesResult, type ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 
 // Inlined copy of apps/api's chatCompletionsProtocolFrameToSSEFrame: kept here so this
 // translate-package test does not deep-import into apps/api. The behavior
@@ -42,18 +42,18 @@ const makeResponse = (status: ResponsesResult['status']): ResponsesResult => ({
   },
 });
 
-const toProtocolFrame = (event: ResponsesStreamEvent): ProtocolFrame<RawResponsesStreamEvent> => eventFrame({ ...event, sequence_number: 0 });
+const toProtocolFrame = (event: ResponsesStreamEvent): ProtocolFrame<ResponsesStreamEvent> => eventFrame({ ...event, sequence_number: 0 });
 
 const includeUsageChunk = { includeUsageChunk: true };
 
-const chatSseFrames = async function* (frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>>) {
+const chatSseFrames = async function* (frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>) {
   for await (const frame of translateToSourceEvents(frames)) {
     const sse = chatCompletionsProtocolFrameToSSEFrame(frame, includeUsageChunk);
     if (sse) yield sse;
   }
 };
 
-const countDoneSentinels = async (frames: ProtocolFrame<RawResponsesStreamEvent>[]): Promise<number> => {
+const countDoneSentinels = async (frames: ProtocolFrame<ResponsesStreamEvent>[]): Promise<number> => {
   let doneCount = 0;
 
   async function* stream() {
@@ -67,7 +67,7 @@ const countDoneSentinels = async (frames: ProtocolFrame<RawResponsesStreamEvent>
   return doneCount;
 };
 
-const countAssistantStartChunksAndDone = async (frames: ProtocolFrame<RawResponsesStreamEvent>[]): Promise<{ assistantStartCount: number; doneCount: number }> => {
+const countAssistantStartChunksAndDone = async (frames: ProtocolFrame<ResponsesStreamEvent>[]): Promise<{ assistantStartCount: number; doneCount: number }> => {
   let assistantStartCount = 0;
   let doneCount = 0;
 

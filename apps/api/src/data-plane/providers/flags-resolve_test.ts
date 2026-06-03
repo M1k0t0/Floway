@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 
-import { resolveEffectiveFlags } from './flags-resolve.ts';
-import { assertEquals } from '../../test-assert.ts';
+import { resolveEffectiveFlags } from '@floway-dev/provider';
+import { assertEquals } from '@floway-dev/test-utils';
 
 test('flags-resolve: empty defaults and no layers → empty set', () => {
   const set = resolveEffectiveFlags(new Set(), []);

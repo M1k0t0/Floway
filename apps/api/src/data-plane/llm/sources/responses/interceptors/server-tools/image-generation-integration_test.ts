@@ -2,13 +2,13 @@ import { beforeEach, test, vi } from 'vitest';
 
 import { initRepo } from '../../../../../../repo/index.ts';
 import { InMemoryRepo } from '../../../../../../repo/memory.ts';
-import { assert, assertEquals } from '../../../../../../test-assert.ts';
 import type { RequestContext, ResponsesInvocation } from '../../../../interceptors.ts';
-import type { EventResult, ExecuteResult } from '../../../../shared/errors/result.ts';
 import { createHttpStatefulResponsesStore } from '../../stateful-store.ts';
 import { eventFrame } from '@floway-dev/protocols/common';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { EventResult, ExecuteResult } from '@floway-dev/provider';
+import { assert, assertEquals } from '@floway-dev/test-utils';
 
 // Dirty integration harness: mock the model registry so the image backend is a
 // pair of in-test stubs, then drive the whole shim (function-tool rewrite,

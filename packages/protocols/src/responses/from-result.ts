@@ -1,5 +1,5 @@
 import { imageGenerationCallLifecycleEvents } from './image-generation-lifecycle.ts';
-import type { ResponsesOutputCustomToolCall, ResponsesOutputFunctionCall, ResponsesOutputImageGenerationCall, ResponsesOutputItem, ResponsesOutputMessage, ResponsesOutputReasoning, ResponsesOutputWebSearchCall, ResponsesResult, ResponsesStreamEvent, SequencedResponsesStreamEvent } from './index.ts';
+import type { ResponsesOutputCustomToolCall, ResponsesOutputFunctionCall, ResponsesOutputImageGenerationCall, ResponsesOutputItem, ResponsesOutputMessage, ResponsesOutputReasoning, ResponsesOutputWebSearchCall, ResponsesResult, ResponsesStreamEvent } from './index.ts';
 import { webSearchCallLifecycleEvents } from './web-search-lifecycle.ts';
 import { type EventFrame, eventFrame } from '../common/index.ts';
 
@@ -286,7 +286,7 @@ const responsesOutputItemEvents = (item: ResponsesOutputItem, outputIndex: numbe
   }
 };
 
-export const responsesResultToEvents = (response: ResponsesResult): EventFrame<SequencedResponsesStreamEvent>[] => {
+export const responsesResultToEvents = (response: ResponsesResult): EventFrame<ResponsesStreamEvent>[] => {
   const started = responsesStartSnapshot(response);
   const events: ResponsesStreamEvent[] = [
     { type: 'response.created', response: started },

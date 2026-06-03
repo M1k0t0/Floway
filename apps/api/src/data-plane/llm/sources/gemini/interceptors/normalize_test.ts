@@ -3,10 +3,10 @@ import { test } from 'vitest';
 import { stripSafetySettings } from './strip-safety-settings.ts';
 import { stripUnsupportedPartFieldsFromPayload } from './strip-unsupported-part-fields.ts';
 import { stripUnsupportedToolsFromPayload } from './strip-unsupported-tools.ts';
-import { assertEquals } from '../../../../../test-assert.ts';
 import type { GeminiInvocation, RequestContext } from '../../../interceptors.ts';
 import { createHttpStatefulResponsesStore } from '../../responses/stateful-store.ts';
 import type { GeminiPayload } from '@floway-dev/protocols/gemini';
+import { assertEquals } from '@floway-dev/test-utils';
 
 const testTelemetryModelIdentity = {
   model: 'test-model',

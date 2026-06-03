@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 
-import { assertEquals, assertExists } from '../../test-assert.ts';
 import { buildCustomUpstreamRecord, requestApp, setupAppTest } from '../../test-helpers.ts';
+import { assertEquals, assertExists } from '@floway-dev/test-utils';
 
 const adminPatch = (id: string, body: unknown, adminKey: string) =>
   requestApp(`/api/keys/${id}`, {

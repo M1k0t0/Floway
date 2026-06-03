@@ -5,13 +5,12 @@ import { MESSAGES_MISSING_TERMINAL_MESSAGE, collectMessagesProtocolEventsToResul
 import { messagesProtocolFrameToSSEFrame } from './events/to-sse.ts';
 import { tokenUsage } from '../../../shared/telemetry/usage.ts';
 import type { RequestContext } from '../../interceptors.ts';
-import { type InternalDebugError, toInternalDebugError } from '../../shared/errors/internal-debug-error.ts';
-import type { ExecuteResult, PlainResult } from '../../shared/errors/result.ts';
-import { upstreamErrorToResponse } from '../../shared/errors/upstream-error.ts';
 import { type StreamCompletion, writeSSEFrames } from '../../shared/stream/proxy-sse.ts';
 import { SourceStreamState, eventResultMetadata, plainResultToResponse, recordSourcePerformance, recordSourceUsage } from '../respond.ts';
 import { type ProtocolFrame, sseFrame } from '@floway-dev/protocols/common';
 import type { MessagesMessageDeltaEvent, MessagesStreamEvent, MessagesUsage } from '@floway-dev/protocols/messages';
+import { type ExecuteResult, type PlainResult, type InternalDebugError, toInternalDebugError } from '@floway-dev/provider';
+import { upstreamErrorToResponse } from '@floway-dev/provider';
 
 type MessagesUsageLike = MessagesUsage | NonNullable<MessagesMessageDeltaEvent['usage']>;
 

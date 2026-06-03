@@ -1,11 +1,10 @@
 import type { Context } from 'hono';
 
 import { toPublicModel } from '../../data-plane/models/load.ts';
-import { ProviderModelsUnavailableError } from '../../data-plane/providers/models-store.ts';
 import { getModels } from '../../data-plane/providers/registry.ts';
-import type { ResolvedModel } from '../../data-plane/providers/types.ts';
-import type { UpstreamProviderKind } from '../../repo/types.ts';
 import type { PublicModel, PublicModelsResponse } from '@floway-dev/protocols/common';
+import { ProviderModelsUnavailableError } from '@floway-dev/provider';
+import type { ResolvedModel, UpstreamProviderKind } from '@floway-dev/provider';
 
 // Same DTO as the public /models endpoint, plus one dashboard-only field:
 // `upstreams` lists every provider binding for this model as { kind, id, name }

@@ -1,9 +1,9 @@
 import { test } from 'vitest';
 
-import { clearCopilotTokenCache } from '../../../../shared/copilot.ts';
-import { assertEquals, assertExists, assertFalse, assertStringIncludes } from '../../../../test-assert.ts';
-import { buildCustomUpstreamRecord, copilotModels, jsonResponse, parseSSEText, requestApp, setupAppTest, sseChatCompletionsResponse, sseResponse, withMockedFetch } from '../../../../test-helpers.ts';
-import { clearModelsStore } from '../../../providers/models-store.ts';
+import { buildCustomUpstreamRecord, copilotModels, parseSSEText, requestApp, setupAppTest, sseChatCompletionsResponse, sseResponse } from '../../../../test-helpers.ts';
+import { clearModelsStore } from '@floway-dev/provider';
+import { clearCopilotTokenCache } from '@floway-dev/provider-copilot';
+import { jsonResponse, withMockedFetch, assertEquals, assertExists, assertFalse, assertStringIncludes } from '@floway-dev/test-utils';
 
 const mockTokenAndModels = (request: Request, models: Parameters<typeof copilotModels>[0]): Response | null => {
   const url = new URL(request.url);

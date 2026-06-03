@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 
 import { truncateUtf8 } from './truncate.ts';
-import { assertEquals } from '../../../../test-assert.ts';
+import { assertEquals } from '@floway-dev/test-utils';
 
 test('truncateUtf8 returns content untouched if under limit', () => {
   assertEquals(truncateUtf8('hello', 100), { content: 'hello', truncated: false, fullContentBytes: 5 });

@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 
 import { R2FileProvider, type R2BucketLike } from './r2-file-provider.ts';
-import { assertEquals } from '../test-assert.ts';
+import { assertEquals } from '@floway-dev/test-utils';
 
 class FakeR2Bucket implements R2BucketLike {
   store = new Map<string, Uint8Array>();

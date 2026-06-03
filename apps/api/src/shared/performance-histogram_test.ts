@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 
-import { assertEquals } from '../test-assert.ts';
 import { latencyBucketForMs, percentileFromHistogramBuckets } from './performance-histogram.ts';
+import { assertEquals } from '@floway-dev/test-utils';
 
 test('latencyBucketForMs returns self-describing exponential buckets', () => {
   assertEquals(latencyBucketForMs(75), { lowerMs: 0, upperMs: 100 });

@@ -6,8 +6,8 @@ import { zValidator } from '../../middleware/zod-validator.ts';
 import { initRepo } from '../../repo/index.ts';
 import { InMemoryRepo } from '../../repo/memory.ts';
 import type { ApiKey, SearchUsageRecord } from '../../repo/types.ts';
-import { assertEquals } from '../../test-assert.ts';
 import { searchUsageQuery } from '../schemas.ts';
+import { assertEquals } from '@floway-dev/test-utils';
 
 const KEY_A: ApiKey = {
   id: 'key-aaa',

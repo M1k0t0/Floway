@@ -1,9 +1,9 @@
 import { test } from 'vitest';
 
-import { assertEquals, assertRejects } from '../test-assert.ts';
 import { type D1Database, D1Repo } from './d1.ts';
 import { InMemoryRepo } from './memory.ts';
 import type { SearchUsageRecord, SearchUsageRepo } from './types.ts';
+import { assertEquals, assertRejects } from '@floway-dev/test-utils';
 
 const sortSearchUsageRecords = (records: SearchUsageRecord[]) =>
   records.toSorted(

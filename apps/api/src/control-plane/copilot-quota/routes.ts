@@ -3,7 +3,7 @@
 import type { Context } from 'hono';
 
 import { getRepo } from '../../repo/index.ts';
-import { githubHeaders } from '../../shared/copilot.ts';
+import { githubHeaders } from '@floway-dev/provider-copilot';
 
 interface QuotaDetail {
   entitlement: number;

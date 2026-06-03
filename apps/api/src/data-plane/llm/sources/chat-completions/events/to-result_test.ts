@@ -1,9 +1,9 @@
 import { test } from 'vitest';
 
 import { collectChatCompletionsProtocolEventsToResult } from './to-result.ts';
-import { assertEquals, assertRejects } from '../../../../../test-assert.ts';
 import type { ChatCompletionsStreamEvent, ChatCompletionsResult } from '@floway-dev/protocols/chat-completions';
 import { doneFrame, eventFrame } from '@floway-dev/protocols/common';
+import { assertEquals, assertRejects } from '@floway-dev/test-utils';
 
 test('collectChatCompletionsProtocolEventsToResult reassembles synthetic Chat chunks', async () => {
   const expected: ChatCompletionsResult = {

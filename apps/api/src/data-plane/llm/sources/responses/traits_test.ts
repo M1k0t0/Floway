@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 
 import { responsesTraits } from './traits.ts';
-import { assertEquals } from '../../../../test-assert.ts';
+import { assertEquals } from '@floway-dev/test-utils';
 
 // The same `LlmServeFailure` is rendered into each source's own error envelope.
 // Under the Responses protocol the gateway stands in for OpenAI's own item

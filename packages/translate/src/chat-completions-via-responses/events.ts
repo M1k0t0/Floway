@@ -3,7 +3,7 @@ import { createResponsesOutputOrderState, recordResponsesOutputOrderEvent, type 
 import { type ResponsesEvent, responsesPartKey } from '../shared/via-responses/responses-stream.ts';
 import type { ChatCompletionsStreamEvent, ChatCompletionsResult, ChatCompletionsReasoningItem, ChatCompletionsDelta } from '@floway-dev/protocols/chat-completions';
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
-import type { ResponsesOutputItem, ResponsesResult, RawResponsesStreamEvent, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { ResponsesOutputItem, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 
 const mapResponsesFinishReasonToChatCompletionsFinishReason = (response: ResponsesResult): ChatCompletionsResult['choices'][0]['finish_reason'] =>
   response.status === 'incomplete' && response.incomplete_details?.reason === 'max_output_tokens'
@@ -14,7 +14,7 @@ const mapResponsesFinishReasonToChatCompletionsFinishReason = (response: Respons
 
 const UPSTREAM_RESPONSES_MISSING_TERMINAL_MESSAGE = 'Upstream Responses stream ended without a terminal event.';
 
-const upstreamResponsesEventsUntilTerminal = async function* (frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>>): AsyncGenerator<RawResponsesStreamEvent> {
+const upstreamResponsesEventsUntilTerminal = async function* (frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>): AsyncGenerator<ResponsesStreamEvent> {
   for await (const frame of frames) {
     if (frame.type === 'done') continue;
 
@@ -409,7 +409,7 @@ const chatErrorFrameFromResponsesFatalEvent = (event: ResponsesStreamEvent): Pro
   return undefined;
 };
 
-export const translateToSourceEvents = async function* (frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>>): AsyncGenerator<ProtocolFrame<ChatCompletionsStreamEvent>> {
+export const translateToSourceEvents = async function* (frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>): AsyncGenerator<ProtocolFrame<ChatCompletionsStreamEvent>> {
   const state = createResponsesToChatCompletionsStreamState();
 
   for await (const event of upstreamResponsesEventsUntilTerminal(frames)) {

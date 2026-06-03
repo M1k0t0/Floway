@@ -3,7 +3,7 @@ import { unwrapCustomToolInput } from '../shared/responses-via/custom-tool-wrap.
 import * as responses from '../shared/responses-via/responses-event-builder.ts';
 import type { ChatCompletionsStreamEvent, ChatCompletionsResult } from '@floway-dev/protocols/chat-completions';
 import { eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
-import type { ResponsesOutputItem, ResponsesOutputReasoning, ResponsesResult, RawResponsesStreamEvent, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { ResponsesOutputItem, ResponsesOutputReasoning, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 
 const mapChatCompletionsUsageToResponsesUsage = (usage: ChatCompletionsResult['usage'] | undefined): ResponsesResult['usage'] | undefined =>
   usage
@@ -388,7 +388,7 @@ export const flushChatCompletionsToResponsesEvents = (state: ChatCompletionsToRe
 export const translateToSourceEvents = async function* (
   frames: AsyncIterable<ProtocolFrame<ChatCompletionsStreamEvent>>,
   customToolNames: ReadonlySet<string> = new Set(),
-): AsyncGenerator<ProtocolFrame<RawResponsesStreamEvent>> {
+): AsyncGenerator<ProtocolFrame<ResponsesStreamEvent>> {
   const state = createChatCompletionsToResponsesStreamState(customToolNames);
 
   for await (const chunk of upstreamChatCompletionEventsUntilDone(frames)) {

@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 
 import { normalizeDisabledPublicModelIds, parseDisabledPublicModelIdsWire } from './disabled-public-models.ts';
-import { assertEquals, assertRejects } from '../test-assert.ts';
+import { assertEquals, assertRejects } from '@floway-dev/test-utils';
 
 test('normalizeDisabledPublicModelIds trims, drops empties, and de-dupes preserving order', () => {
   assertEquals(

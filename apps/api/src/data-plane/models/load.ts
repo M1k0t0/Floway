@@ -1,6 +1,6 @@
 import { getInternalModels } from '../providers/registry.ts';
-import type { InternalModel } from '../providers/types.ts';
 import type { PublicModel, PublicModelsResponse } from '@floway-dev/protocols/common';
+import type { InternalModel } from '@floway-dev/provider';
 
 export const toPublicModel = (model: InternalModel): PublicModel => {
   const info: PublicModel = {

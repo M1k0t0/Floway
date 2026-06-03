@@ -314,3 +314,5 @@ export interface MessagesErrorEvent {
     target_api?: string;
   };
 }
+
+export { parseMessagesStream, type ParseMessagesStreamOptions } from './stream.ts';

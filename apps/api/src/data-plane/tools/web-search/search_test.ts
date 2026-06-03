@@ -4,7 +4,7 @@ import { searchWebAndRecordUsage } from './search.ts';
 import type { WebSearchProvider, WebSearchProviderResult } from './types.ts';
 import { initRepo } from '../../../repo/index.ts';
 import { InMemoryRepo } from '../../../repo/memory.ts';
-import { assertEquals, assertRejects } from '../../../test-assert.ts';
+import { assertEquals, assertRejects } from '@floway-dev/test-utils';
 
 const stubProvider = (search: WebSearchProvider['search']): WebSearchProvider => ({
   search,

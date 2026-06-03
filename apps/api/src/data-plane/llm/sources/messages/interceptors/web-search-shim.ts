@@ -4,8 +4,6 @@ import { loadSearchConfig } from '../../../../tools/web-search/search-config.ts'
 import { searchWebAndRecordUsage, searchWebWithoutRecordingUsage } from '../../../../tools/web-search/search.ts';
 import type { WebSearchProvider, WebSearchProviderName, WebSearchProviderRequest, WebSearchProviderResult } from '../../../../tools/web-search/types.ts';
 import type { MessagesInterceptor } from '../../../interceptors.ts';
-import { toInternalDebugError } from '../../../shared/errors/internal-debug-error.ts';
-import { internalErrorResult } from '../../../shared/errors/result.ts';
 import { eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type {
   MessagesAssistantContentBlock,
@@ -25,6 +23,7 @@ import type {
   MessagesWebSearchToolResultError,
 } from '@floway-dev/protocols/messages';
 import { MESSAGES_WEB_SEARCH_ERROR_CODES } from '@floway-dev/protocols/messages';
+import { internalErrorResult, toInternalDebugError } from '@floway-dev/provider';
 
 const MAX_QUERY_LENGTH = 1000;
 const WEB_SEARCH_TOOL_NAME = 'web_search';

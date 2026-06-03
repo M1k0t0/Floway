@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 
-import { assertEquals, assertStringIncludes } from '../../test-assert.ts';
-import { buildCopilotUpstreamRecord, jsonResponse, requestApp, setupAppTest, withMockedFetch } from '../../test-helpers.ts';
+import { buildCopilotUpstreamRecord, requestApp, setupAppTest } from '../../test-helpers.ts';
+import { assertEquals, assertStringIncludes, jsonResponse, withMockedFetch } from '@floway-dev/test-utils';
 
 const githubUser = {
   id: 777,

@@ -1,16 +1,14 @@
 import { app } from './app.ts';
-import { clearModelsStore } from './data-plane/providers/models-store.ts';
-import type { ModelProvider, UpstreamModel } from './data-plane/providers/types.ts';
 import type { SearchConfig } from './data-plane/tools/web-search/types.ts';
-import { initImageProcessor } from './image/index.ts';
-import { createInMemoryImageProcessor } from './image/memory.ts';
 import { initRepo } from './repo/index.ts';
 import { InMemoryRepo } from './repo/memory.ts';
-import type { ApiKey, TelemetryModelIdentity, UpstreamRecord } from './repo/types.ts';
+import type { ApiKey } from './repo/types.ts';
 import { initEnv } from './runtime/env.ts';
 import { initFileProvider, MemoryFileProvider } from './runtime/file-provider.ts';
-import { clearCopilotTokenCache } from './shared/copilot.ts';
-import type { Upstream } from './shared/upstream/types.ts';
+import { initImageProcessor, clearModelsStore } from '@floway-dev/provider';
+import type { UpstreamRecord } from '@floway-dev/provider';
+import { clearCopilotTokenCache } from '@floway-dev/provider-copilot';
+import { createInMemoryImageProcessor } from '@floway-dev/test-utils';
 
 interface SetupOptions {
   adminKey?: string;
@@ -19,9 +17,6 @@ interface SetupOptions {
   copilotUpstream?: UpstreamRecord;
   searchConfig?: SearchConfig;
 }
-
-type FetchInput = Parameters<typeof fetch>[0];
-type FetchInit = Parameters<typeof fetch>[1];
 
 interface AppTestContext {
   repo: InMemoryRepo;
@@ -46,8 +41,6 @@ interface SSEChunk {
   event?: string;
   data: string | Record<string, unknown>;
 }
-
-let fetchLock: Promise<void> = Promise.resolve();
 
 const TEST_UPSTREAM_TIMESTAMP = '2026-03-15T00:00:00.000Z';
 
@@ -136,35 +129,6 @@ export async function setupAppTest(options: SetupOptions = {}): Promise<AppTestC
   }
 
   return { repo, adminKey, apiKey, githubAccount, copilotUpstream };
-}
-
-export async function withMockedFetch<T>(handler: (request: Request) => Promise<Response> | Response, run: () => Promise<T>): Promise<T> {
-  let release: (() => void) | undefined;
-  const previousLock = fetchLock;
-  fetchLock = new Promise<void>(resolve => {
-    release = resolve;
-  });
-  await previousLock;
-
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (input: FetchInput, init?: FetchInit) => {
-    const request = input instanceof Request && init === undefined ? input : new Request(input, init);
-    return Promise.resolve(handler(request));
-  };
-
-  try {
-    return await run();
-  } finally {
-    globalThis.fetch = originalFetch;
-    release?.();
-  }
-}
-
-export function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  });
 }
 
 export function sseResponse(chunks: SSEChunk[], status = 200): Response {
@@ -329,42 +293,3 @@ export function copilotModels(
     })),
   };
 }
-
-// A throwaway upstream stub for unit tests that exercise the low-level upstream
-// adapter cache without depending on a real network target.
-export const stubUpstream = (overrides: Partial<Upstream> = {}): Upstream => ({
-  id: 'test-upstream',
-  name: 'Test Upstream',
-  kind: 'custom',
-  endpoints: { chatCompletions: {}, responses: {}, messages: {} },
-  fetch: () => Promise.reject(new Error('stubUpstream.fetch was called')),
-  ...overrides,
-});
-
-export const stubUpstreamModel = (overrides: Partial<UpstreamModel> = {}): UpstreamModel => ({
-  id: 'test-model',
-  limits: {},
-  kind: 'chat',
-  endpoints: { chatCompletions: {}, responses: {}, messages: {} },
-  enabledFlags: new Set<string>(),
-  ...overrides,
-});
-
-export const testTelemetryModelIdentity: TelemetryModelIdentity = {
-  model: 'test-model',
-  upstream: 'test-upstream',
-  modelKey: 'test-model-key', cost: null,
-};
-
-export const stubProvider = (overrides: Partial<ModelProvider> = {}): ModelProvider => ({
-  getProvidedModels: () => Promise.resolve([]),
-  getPricingForModelKey: () => null,
-  callChatCompletions: () => Promise.reject(new Error('stubProvider.callChatCompletions was called')),
-  callResponses: () => Promise.reject(new Error('stubProvider.callResponses was called')),
-  callMessages: () => Promise.reject(new Error('stubProvider.callMessages was called')),
-  callMessagesCountTokens: () => Promise.reject(new Error('stubProvider.callMessagesCountTokens was called')),
-  callEmbeddings: () => Promise.reject(new Error('stubProvider.callEmbeddings was called')),
-  callImagesGenerations: () => Promise.reject(new Error('stubProvider.callImagesGenerations was called')),
-  callImagesEdits: () => Promise.reject(new Error('stubProvider.callImagesEdits was called')),
-  ...overrides,
-});

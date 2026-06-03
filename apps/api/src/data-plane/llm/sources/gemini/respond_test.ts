@@ -2,14 +2,13 @@ import { Hono } from 'hono';
 import { test } from 'vitest';
 
 import { respondGemini } from './respond.ts';
-import { assertEquals, assertExists } from '../../../../test-assert.ts';
 import type { RequestContext } from '../../interceptors.ts';
-import type { InternalDebugError } from '../../shared/errors/internal-debug-error.ts';
-import type { ExecuteResult } from '../../shared/errors/result.ts';
 import { createHttpStatefulResponsesStore } from '../responses/stateful-store.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import { eventFrame } from '@floway-dev/protocols/common';
 import type { GeminiErrorResponse } from '@floway-dev/protocols/gemini';
+import type { ExecuteResult, InternalDebugError } from '@floway-dev/provider';
+import { assertEquals, assertExists } from '@floway-dev/test-utils';
 
 const encoder = new TextEncoder();
 

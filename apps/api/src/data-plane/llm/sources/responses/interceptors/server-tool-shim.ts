@@ -1,7 +1,6 @@
 import { jsonrepair } from 'jsonrepair';
 
 import type { InterceptorRun, RequestContext, ResponsesInterceptor, ResponsesInvocation } from '../../../interceptors.ts';
-import type { EventResultMetadata, ExecuteResult } from '../../../shared/errors/result.ts';
 import { truncatePreservingCodePoints } from '../../../shared/text.ts';
 import type { StatefulResponsesStore } from '../stateful-store.ts';
 import { eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
@@ -10,11 +9,11 @@ import type {
   ResponsesOutputItem,
   ResponsesPayload,
   ResponsesResult,
-  RawResponsesStreamEvent,
   ResponsesStreamEvent,
   ResponsesTool,
   ResponsesToolChoice,
 } from '@floway-dev/protocols/responses';
+import type { EventResultMetadata, ExecuteResult } from '@floway-dev/provider';
 
 export interface MergeUsage {
   input_tokens: number;
@@ -364,13 +363,13 @@ const stampServerToolEvent = (
   outputIndex: number,
   itemId: string,
   event: ServerToolLifecycleEvent,
-): ProtocolFrame<RawResponsesStreamEvent> =>
+): ProtocolFrame<ResponsesStreamEvent> =>
   eventFrame({
     ...event,
     output_index: outputIndex,
     item_id: itemId,
     sequence_number: merge.sequenceNumber++,
-  } as RawResponsesStreamEvent);
+  } as ResponsesStreamEvent);
 
 // Builds a slot whose deferred lifecycle is driven by `run` at materialization:
 // `run` yields any intermediate frames as they arrive (e.g. image generation's
@@ -396,13 +395,13 @@ const serverToolStartFrames = (
   merge: MergeState,
   outputIndex: number,
   slot: ServerToolResultSlot,
-): ProtocolFrame<RawResponsesStreamEvent>[] => [
+): ProtocolFrame<ResponsesStreamEvent>[] => [
   eventFrame({
     type: 'response.output_item.added',
     output_index: outputIndex,
     item: attachServerToolItemId(slot.startItem, slot.id),
     sequence_number: merge.sequenceNumber++,
-  } as RawResponsesStreamEvent),
+  } as ResponsesStreamEvent),
   ...slot.startEvents.map(event => stampServerToolEvent(merge, outputIndex, slot.id, event)),
 ];
 
@@ -411,7 +410,7 @@ const serverToolEndFrames = (
   outputIndex: number,
   slot: ServerToolResultSlot,
   result: ServerToolTerminal,
-): ProtocolFrame<RawResponsesStreamEvent>[] => {
+): ProtocolFrame<ResponsesStreamEvent>[] => {
   const frames = [
     ...result.endEvents.map(event => stampServerToolEvent(merge, outputIndex, slot.id, event)),
     eventFrame({
@@ -419,7 +418,7 @@ const serverToolEndFrames = (
       output_index: outputIndex,
       item: attachServerToolItemId(result.item, slot.id),
       sequence_number: merge.sequenceNumber++,
-    } as RawResponsesStreamEvent),
+    } as ResponsesStreamEvent),
   ];
   merge.accumulatedOutput.set(outputIndex, attachServerToolItemId(result.item, slot.id));
   return frames;
@@ -447,12 +446,12 @@ const UPSTREAM_TERMINAL_LABEL: Record<UpstreamTerminal['kind'], string> = {
 };
 
 export const consumeTurnStreaming = async function* (
-  frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>>,
+  frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>,
   merge: MergeState,
   isFirstTurn: boolean,
   dispatchers: ReadonlyMap<string, ServerToolDispatcher>,
   loopState: ServerToolLoopState,
-): AsyncGenerator<ProtocolFrame<RawResponsesStreamEvent>, TurnSummary> {
+): AsyncGenerator<ProtocolFrame<ResponsesStreamEvent>, TurnSummary> {
   const dispatched: Array<{ intercepted: InterceptedFunctionCall; slots: DispatchedServerToolSlot[] }> = [];
   let sawClientToolCall = false;
   let turnUsage: Partial<MergeUsage> = {};
@@ -473,11 +472,11 @@ export const consumeTurnStreaming = async function* (
     return merge.lastSeenModel;
   };
 
-  const stamp = (event: ResponsesStreamEvent): ProtocolFrame<RawResponsesStreamEvent> =>
+  const stamp = (event: ResponsesStreamEvent): ProtocolFrame<ResponsesStreamEvent> =>
     eventFrame({
       ...event,
       sequence_number: merge.sequenceNumber++,
-    } as RawResponsesStreamEvent);
+    } as ResponsesStreamEvent);
 
   for await (const frame of frames) {
     if (frame.type !== 'event') {
@@ -737,7 +736,7 @@ export const invalidRequestEnvelope = (
   message: string,
   param: string,
   code = 'invalid_request_error',
-): ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>> => {
+): ExecuteResult<ProtocolFrame<ResponsesStreamEvent>> => {
   const body = JSON.stringify({
     error: {
       message,
@@ -783,7 +782,7 @@ const SYNTHESIZED_TERMINAL_FRAME: Record<SynthesizedTerminal['kind'], { type: 'r
 export const synthesizeTerminalEnvelope = (
   state: MergeState,
   kind: SynthesizedTerminal,
-): ProtocolFrame<RawResponsesStreamEvent> => {
+): ProtocolFrame<ResponsesStreamEvent> => {
   if (state.lastSeenModel === null) {
     throw new Error('Server-tool shim cannot synthesize a Responses terminal envelope before upstream `response.created` reports a model.');
   }
@@ -804,14 +803,14 @@ export const synthesizeTerminalEnvelope = (
       ...(kind.kind === 'failed' ? { error: kind.error } : {}),
       ...(kind.kind === 'incomplete' ? { incomplete_details: kind.incompleteDetails } : {}),
     }),
-  } as RawResponsesStreamEvent);
+  } as ResponsesStreamEvent);
 };
 
 async function* materializeServerToolItems(
   dispatched: ReadonlyArray<{ slots: DispatchedServerToolSlot[] }>,
   merge: MergeState,
   statefulResponsesStore: StatefulResponsesStore,
-): AsyncGenerator<ProtocolFrame<RawResponsesStreamEvent>, void> {
+): AsyncGenerator<ProtocolFrame<ResponsesStreamEvent>, void> {
   for (const d of dispatched) {
     for (const { slot, outputIndex } of d.slots) {
       const lifecycle = slot.run();
@@ -834,18 +833,18 @@ async function* materializeServerToolItems(
 
 async function* runMultiTurnLoop(args: {
   ctx: ResponsesInvocation;
-  run: InterceptorRun<ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>>;
+  run: InterceptorRun<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>>;
   merge: MergeState;
   loopState: ServerToolLoopState;
   demoteForcedServerToolChoiceAfterFirstTurn: boolean;
-  turn1Iter: AsyncGenerator<ProtocolFrame<RawResponsesStreamEvent>, TurnSummary>;
+  turn1Iter: AsyncGenerator<ProtocolFrame<ResponsesStreamEvent>, TurnSummary>;
   dispatchers: ReadonlyMap<string, ServerToolDispatcher>;
   statefulResponsesStore: StatefulResponsesStore;
   canonicalInput: ResponsesInputItem[];
   active: readonly ActiveServerTool[];
   metadata: LatestUpstreamMetadata;
   resolveFinalMetadata: (m: EventResultMetadata) => void;
-}): AsyncGenerator<ProtocolFrame<RawResponsesStreamEvent>> {
+}): AsyncGenerator<ProtocolFrame<ResponsesStreamEvent>> {
   const { ctx, run, merge, loopState, demoteForcedServerToolChoiceAfterFirstTurn, turn1Iter, dispatchers, statefulResponsesStore, active, metadata, resolveFinalMetadata } = args;
   const baseInput = args.canonicalInput;
   let midStreamError: unknown = undefined;

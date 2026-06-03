@@ -1,12 +1,12 @@
 import { test } from 'vitest';
 
-import { clearCopilotTokenCache } from '../../../../shared/copilot.ts';
-import { assert, assertEquals, assertExists, assertFalse, assertStringIncludes } from '../../../../test-assert.ts';
-import { buildCustomUpstreamRecord, copilotModels, jsonResponse, parseSSEText, requestApp, setupAppTest, sseMessagesResponse, sseResponse, withMockedFetch } from '../../../../test-helpers.ts';
-import { clearModelsStore } from '../../../providers/models-store.ts';
+import { buildCustomUpstreamRecord, copilotModels, parseSSEText, requestApp, setupAppTest, sseMessagesResponse, sseResponse } from '../../../../test-helpers.ts';
 import type { SearchConfig } from '../../../tools/web-search/types.ts';
 import { createStoredResponsesItemId, isStoredResponsesItemId } from '../responses/items/format.ts';
 import type { ResponsesResult } from '@floway-dev/protocols/responses';
+import { clearModelsStore } from '@floway-dev/provider';
+import { clearCopilotTokenCache } from '@floway-dev/provider-copilot';
+import { jsonResponse, withMockedFetch, assert, assertEquals, assertExists, assertFalse, assertStringIncludes } from '@floway-dev/test-utils';
 
 const ENABLED_SEARCH_CONFIG: SearchConfig = {
   provider: 'tavily',

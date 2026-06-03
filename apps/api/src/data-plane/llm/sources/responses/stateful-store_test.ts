@@ -6,8 +6,8 @@ import { createHttpStatefulResponsesStore, createWebSocketStatefulResponsesSessi
 import { initRepo } from '../../../../repo/index.ts';
 import { InMemoryRepo } from '../../../../repo/memory.ts';
 import type { StoredResponsesItem } from '../../../../repo/types.ts';
-import { assertEquals, assertExists } from '../../../../test-assert.ts';
 import type { ResponsesInputItem } from '@floway-dev/protocols/responses';
+import { assertEquals, assertExists } from '@floway-dev/test-utils';
 import { responsesItemsView } from '@floway-dev/translate/via-responses/responses-items';
 
 const API_KEY_ID = 'key_stateful_store';

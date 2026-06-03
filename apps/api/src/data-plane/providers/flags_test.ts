@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 
-import { defaultsForProvider, getFlagCatalog, isKnownFlagId } from './flags.ts';
-import { assertEquals } from '../../test-assert.ts';
+import { defaultsForProvider, getFlagCatalog, isKnownFlagId } from '@floway-dev/provider';
+import { assertEquals } from '@floway-dev/test-utils';
 
 test('provider flags: catalog ids are unique', () => {
   const ids = new Set<string>();

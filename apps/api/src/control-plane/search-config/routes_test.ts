@@ -1,8 +1,8 @@
 import { test } from 'vitest';
 
 import { DEFAULT_SEARCH_CONFIG } from '../../data-plane/tools/web-search/search-config.ts';
-import { assertEquals } from '../../test-assert.ts';
-import { jsonResponse, requestApp, setupAppTest, withMockedFetch } from '../../test-helpers.ts';
+import { requestApp, setupAppTest } from '../../test-helpers.ts';
+import { assertEquals, jsonResponse, withMockedFetch } from '@floway-dev/test-utils';
 
 test('/api/search-config GET returns the default disabled config for admin', async () => {
   const { adminKey } = await setupAppTest();

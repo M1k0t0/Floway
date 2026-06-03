@@ -4,7 +4,7 @@ import { DEFAULT_SEARCH_CONFIG, FIXED_SEARCH_CONFIG_TEST_QUERY, loadSearchConfig
 import { type D1Database, D1Repo } from '../../../repo/d1.ts';
 import { initRepo } from '../../../repo/index.ts';
 import { InMemoryRepo } from '../../../repo/memory.ts';
-import { assertEquals, assertRejects, assertThrows } from '../../../test-assert.ts';
+import { assertEquals, assertRejects, assertThrows } from '@floway-dev/test-utils';
 
 class FakeD1PreparedStatement {
   private binds: unknown[] = [];

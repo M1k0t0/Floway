@@ -142,3 +142,5 @@ export interface ChatCompletionsDelta {
 }
 
 export * from './errors.ts';
+
+export { parseChatCompletionsStream, type ParseChatCompletionsStreamOptions } from './stream.ts';

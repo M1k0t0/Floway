@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 
-import { assertEquals } from '../../test-assert.ts';
-import { jsonResponse, requestApp, setupAppTest, withMockedFetch } from '../../test-helpers.ts';
+import { requestApp, setupAppTest } from '../../test-helpers.ts';
+import { assertEquals, jsonResponse, withMockedFetch } from '@floway-dev/test-utils';
 
 const customConfig = {
   baseUrl: 'https://custom.example.com',

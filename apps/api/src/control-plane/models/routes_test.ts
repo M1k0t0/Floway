@@ -1,8 +1,8 @@
 import { test } from 'vitest';
 
-import type { UpstreamRecord } from '../../repo/types.ts';
-import { assertEquals } from '../../test-assert.ts';
-import { buildCustomUpstreamRecord, copilotModels, jsonResponse, requestApp, setupAppTest, withMockedFetch } from '../../test-helpers.ts';
+import { buildCustomUpstreamRecord, copilotModels, requestApp, setupAppTest } from '../../test-helpers.ts';
+import type { UpstreamRecord } from '@floway-dev/provider';
+import { assertEquals, jsonResponse, withMockedFetch } from '@floway-dev/test-utils';
 
 const azureUpstream = (): UpstreamRecord => ({
   id: 'up_azure_models',

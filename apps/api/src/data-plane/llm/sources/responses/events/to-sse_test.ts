@@ -1,9 +1,9 @@
 import { test } from 'vitest';
 
 import { responsesProtocolFrameToSSEFrame } from './to-sse.ts';
-import { assertEquals } from '../../../../../test-assert.ts';
 import { eventFrame } from '@floway-dev/protocols/common';
-import type { RawResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import { assertEquals } from '@floway-dev/test-utils';
 
 test('responsesProtocolFrameToSSEFrame serializes events without owning termination', () => {
   const frames = [
@@ -20,7 +20,7 @@ test('responsesProtocolFrameToSSEFrame serializes events without owning terminat
         error: null,
         incomplete_details: null,
       },
-    } satisfies RawResponsesStreamEvent),
+    } satisfies ResponsesStreamEvent),
     eventFrame({
       type: 'response.output_text.delta',
       sequence_number: 1,
@@ -28,7 +28,7 @@ test('responsesProtocolFrameToSSEFrame serializes events without owning terminat
       output_index: 0,
       content_index: 0,
       delta: 'still serialized',
-    } satisfies RawResponsesStreamEvent),
+    } satisfies ResponsesStreamEvent),
   ].map(responsesProtocolFrameToSSEFrame);
 
   assertEquals(

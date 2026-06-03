@@ -1,9 +1,9 @@
 import { test } from 'vitest';
 
-import { clearCopilotTokenCache } from '../../shared/copilot.ts';
-import { assertEquals } from '../../test-assert.ts';
-import { buildCopilotUpstreamRecord, buildCustomUpstreamRecord, copilotModels, jsonResponse, requestApp, setupAppTest, withMockedFetch } from '../../test-helpers.ts';
-import { clearModelsStore } from '../providers/models-store.ts';
+import { buildCopilotUpstreamRecord, buildCustomUpstreamRecord, copilotModels, requestApp, setupAppTest } from '../../test-helpers.ts';
+import { clearModelsStore } from '@floway-dev/provider';
+import { clearCopilotTokenCache } from '@floway-dev/provider-copilot';
+import { jsonResponse, withMockedFetch, assertEquals } from '@floway-dev/test-utils';
 
 const SECOND_ACCOUNT = {
   token: 'ghu_second',

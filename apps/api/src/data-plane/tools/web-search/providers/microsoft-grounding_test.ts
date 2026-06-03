@@ -1,9 +1,8 @@
 import { test } from 'vitest';
 
 import { createMicrosoftGroundingWebSearchProvider } from './microsoft-grounding.ts';
-import { assertEquals } from '../../../../test-assert.ts';
-import { jsonResponse, withMockedFetch } from '../../../../test-helpers.ts';
 import { FakeTime } from '../../../../test-time.ts';
+import { assertEquals, jsonResponse, withMockedFetch } from '@floway-dev/test-utils';
 
 test('createMicrosoftGroundingWebSearchProvider calls v3 search/web with passage content', async () => {
   let request: Request | undefined;

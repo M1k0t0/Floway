@@ -12,7 +12,6 @@ import {
 } from './web-search-shim.ts';
 import { initRepo } from '../../../../../repo/index.ts';
 import { InMemoryRepo } from '../../../../../repo/memory.ts';
-import { assertEquals, assertExists, assertRejects } from '../../../../../test-assert.ts';
 import { DEFAULT_SEARCH_CONFIG } from '../../../../tools/web-search/search-config.ts';
 import type { WebSearchProvider, WebSearchProviderResult } from '../../../../tools/web-search/types.ts';
 import type { MessagesInvocation, RequestContext } from '../../../interceptors.ts';
@@ -30,6 +29,7 @@ import type {
   MessagesToolResultContentBlock,
   MessagesUserContentBlock,
 } from '@floway-dev/protocols/messages';
+import { assertEquals, assertExists, assertRejects } from '@floway-dev/test-utils';
 
 const testTelemetryModelIdentity = {
   model: 'test-model',

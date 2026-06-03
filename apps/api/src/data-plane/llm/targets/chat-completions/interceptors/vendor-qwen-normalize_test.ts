@@ -1,10 +1,10 @@
 import { test } from 'vitest';
 
-import { chatCompletionsInvocation, stubRequestContext, testTelemetryModelIdentity } from './test-helpers.ts';
+import { chatCompletionsInvocation, stubRequestContext } from './test-helpers.ts';
 import { withVendorQwenChatCompletionsNormalize } from './vendor-qwen-normalize.ts';
-import { assertEquals } from '../../../../../test-assert.ts';
-import { eventResult } from '../../../shared/errors/result.ts';
 import type { ChatCompletionsPayload } from '@floway-dev/protocols/chat-completions';
+import { eventResult } from '@floway-dev/provider';
+import { assertEquals, testTelemetryModelIdentity } from '@floway-dev/test-utils';
 
 const okEvents = () => Promise.resolve(eventResult((async function* () { yield* []; })(), testTelemetryModelIdentity));
 

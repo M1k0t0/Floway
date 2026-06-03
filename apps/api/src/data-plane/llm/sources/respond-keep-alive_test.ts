@@ -7,15 +7,15 @@ import { respondGemini } from './gemini/respond.ts';
 import { respondMessages } from './messages/respond.ts';
 import { respondResponses } from './responses/respond.ts';
 import { createHttpStatefulResponsesStore } from './responses/stateful-store.ts';
-import { assertEquals } from '../../../test-assert.ts';
 import { FakeTime } from '../../../test-time.ts';
-import { eventResult } from '../shared/errors/result.ts';
 import { DOWNSTREAM_KEEP_ALIVE_INTERVAL_MS } from '../shared/stream/proxy-sse.ts';
 import type { ChatCompletionsStreamEvent } from '@floway-dev/protocols/chat-completions';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { GeminiStreamEvent } from '@floway-dev/protocols/gemini';
 import type { MessagesStreamEvent } from '@floway-dev/protocols/messages';
-import type { RawResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import { eventResult } from '@floway-dev/provider';
+import { assertEquals } from '@floway-dev/test-utils';
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -133,7 +133,7 @@ test('Messages streaming keepalive uses Anthropic ping events', async () => {
 });
 
 test('Responses streaming keepalive uses SSE comments', async () => {
-  await assertSourceKeepAlive<RawResponsesStreamEvent>(async (c, events) => (await respondResponses(c, eventResult(events, testTelemetryModelIdentity), true, request(), undefined)).response, ': keepalive\n\n');
+  await assertSourceKeepAlive<ResponsesStreamEvent>(async (c, events) => (await respondResponses(c, eventResult(events, testTelemetryModelIdentity), true, request(), undefined)).response, ': keepalive\n\n');
 });
 
 test('Chat Completions streaming keepalive uses SSE comments', async () => {

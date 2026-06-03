@@ -2,8 +2,8 @@ import { test } from 'vitest';
 
 import { aggregateUsageForDisplay } from './aggregate.ts';
 import type { UsageRecord } from '../../repo/types.ts';
-import { assertAlmostEquals, assertEquals } from '../../test-assert.ts';
 import type { ModelPricing } from '@floway-dev/protocols/common';
+import { assertAlmostEquals, assertEquals } from '@floway-dev/test-utils';
 
 const opus47Pricing: ModelPricing = { input: 5, output: 25, input_cache_read: 0.5, input_cache_write: 6.25 };
 const gpt54Pricing: ModelPricing = { input: 2.5, output: 15, input_cache_read: 0.25 };

@@ -501,7 +501,11 @@ export interface ResponsesOutputImageGenerationCall {
 
 // ── Stream event types ──
 
-export type ResponsesStreamEvent =
+// Spec marks sequence_number required, but some Copilot upstreams omit it
+// on the wire; the stream parser backfills a monotonic counter when missing.
+export type ResponsesStreamEvent = ResponsesStreamEventVariant & { sequence_number?: number };
+
+type ResponsesStreamEventVariant =
   | { type: 'response.created'; response: ResponsesResult }
   | { type: 'response.in_progress'; response: ResponsesResult }
   | {
@@ -668,19 +672,6 @@ export type ResponsesStreamEvent =
   }
   | { type: 'ping' };
 
-// Gateway-side extension: upstream Responses streams may omit `sequence_number`
-// when probing, so the gateway-internal shape leaves it optional.
-export type RawResponsesStreamEvent = ResponsesStreamEvent & {
-  sequence_number?: number;
-};
-
-// Sibling of RawResponsesStreamEvent for sequences synthesized inside the
-// gateway (from-result expansion, from-stream projection), where the
-// sequence number is always present.
-export type SequencedResponsesStreamEvent = ResponsesStreamEvent & {
-  sequence_number: number;
-};
-
 // Either side of the Responses reasoning round trip: input echoes a prior
 // turn's reasoning back in, output emits the current turn's reasoning. Shape
 // is identical aside from the type tag's role.
@@ -692,3 +683,4 @@ export const isResponsesTerminalEvent = (event: Pick<ResponsesStreamEvent, 'type
 export { responsesResultToEvents } from './from-result.ts';
 export { imageGenerationCallLifecycleEvents } from './image-generation-lifecycle.ts';
 export { webSearchCallLifecycleEvents } from './web-search-lifecycle.ts';
+export { parseResponsesStream, type ParseResponsesStreamOptions } from './stream.ts';

@@ -17,17 +17,16 @@ import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import type { NonLlmServeApiName } from './api-names.ts';
+import type { PerformanceTelemetryContext } from './telemetry/performance.ts';
+import { recordPerformanceError, recordPerformanceLatency, recordRequestPerformanceForApiKey, runtimeLocationFromRequest } from './telemetry/performance.ts';
+import { recordTokenUsageForApiKey } from './telemetry/usage.ts';
 import { apiKeyUpstreamIdsFromContext } from '../../middleware/auth.ts';
 import type { TokenUsage } from '../../repo/types.ts';
 import type { BackgroundScheduler } from '../../runtime/background.ts';
 import { backgroundSchedulerFromContext } from '../../runtime/background.ts';
-import { toInternalDebugError } from '../llm/shared/errors/internal-debug-error.ts';
-import { httpResponseToResponse, ProviderModelsUnavailableError } from '../providers/models-store.ts';
 import { resolveModelForRequest } from '../providers/registry.ts';
-import type { ProviderCallResult, ProviderModelRecord } from '../providers/types.ts';
-import type { PerformanceTelemetryContext } from './telemetry/performance.ts';
-import { recordPerformanceError, recordPerformanceLatency, recordRequestPerformanceForApiKey, runtimeLocationFromRequest } from './telemetry/performance.ts';
-import { recordTokenUsageForApiKey } from './telemetry/usage.ts';
+import { httpResponseToResponse, ProviderModelsUnavailableError, toInternalDebugError } from '@floway-dev/provider';
+import type { ProviderCallResult, ProviderModelRecord } from '@floway-dev/provider';
 
 // Headers we forward verbatim from a successful upstream JSON response.
 // The set is intentionally narrow and matches the proxy contract that

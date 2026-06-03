@@ -1,8 +1,8 @@
 import { test } from 'vitest';
 
 import { latencyBucketForMs } from '../../shared/performance-histogram.ts';
-import { assertEquals } from '../../test-assert.ts';
 import { requestApp, setupAppTest } from '../../test-helpers.ts';
+import { assertEquals } from '@floway-dev/test-utils';
 
 test('/api/performance returns backend-aggregated base-model percentiles', async () => {
   const { repo, apiKey } = await setupAppTest();

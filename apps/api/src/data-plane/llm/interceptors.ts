@@ -1,16 +1,35 @@
 import type { BackgroundScheduler } from '../../runtime/background.ts';
-import type { ModelProvider, ProviderTargetInterceptors, UpstreamModel } from '../providers/types.ts';
-import type { ExecuteResult } from './shared/errors/result.ts';
 import type { StatefulResponsesStore } from './sources/responses/stateful-store.ts';
-import type { ChatCompletionsStreamEvent, ChatCompletionsPayload } from '@floway-dev/protocols/chat-completions';
+import type { Interceptor } from '@floway-dev/interceptor';
+import type { ChatCompletionsStreamEvent } from '@floway-dev/protocols/chat-completions';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
-import type { GeminiPayload, GeminiStreamEvent } from '@floway-dev/protocols/gemini';
-import type { MessagesPayload, MessagesStreamEvent } from '@floway-dev/protocols/messages';
-import type { ResponsesPayload, RawResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { GeminiStreamEvent } from '@floway-dev/protocols/gemini';
+import type { MessagesStreamEvent } from '@floway-dev/protocols/messages';
+import type { ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type {
+  ChatCompletionsInvocation,
+  ExecuteResult,
+  GeminiInvocation,
+  MessagesInvocation,
+  ResponsesInvocation,
+} from '@floway-dev/provider';
 
-export type LlmSourceApi = 'messages' | 'responses' | 'chat-completions' | 'gemini';
+// Re-export the generic interceptor machinery so api-internal call sites keep
+// their short module path.
+export { runInterceptors } from '@floway-dev/interceptor';
+export type { Interceptor, InterceptorRun } from '@floway-dev/interceptor';
 
-export type LlmTargetApi = 'messages' | 'responses' | 'chat-completions';
+// Re-export per-protocol Invocation types and the protocol/api enums so
+// api-internal call sites keep their short module path.
+export type {
+  ChatCompletionsInvocation,
+  GeminiInvocation,
+  Invocation,
+  LlmSourceApi,
+  LlmTargetApi,
+  MessagesInvocation,
+  ResponsesInvocation,
+} from '@floway-dev/provider';
 
 /**
  * Per client request scope. Constructed once in `createHttpRequestContext` and
@@ -21,6 +40,12 @@ export type LlmTargetApi = 'messages' | 'responses' | 'chat-completions';
  * Telemetry recording is done via global helpers that accept `apiKeyId` (and
  * `scheduleBackground` for performance) explicitly so call sites stay visible
  * about the no-op when the request has no API key (ADMIN_KEY playground path).
+ *
+ * Structurally satisfies the provider package's empty `InterceptorRequest`
+ * marker, so provider-package interceptors typed against the marker remain
+ * assignable to api-side chains typed against this richer context (parameter
+ * contravariance: a function accepting `{}` is a valid element in a list of
+ * functions accepting `RequestContext`).
  */
 export interface RequestContext {
   readonly requestStartedAt: number;
@@ -34,70 +59,13 @@ export interface RequestContext {
   statefulResponsesStore: StatefulResponsesStore;
 }
 
-/**
- * Per-provider-binding-attempt request-side description. Rebuilt for every
- * binding the planner tries inside one client request.
- *
- * - sourceApi / targetApi: the protocol the client spoke and the protocol
- *   the planner picked for this binding.
- * - model: the resolved public model id.
- * - upstream / upstreamModel / provider: the planner's binding choice.
- * - enabledFlags: the effective flag set for this binding.
- * - targetInterceptors: the provider-registered target interceptor table.
- * - payload: the source-shape request body, mutable so source interceptors
- *   can clean it.
- * - headers: mutable HTTP-header bag the source serve seeds empty and target
- *   interceptors populate. The provider's upstream call passes it through to
- *   the wire fetch unchanged, so workarounds that only need to set or drop a
- *   header (vision, initiator, anthropic-beta, ...) stay at the owning
- *   interceptor boundary instead of widening the provider call signature.
- *
- * Named `Invocation` (not `Exchange`) because "exchange" implies a
- * request/response pair; this object carries only the request side plus the
- * planner's binding decisions. The response flows through `ExecuteResult`,
- * not back through `Invocation`.
- *
- * apiKeyId, downstreamAbortSignal, telemetry recorders are NOT on
- * `Invocation` — they belong on `RequestContext` because they don't change
- * when the planner tries another binding.
- */
-export interface Invocation<TPayload> {
-  readonly sourceApi: LlmSourceApi;
-  readonly targetApi: LlmTargetApi;
-  readonly model: string;
-  readonly upstream: string;
-  readonly upstreamModel: UpstreamModel;
-  readonly provider: ModelProvider;
-  readonly enabledFlags: ReadonlySet<string>;
-  readonly targetInterceptors?: ProviderTargetInterceptors;
-  payload: TPayload;
-  headers: Record<string, string>;
-}
-
-export interface MessagesInvocation extends Invocation<MessagesPayload> {
-  readonly anthropicBeta?: readonly string[];
-}
-export type ResponsesInvocation = Invocation<ResponsesPayload>;
-export type ChatCompletionsInvocation = Invocation<ChatCompletionsPayload>;
-export type GeminiInvocation = Invocation<GeminiPayload>;
-
-export type InterceptorRun<TResult> = () => Promise<TResult>;
-
-export type Interceptor<TContext, TRequest, TResult> = (ctx: TContext, request: TRequest, run: InterceptorRun<TResult>) => Promise<TResult>;
-
-export const runInterceptors = async <TContext, TRequest, TResult>(
-  ctx: TContext,
-  request: TRequest,
-  interceptors: readonly Interceptor<TContext, TRequest, TResult>[],
-  terminal: InterceptorRun<TResult>,
-): Promise<TResult> => {
-  const run = (index: number): Promise<TResult> => (index < interceptors.length ? interceptors[index](ctx, request, () => run(index + 1)) : terminal());
-
-  return await run(0);
-};
-
+// Per-protocol api-side Interceptor aliases. They differ from the
+// `Provider*Interceptor` aliases in `@floway-dev/provider` only in the request
+// slot (`RequestContext` here vs the empty marker there); api-internal source
+// and target interceptors read fields off `request` (apiKeyId,
+// scheduleBackground, statefulResponsesStore, ...) so they need the rich type.
 export type MessagesInterceptor = Interceptor<MessagesInvocation, RequestContext, ExecuteResult<ProtocolFrame<MessagesStreamEvent>>>;
-export type ResponsesInterceptor = Interceptor<ResponsesInvocation, RequestContext, ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>>;
+export type ResponsesInterceptor = Interceptor<ResponsesInvocation, RequestContext, ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>>;
 export type ChatCompletionsInterceptor = Interceptor<ChatCompletionsInvocation, RequestContext, ExecuteResult<ProtocolFrame<ChatCompletionsStreamEvent>>>;
 export type GeminiInterceptor = Interceptor<GeminiInvocation, RequestContext, ExecuteResult<ProtocolFrame<GeminiStreamEvent>>>;
 

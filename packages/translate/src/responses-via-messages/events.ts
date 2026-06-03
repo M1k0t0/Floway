@@ -10,7 +10,7 @@ import type {
   MessagesStreamEvent,
   MessagesTextCitation,
 } from '@floway-dev/protocols/messages';
-import type { ResponsesOutputItem, ResponsesResult, RawResponsesStreamEvent, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { ResponsesOutputItem, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 
 const UPSTREAM_MESSAGES_MISSING_TERMINAL_MESSAGE = 'Upstream Messages stream ended without a message_stop event.';
 
@@ -379,7 +379,7 @@ export const translateToSourceEvents = async function* (
   responseId: string,
   model: string,
   customToolNames: ReadonlySet<string> = new Set(),
-): AsyncGenerator<ProtocolFrame<RawResponsesStreamEvent>> {
+): AsyncGenerator<ProtocolFrame<ResponsesStreamEvent>> {
   const state = createMessagesToResponsesStreamState(responseId, model, customToolNames);
 
   for await (const event of upstreamMessagesEventsUntilTerminal(frames)) {

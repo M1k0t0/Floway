@@ -1,9 +1,9 @@
 import { test } from 'vitest';
 
 import { messagesProtocolFrameToSSEFrame } from './to-sse.ts';
-import { assertEquals } from '../../../../../test-assert.ts';
 import { eventFrame } from '@floway-dev/protocols/common';
 import type { MessagesStreamEvent } from '@floway-dev/protocols/messages';
+import { assertEquals } from '@floway-dev/test-utils';
 
 test('messagesProtocolFrameToSSEFrame serializes events without owning termination', () => {
   const frames = [eventFrame({ type: 'message_stop' } satisfies MessagesStreamEvent), eventFrame({ type: 'ping' } satisfies MessagesStreamEvent)].map(messagesProtocolFrameToSSEFrame);

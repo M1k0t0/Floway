@@ -1,10 +1,10 @@
 import { test } from 'vitest';
 
-import { latencyBucketForMs } from '../shared/performance-histogram.ts';
-import { assertEquals } from '../test-assert.ts';
 import { type D1Database, D1Repo } from './d1.ts';
 import { InMemoryRepo } from './memory.ts';
 import type { PerformanceRepo } from './types.ts';
+import { latencyBucketForMs } from '../shared/performance-histogram.ts';
+import { assertEquals } from '@floway-dev/test-utils';
 
 const baseSample = {
   hour: '2026-04-30T10',

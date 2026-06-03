@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 
 import { getFileProvider, initFileProvider, MemoryFileProvider } from './file-provider.ts';
-import { assertEquals } from '../test-assert.ts';
+import { assertEquals } from '@floway-dev/test-utils';
 
 test('MemoryFileProvider clones at the provider boundary', async () => {
   const provider = new MemoryFileProvider();

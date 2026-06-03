@@ -1,9 +1,9 @@
 import { createTemporaryResponsesItemId, hashResponsesItemEncryptedContent, isStoredResponsesItemId, responsesItemEncryptedContent, responsesItemId } from './format.ts';
 import type { StoredResponsesItem } from '../../../../../repo/types.ts';
-import type { ModelProviderInstance, ProviderModelRecord } from '../../../../providers/types.ts';
 import { throwLlmServeFailure, type LlmServeFailure } from '../../traits.ts';
 import type { StatefulResponsesStore } from '../stateful-store.ts';
 import type { ResponsesInputItem } from '@floway-dev/protocols/responses';
+import type { ModelProviderInstance, ProviderModelRecord } from '@floway-dev/provider';
 import type { Mutable, ResponsesItemsView } from '@floway-dev/translate/via-responses/responses-items';
 
 export type StoredResponsesAffinity = 'forcing' | 'portable' | 'downgradable' | 'non_affinity';

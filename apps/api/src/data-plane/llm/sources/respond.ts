@@ -1,11 +1,11 @@
-import type { TelemetryModelIdentity, TokenUsage } from '../../../repo/types.ts';
+import type { TokenUsage } from '../../../repo/types.ts';
 import { recordRequestPerformanceForApiKey } from '../../shared/telemetry/performance.ts';
 import { hasTokenUsage, recordTokenUsageForApiKey } from '../../shared/telemetry/usage.ts';
 import type { RequestContext } from '../interceptors.ts';
-import type { EventResultMetadata, ExecuteResult, PlainResult } from '../shared/errors/result.ts';
-import { plainResult } from '../shared/errors/result.ts';
 import type { StreamCompletion } from '../shared/stream/proxy-sse.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
+import { plainResult } from '@floway-dev/provider';
+import type { EventResultMetadata, ExecuteResult, PlainResult, TelemetryModelIdentity } from '@floway-dev/provider';
 
 // Emits a measurement endpoint's already-shaped body verbatim. The endpoint's
 // `attempt` owns all shaping — the success body and any source-specific error

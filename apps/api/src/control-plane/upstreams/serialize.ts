@@ -1,4 +1,4 @@
-import type { UpstreamProviderKind, UpstreamRecord } from '../../repo/types.ts';
+import type { UpstreamProviderKind, UpstreamRecord } from '@floway-dev/provider';
 
 export interface SerializedUpstreamRecord {
   id: string;

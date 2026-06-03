@@ -18,8 +18,8 @@
 
 import { z } from 'zod';
 
-import { OPTIONAL_FLAGS, parseFlagOverridesWire } from '../data-plane/providers/flags.ts';
 import { normalizeDisabledPublicModelIds } from '../repo/disabled-public-models.ts';
+import { OPTIONAL_FLAGS, parseFlagOverridesWire } from '@floway-dev/provider';
 
 // --- shared atoms ---
 
@@ -62,7 +62,7 @@ const modelEndpointsSchema = z.object({
   imagesEdits: z.object({}).optional(),
 });
 
-// Mirrors the runtime UpstreamModelConfig in shared/upstream/model-config.ts.
+// Mirrors the runtime UpstreamModelConfig in @floway-dev/provider.
 // Azure and custom upstreams share this per-model entry; the canonical
 // per-model endpoint validation lives in the runtime validator.
 const upstreamModelSchema = z.object({

@@ -2,7 +2,7 @@ import { test } from 'vitest';
 
 import { aggregatePerformanceForDisplay } from './aggregate.ts';
 import type { PerformanceTelemetryRecord } from '../../repo/types.ts';
-import { assertEquals } from '../../test-assert.ts';
+import { assertEquals } from '@floway-dev/test-utils';
 
 const record = (overrides: Partial<PerformanceTelemetryRecord>): PerformanceTelemetryRecord => ({
   hour: '2026-04-30T10',

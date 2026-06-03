@@ -2,7 +2,7 @@ import { test } from 'vitest';
 
 import { runtimeLocationFromRequest } from './performance.ts';
 import { initEnv } from '../../../runtime/env.ts';
-import { assertEquals } from '../../../test-assert.ts';
+import { assertEquals } from '@floway-dev/test-utils';
 
 test('runtimeLocationFromRequest prefers Cloudflare colo', () => {
   initEnv(() => 'fallback-location');

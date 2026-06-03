@@ -1,8 +1,8 @@
 import { test } from 'vitest';
 
 import { createCloudflareImageProcessor, type ImageCacheKv, type ImagesBinding } from './cloudflare.ts';
-import { assert, assertEquals } from '../test-assert.ts';
-import type { ImageSizeCalculator } from './types.ts';
+import type { ImageSizeCalculator } from '@floway-dev/provider';
+import { assert, assertEquals } from '@floway-dev/test-utils';
 
 const decode = (base64: string): Uint8Array => {
   const binary = atob(base64);

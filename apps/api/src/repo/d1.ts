@@ -19,8 +19,6 @@ import type {
   SearchUsageRepo,
   StoredResponsesItem,
   StoredResponsesSnapshot,
-  UpstreamProviderKind,
-  UpstreamRecord,
   UpstreamRepo,
   UsageRecord,
   UsageRepo,
@@ -28,6 +26,7 @@ import type {
 import { latencyBucketForMs } from '../shared/performance-histogram.ts';
 import { assertWebSearchProviderName } from '../shared/web-search-providers.ts';
 import { type BillingDimension, type ModelPricing, unitPriceForDimension } from '@floway-dev/protocols/common';
+import type { UpstreamProviderKind, UpstreamRecord } from '@floway-dev/provider';
 
 // Minimal D1 type definitions (subset of @cloudflare/workers-types)
 interface D1Result<T = Record<string, unknown>> {

@@ -4,7 +4,7 @@ import { createResponsesOutputOrderState, recordResponsesOutputOrderEvent, type 
 import { type ResponsesEvent, responsesPartKey } from '../shared/via-responses/responses-stream.ts';
 import { eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { MessagesAssistantContentBlock, MessagesResult, MessagesStreamEvent } from '@floway-dev/protocols/messages';
-import type { ResponsesOutputContentBlock, ResponsesOutputItem, ResponsesResult, RawResponsesStreamEvent, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { ResponsesOutputContentBlock, ResponsesOutputItem, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 
 const combineMessageTextContent = (content: ResponsesOutputContentBlock[] | undefined): string => {
   if (!Array.isArray(content)) return '';
@@ -90,7 +90,7 @@ export const translateResponsesToMessagesResult = (response: ResponsesResult): M
 
 const UPSTREAM_RESPONSES_MISSING_TERMINAL_MESSAGE = 'Upstream Responses stream ended without a terminal event.';
 
-const upstreamResponsesEventsUntilTerminal = async function* (frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>>): AsyncGenerator<RawResponsesStreamEvent> {
+const upstreamResponsesEventsUntilTerminal = async function* (frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>): AsyncGenerator<ResponsesStreamEvent> {
   for await (const frame of frames) {
     if (frame.type === 'done') continue;
 
@@ -525,7 +525,7 @@ export const translateResponsesStreamEventToMessagesEvents = (event: ResponsesSt
   return events;
 };
 
-export const translateToSourceEvents = async function* (frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>>): AsyncGenerator<ProtocolFrame<MessagesStreamEvent>> {
+export const translateToSourceEvents = async function* (frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>): AsyncGenerator<ProtocolFrame<MessagesStreamEvent>> {
   const state = createResponsesToMessagesStreamState();
 
   for await (const event of upstreamResponsesEventsUntilTerminal(frames)) {

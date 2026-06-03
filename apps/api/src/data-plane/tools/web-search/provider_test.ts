@@ -4,8 +4,7 @@ import { resolveConfiguredWebSearchProvider, testSearchConfigConnection } from '
 import { DEFAULT_SEARCH_CONFIG, FIXED_SEARCH_CONFIG_TEST_QUERY } from './search-config.ts';
 import { initRepo } from '../../../repo/index.ts';
 import { InMemoryRepo } from '../../../repo/memory.ts';
-import { assertEquals } from '../../../test-assert.ts';
-import { jsonResponse, withMockedFetch } from '../../../test-helpers.ts';
+import { assertEquals, jsonResponse, withMockedFetch } from '@floway-dev/test-utils';
 
 test('resolveConfiguredWebSearchProvider returns disabled, missing-credential, or enabled', () => {
   assertEquals(resolveConfiguredWebSearchProvider(DEFAULT_SEARCH_CONFIG), {

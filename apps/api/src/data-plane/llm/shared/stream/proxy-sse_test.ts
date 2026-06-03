@@ -2,11 +2,11 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { test } from 'vitest';
 
-import { parseSSEStream } from './parse-sse.ts';
 import { writeSSEFrames } from './proxy-sse.ts';
-import { assertEquals } from '../../../../test-assert.ts';
 import { FakeTime } from '../../../../test-time.ts';
+import { parseSSEStream } from '@floway-dev/protocols/common';
 import { sseCommentFrame, type SseFrame, sseFrame } from '@floway-dev/protocols/common';
+import { assertEquals } from '@floway-dev/test-utils';
 
 interface Deferred<T> {
   promise: Promise<T>;

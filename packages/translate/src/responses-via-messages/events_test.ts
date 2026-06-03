@@ -3,7 +3,7 @@ import { test } from 'vitest';
 import { createMessagesToResponsesStreamState, translateMessagesEventToResponsesEvents } from './events.ts';
 import { assertEquals } from '../test-assert.ts';
 import type { MessagesStreamEvent } from '@floway-dev/protocols/messages';
-import type { ResponsesResult, RawResponsesStreamEvent, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 
 type ResponsesOutputItemAddedEvent = Extract<ResponsesStreamEvent, { type: 'response.output_item.added' }>;
 
@@ -364,7 +364,7 @@ test('unwraps wrapped custom tool calls into custom_tool_call shape', () => {
 
 // ── citation_delta → response.output_text.annotation.added ──
 
-type AnnotationAddedEvent = Extract<RawResponsesStreamEvent, { type: 'response.output_text.annotation.added' }>;
+type AnnotationAddedEvent = Extract<ResponsesStreamEvent, { type: 'response.output_text.annotation.added' }>;
 
 const startTextBlockWithMessage = (state: ReturnType<typeof createMessagesToResponsesStreamState>): void => {
   translateMessagesEventToResponsesEvents(

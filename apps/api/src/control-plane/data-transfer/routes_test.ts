@@ -6,10 +6,11 @@ import { DEFAULT_SEARCH_CONFIG } from '../../data-plane/tools/web-search/search-
 import { zValidator } from '../../middleware/zod-validator.ts';
 import { initRepo } from '../../repo/index.ts';
 import { InMemoryRepo } from '../../repo/memory.ts';
-import type { ApiKey, PerformanceTelemetryRecord, SearchUsageRecord, StoredResponsesItem, UpstreamRecord, UsageRecord } from '../../repo/types.ts';
-import { assertEquals } from '../../test-assert.ts';
+import type { ApiKey, PerformanceTelemetryRecord, SearchUsageRecord, StoredResponsesItem, UsageRecord } from '../../repo/types.ts';
 import { exportQuery, importBody } from '../schemas.ts';
 import { upstreamRecordToFullJson } from '../upstreams/serialize.ts';
+import type { UpstreamRecord } from '@floway-dev/provider';
+import { assertEquals } from '@floway-dev/test-utils';
 
 const hasOwn = (value: object, key: string) => Object.prototype.hasOwnProperty.call(value, key);
 

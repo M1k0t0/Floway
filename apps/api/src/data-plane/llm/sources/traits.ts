@@ -1,14 +1,11 @@
 import type { Context } from 'hono';
 
-import type { PerformanceApiName } from '../../../repo/types.ts';
-import type { ProviderModelRecord } from '../../providers/types.ts';
 import type { NonLlmServeApiName } from '../../shared/api-names.ts';
 import type { LlmTargetApi, RequestContext } from '../interceptors.ts';
-import { toInternalDebugError } from '../shared/errors/internal-debug-error.ts';
-import { internalErrorResult, type ExecuteResult, type PlainResult, type UpstreamErrorResult } from '../shared/errors/result.ts';
-import { thrownUpstreamErrorResult } from '../shared/errors/upstream-error.ts';
 import type { ModelEndpoints, ProtocolFrame } from '@floway-dev/protocols/common';
 import type { ResponsesInputItem } from '@floway-dev/protocols/responses';
+import { type PerformanceApiName, type ProviderModelRecord, type ExecuteResult, type PlainResult, type UpstreamErrorResult, internalErrorResult } from '@floway-dev/provider';
+import { ProviderModelsUnavailableError, toInternalDebugError } from '@floway-dev/provider';
 import type { Mutable, ResponsesItemsView } from '@floway-dev/translate/via-responses/responses-items';
 
 type Frame<TEvent> = ProtocolFrame<TEvent>;
@@ -83,10 +80,25 @@ export const sourceErrorResult = <TEvent>(
     internalStatus: number;
   },
 ): ExecuteResult<Frame<TEvent>> => {
-  const upstreamError = thrownUpstreamErrorResult(error);
+  const upstreamError = providerModelsUnavailableUpstreamError(error);
   if (upstreamError) return upstreamError;
 
   return internalErrorResult(options.internalStatus, toInternalDebugError(error, options.sourceApi));
+};
+
+// Translate the live wrapper provider models-store throws when a provider's
+// remote `/models` endpoint returned an HTTP error into the canonical
+// upstream-error result, so the source layer surfaces upstream failures
+// verbatim rather than collapsing them into a 500.
+const providerModelsUnavailableUpstreamError = (error: unknown): UpstreamErrorResult | null => {
+  if (!(error instanceof ProviderModelsUnavailableError) || !error.httpResponse) return null;
+  const { status, headers, body } = error.httpResponse;
+  return {
+    type: 'upstream-error',
+    status,
+    headers: new Headers(headers),
+    body: new TextEncoder().encode(body),
+  };
 };
 
 export interface LlmSourceRuntime {

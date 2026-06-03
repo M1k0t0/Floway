@@ -1,12 +1,11 @@
 import { test } from 'vitest';
 
-import { chatCompletionsInvocation, stubRequestContext, testTelemetryModelIdentity } from './test-helpers.ts';
+import { chatCompletionsInvocation, stubRequestContext } from './test-helpers.ts';
 import { withVendorKimiChatCompletionsNormalize } from './vendor-kimi-normalize.ts';
-import { assertEquals } from '../../../../../test-assert.ts';
-import type { ExecuteResult } from '../../../shared/errors/result.ts';
-import { eventResult } from '../../../shared/errors/result.ts';
 import type { ChatCompletionsStreamEvent } from '@floway-dev/protocols/chat-completions';
 import { eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
+import { type ExecuteResult, eventResult } from '@floway-dev/provider';
+import { assertEquals, testTelemetryModelIdentity } from '@floway-dev/test-utils';
 
 const collectFrames = async (result: ExecuteResult<ProtocolFrame<ChatCompletionsStreamEvent>>): Promise<ProtocolFrame<ChatCompletionsStreamEvent>[]> => {
   if (result.type !== 'events') throw new Error('expected events result');

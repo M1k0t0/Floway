@@ -2,9 +2,7 @@ import { geminiSourceInterceptors } from './interceptors/index.ts';
 import { stripUnsupportedPartFieldsFromPayload } from './interceptors/strip-unsupported-part-fields.ts';
 import { stripUnsupportedToolsFromPayload } from './interceptors/strip-unsupported-tools.ts';
 import { respondGemini, geminiInternalRpcErrorResponse, geminiRpcErrorPayload, geminiRpcErrorResponse } from './respond.ts';
-import type { ProviderModelRecord } from '../../../providers/types.ts';
 import { type GeminiInvocation, type LlmTargetApi, type MessagesInvocation, runInterceptors } from '../../interceptors.ts';
-import { type ExecuteResult, plainResult } from '../../shared/errors/result.ts';
 import { emitToChatCompletions } from '../../targets/chat-completions/emit.ts';
 import { emitToMessages } from '../../targets/messages/emit.ts';
 import { emitToResponses } from '../../targets/responses/emit.ts';
@@ -16,6 +14,7 @@ import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { GeminiContent, GeminiPayload, GeminiStreamEvent } from '@floway-dev/protocols/gemini';
 import type { MessagesPayload } from '@floway-dev/protocols/messages';
 import type { ResponsesPayload } from '@floway-dev/protocols/responses';
+import { type ProviderModelRecord, type ExecuteResult, plainResult } from '@floway-dev/provider';
 import { type SourceEmit, translateGeminiViaChatCompletions, translateGeminiViaMessages, translateGeminiViaResponses, viaTranslation } from '@floway-dev/translate';
 import { geminiViaResponsesItemsView } from '@floway-dev/translate/via-responses/responses-items';
 

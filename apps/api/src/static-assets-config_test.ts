@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { parse } from 'jsonc-parser';
 import { test } from 'vitest';
 
-import { assertEquals } from './test-assert.ts';
+import { assertEquals } from '@floway-dev/test-utils';
 
 const workerFirstRoutes = [
   '/api/*',

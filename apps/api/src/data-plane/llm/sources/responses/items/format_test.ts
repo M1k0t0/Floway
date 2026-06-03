@@ -6,7 +6,7 @@ import {
   hashResponsesItemContent,
   isStoredResponsesItemId,
 } from './format.ts';
-import { assert, assertFalse, assertThrows } from '../../../../../test-assert.ts';
+import { assert, assertFalse, assertThrows } from '@floway-dev/test-utils';
 
 const explicitPrefixes = [
   ['message', 'msg'],

@@ -64,9 +64,24 @@ importers:
 
   apps/api:
     dependencies:
+      '@floway-dev/interceptor':
+        specifier: workspace:*
+        version: link:../../packages/interceptor
       '@floway-dev/protocols':
         specifier: workspace:*
         version: link:../../packages/protocols
+      '@floway-dev/provider':
+        specifier: workspace:*
+        version: link:../../packages/provider
+      '@floway-dev/provider-azure':
+        specifier: workspace:*
+        version: link:../../packages/provider-azure
+      '@floway-dev/provider-copilot':
+        specifier: workspace:*
+        version: link:../../packages/provider-copilot
+      '@floway-dev/provider-custom':
+        specifier: workspace:*
+        version: link:../../packages/provider-custom
       '@floway-dev/translate':
         specifier: workspace:*
         version: link:../../packages/translate
@@ -88,6 +103,10 @@ importers:
       zod:
         specifier: ^4.4.3
         version: 4.4.3
+    devDependencies:
+      '@floway-dev/test-utils':
+        specifier: workspace:*
+        version: link:../../packages/test-utils
 
   apps/web:
     dependencies:
@@ -180,7 +199,80 @@ importers:
         specifier: ^2.2.0
         version: 2.2.12(typescript@5.9.3)
 
-  packages/protocols: {}
+  packages/interceptor: {}
+
+  packages/protocols:
+    devDependencies:
+      '@floway-dev/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
+
+  packages/provider:
+    dependencies:
+      '@floway-dev/interceptor':
+        specifier: workspace:*
+        version: link:../interceptor
+      '@floway-dev/protocols':
+        specifier: workspace:*
+        version: link:../protocols
+    devDependencies:
+      '@floway-dev/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
+
+  packages/provider-azure:
+    dependencies:
+      '@floway-dev/interceptor':
+        specifier: workspace:*
+        version: link:../interceptor
+      '@floway-dev/protocols':
+        specifier: workspace:*
+        version: link:../protocols
+      '@floway-dev/provider':
+        specifier: workspace:*
+        version: link:../provider
+    devDependencies:
+      '@floway-dev/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
+
+  packages/provider-copilot:
+    dependencies:
+      '@floway-dev/interceptor':
+        specifier: workspace:*
+        version: link:../interceptor
+      '@floway-dev/protocols':
+        specifier: workspace:*
+        version: link:../protocols
+      '@floway-dev/provider':
+        specifier: workspace:*
+        version: link:../provider
+    devDependencies:
+      '@floway-dev/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
+
+  packages/provider-custom:
+    dependencies:
+      '@floway-dev/interceptor':
+        specifier: workspace:*
+        version: link:../interceptor
+      '@floway-dev/protocols':
+        specifier: workspace:*
+        version: link:../protocols
+      '@floway-dev/provider':
+        specifier: workspace:*
+        version: link:../provider
+    devDependencies:
+      '@floway-dev/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
+
+  packages/test-utils:
+    dependencies:
+      '@floway-dev/provider':
+        specifier: workspace:*
+        version: link:../provider
 
   packages/translate:
     dependencies:

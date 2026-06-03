@@ -1,4 +1,4 @@
-import { githubHeaders, isCopilotAccountType, type CopilotAccountType } from '../../shared/copilot.ts';
+import { githubHeaders, isCopilotAccountType, type CopilotAccountType } from '@floway-dev/provider-copilot';
 
 export interface GitHubUser {
   login: string;

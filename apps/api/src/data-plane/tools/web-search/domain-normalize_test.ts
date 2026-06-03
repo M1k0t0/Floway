@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 
 import { normalizeDomainEntry, normalizeDomainList } from './domain-normalize.ts';
-import { assertEquals } from '../../../test-assert.ts';
+import { assertEquals } from '@floway-dev/test-utils';
 
 test('normalizeDomainEntry trims and lowercases bare hostnames', () => {
   assertEquals(normalizeDomainEntry('  Example.COM  '), 'example.com');

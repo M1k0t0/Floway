@@ -4,7 +4,7 @@ import type { ChatCompletionsStreamEvent, ChatCompletionsReasoningItem, ChatComp
 import { eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { GeminiContent, GeminiStreamEvent } from '@floway-dev/protocols/gemini';
 import type { MessagesAssistantContentBlock, MessagesMessage, MessagesStreamEvent } from '@floway-dev/protocols/messages';
-import type { ResponsesInputItem, RawResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { ResponsesInputItem, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 
 export type ResponsesItemMapper = (
   item: ResponsesInputItem,
@@ -86,10 +86,10 @@ export const responsesItemsView = {
     return out;
   },
   async *streamMapIdAsResponsesItems(
-    frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>>,
+    frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>,
     idMapper: ResponsesItemIdMapper,
     onItemFinalized?: ResponsesItemFinalizedHandler,
-  ): AsyncGenerator<ProtocolFrame<RawResponsesStreamEvent>> {
+  ): AsyncGenerator<ProtocolFrame<ResponsesStreamEvent>> {
     // `seenItemTypes` records the item type for every upstream id we have
     // mapped via an item-bearing frame. Delta events only carry `item_id`
     // and no type, so we look the type up here before re-invoking idMapper,
@@ -170,13 +170,13 @@ export const responsesItemsView = {
           continue;
         }
         const newId = idMapper(refId, knownType);
-        yield eventFrame({ ...event, item_id: newId } as RawResponsesStreamEvent);
+        yield eventFrame({ ...event, item_id: newId } as ResponsesStreamEvent);
         continue;
       }
       yield frame;
     }
   },
-} satisfies ResponsesItemsView<string | readonly ResponsesInputItem[], ProtocolFrame<RawResponsesStreamEvent>>;
+} satisfies ResponsesItemsView<string | readonly ResponsesInputItem[], ProtocolFrame<ResponsesStreamEvent>>;
 
 const itemId = (item: { id?: unknown }): string | null => {
   const id = item.id;

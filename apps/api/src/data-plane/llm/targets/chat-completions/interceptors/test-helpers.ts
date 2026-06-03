@@ -1,7 +1,7 @@
-import { stubProvider, stubUpstreamModel, testTelemetryModelIdentity } from '../../../../../test-helpers.ts';
 import type { ChatCompletionsInvocation, RequestContext } from '../../../interceptors.ts';
 import { createHttpStatefulResponsesStore } from '../../../sources/responses/stateful-store.ts';
 import type { ChatCompletionsPayload } from '@floway-dev/protocols/chat-completions';
+import { stubProvider, stubUpstreamModel, testTelemetryModelIdentity } from '@floway-dev/test-utils';
 
 export { stubProvider, stubUpstreamModel, testTelemetryModelIdentity };
 

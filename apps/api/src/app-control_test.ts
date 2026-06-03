@@ -1,8 +1,8 @@
 import { test } from 'vitest';
 
 import { DEFAULT_SEARCH_CONFIG } from './data-plane/tools/web-search/search-config.ts';
-import { assertEquals, assertExists } from './test-assert.ts';
-import { copilotModels, jsonResponse, requestApp, setupAppTest, withMockedFetch } from './test-helpers.ts';
+import { copilotModels, requestApp, setupAppTest } from './test-helpers.ts';
+import { assertEquals, assertExists, jsonResponse, withMockedFetch } from '@floway-dev/test-utils';
 
 test('admin key is limited to control plane routes', async () => {
   const { adminKey } = await setupAppTest();

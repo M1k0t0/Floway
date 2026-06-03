@@ -1,7 +1,7 @@
 import type { ResponsesInterceptor } from '../../../interceptors.ts';
-import { eventResult, type ExecuteResult } from '../../../shared/errors/result.ts';
 import { eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
-import type { RawResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import { type ExecuteResult, eventResult } from '@floway-dev/provider';
 
 // Some upstreams (e.g. Azure) re-encrypt `encrypted_content` on every
 // serialization, so an item's `output_item.done` blob differs byte-wise from
@@ -20,8 +20,8 @@ const itemEncryptedContent = (item: { encrypted_content?: unknown }): string | n
 };
 
 const canonicalizeEncryptedContent = async function* (
-  frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>>,
-): AsyncGenerator<ProtocolFrame<RawResponsesStreamEvent>> {
+  frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>,
+): AsyncGenerator<ProtocolFrame<ResponsesStreamEvent>> {
   const canonical = new Map<string, string>();
 
   for await (const frame of frames) {
@@ -54,7 +54,7 @@ const canonicalizeEncryptedContent = async function* (
 };
 
 export const withReasoningEncryptedContentCanonicalized: ResponsesInterceptor = async (_ctx, _request, run) => {
-  const result: ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>> = await run();
+  const result: ExecuteResult<ProtocolFrame<ResponsesStreamEvent>> = await run();
   if (result.type !== 'events') return result;
 
   return eventResult(canonicalizeEncryptedContent(result.events), result.modelIdentity, result.performance, result.finalMetadata);

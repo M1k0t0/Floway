@@ -1,13 +1,13 @@
 import { isObjectLike } from '../../../../../shared/json-helpers.ts';
 import type { RequestContext, ResponsesInterceptor } from '../../../interceptors.ts';
-import type { ExecuteResult } from '../../../shared/errors/result.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
-import type { RawResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { ExecuteResult } from '@floway-dev/provider';
 
 const CYBER_POLICY_ERROR_CODE = 'cyber_policy';
 const MAX_CYBER_POLICY_RETRIES = 10;
 
-type ResponsesResultFrames = ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>;
+type ResponsesResultFrames = ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>;
 type EventsResult = Extract<ResponsesResultFrames, { type: 'events' }>;
 type FailureResult = Exclude<ResponsesResultFrames, { type: 'events' }>;
 
@@ -30,10 +30,10 @@ const isCyberPolicyUpstreamError = (result: ResponsesResultFrames): boolean => {
   }
 };
 
-const isCyberPolicyFrame = (frame: ProtocolFrame<RawResponsesStreamEvent>): boolean =>
+const isCyberPolicyFrame = (frame: ProtocolFrame<ResponsesStreamEvent>): boolean =>
   frame.type === 'event' && valueHasCyberPolicyCode(frame.event);
 
-const isRetryProbePrologue = (frame: ProtocolFrame<RawResponsesStreamEvent>): boolean =>
+const isRetryProbePrologue = (frame: ProtocolFrame<ResponsesStreamEvent>): boolean =>
   frame.type === 'event' && (frame.event.type === 'response.created' || frame.event.type === 'response.in_progress');
 
 const isDownstreamAborted = (request: RequestContext): boolean => request.downstreamAbortSignal?.aborted === true;
@@ -51,10 +51,10 @@ const unexpectedRetryFailureError = (result: FailureResult): Error => {
 };
 
 const replayBufferedThenRest = async function* (
-  buffered: readonly ProtocolFrame<RawResponsesStreamEvent>[],
-  first: ProtocolFrame<RawResponsesStreamEvent>,
-  iterator: AsyncIterator<ProtocolFrame<RawResponsesStreamEvent>>,
-): AsyncGenerator<ProtocolFrame<RawResponsesStreamEvent>> {
+  buffered: readonly ProtocolFrame<ResponsesStreamEvent>[],
+  first: ProtocolFrame<ResponsesStreamEvent>,
+  iterator: AsyncIterator<ProtocolFrame<ResponsesStreamEvent>>,
+): AsyncGenerator<ProtocolFrame<ResponsesStreamEvent>> {
   let done = false;
 
   try {
@@ -93,7 +93,7 @@ const retryCyberPolicyEvents = async function* (
   run: () => Promise<ResponsesResultFrames>,
   initialResult: EventsResult,
   returned: EventsResult,
-): AsyncGenerator<ProtocolFrame<RawResponsesStreamEvent>> {
+): AsyncGenerator<ProtocolFrame<ResponsesStreamEvent>> {
   let result: ResponsesResultFrames = initialResult;
 
   for (let attempt = 0; attempt <= MAX_CYBER_POLICY_RETRIES; attempt++) {
@@ -110,7 +110,7 @@ const retryCyberPolicyEvents = async function* (
     }
 
     const iterator = result.events[Symbol.asyncIterator]();
-    const buffered: ProtocolFrame<RawResponsesStreamEvent>[] = [];
+    const buffered: ProtocolFrame<ResponsesStreamEvent>[] = [];
 
     while (true) {
       const next = await iterator.next();

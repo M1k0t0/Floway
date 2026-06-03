@@ -1,10 +1,10 @@
 import type { Context } from 'hono';
 
 import { apiKeyUpstreamIdsFromContext } from '../../middleware/auth.ts';
-import { ProviderModelsUnavailableError } from '../providers/models-store.ts';
 import { getInternalModels } from '../providers/registry.ts';
-import type { InternalModel } from '../providers/types.ts';
 import type { ModelPricing } from '@floway-dev/protocols/common';
+import { ProviderModelsUnavailableError } from '@floway-dev/provider';
+import type { InternalModel } from '@floway-dev/provider';
 
 type GeminiGenerationMethod = 'generateContent' | 'streamGenerateContent' | 'countTokens';
 

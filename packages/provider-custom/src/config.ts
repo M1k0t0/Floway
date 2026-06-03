@@ -1,0 +1,132 @@
+// Generic custom upstream — any third-party LLM provider that speaks an
+// OpenAI-shaped or Anthropic-shaped HTTP API under a single base URL with a
+// static credential. `authStyle` decides the credential header:
+//   - 'bearer'    -> Authorization: Bearer <token>   (OpenAI, OpenRouter, ...)
+//   - 'anthropic' -> x-api-key: <token> + anthropic-version: 2023-06-01
+//                                                    (api.anthropic.com)
+//
+// The base URL is stored without an API prefix (admin enters e.g.
+// https://api.openai.com); we join it to a per-endpoint path. Default paths
+// follow `/v1/*`, but admins can override individual endpoints to handle
+// providers that mount the API under a subpath while still serving e.g.
+// `/models` at the root.
+//
+// Custom upstreams surface models from two sources, merged at the data
+// plane: a statically configured list of per-model overrides
+// (`config.models`) that pin metadata/pricing locally, and an optional
+// live fetch of the upstream `/models` (`config.modelsFetch`). The `/models`
+// path is part of the fetch toggle (`modelsFetch.endpoint`), not a generic
+// path override, because it only matters when fetching is enabled.
+
+import type { ModelEndpoints } from '@floway-dev/protocols/common';
+import type { EndpointKey, UpstreamModelConfig, UpstreamRecord } from '@floway-dev/provider';
+import { endpointsField, modelsField, validateUpstreamPath } from '@floway-dev/provider';
+
+export type CustomAuthStyle = 'bearer' | 'anthropic';
+
+export interface CustomModelsFetch {
+  enabled: boolean;
+  endpoint?: string;
+}
+
+export interface CustomUpstreamConfig {
+  baseUrl: string;
+  bearerToken: string;
+  authStyle: CustomAuthStyle;
+  endpoints: ModelEndpoints;
+  pathOverrides?: Partial<Record<Exclude<EndpointKey, 'messages_count_tokens' | 'models'>, string>>;
+  modelsFetch: CustomModelsFetch;
+  models: UpstreamModelConfig[];
+}
+
+export type CustomUpstreamRecord = UpstreamRecord & {
+  provider: 'custom';
+  config: CustomUpstreamConfig;
+};
+
+const AUTH_STYLES: ReadonlySet<CustomAuthStyle> = new Set<CustomAuthStyle>(['bearer', 'anthropic']);
+
+const authStyleField = (value: unknown): CustomAuthStyle => {
+  // Records written before authStyle existed default to bearer, matching the
+  // previous fixed behavior.
+  if (value === undefined) return 'bearer';
+  if (typeof value !== 'string' || !AUTH_STYLES.has(value as CustomAuthStyle)) {
+    throw new Error('Malformed custom upstream config: authStyle must be "bearer" or "anthropic"');
+  }
+  return value as CustomAuthStyle;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const nonEmptyStringField = (value: unknown, field: string): string => {
+  if (typeof value !== 'string' || value.trim() === '') throw new Error(`Malformed custom upstream config: ${field} must be a non-empty string`);
+  return value;
+};
+
+const baseUrlField = (value: unknown): string => {
+  const baseUrl = nonEmptyStringField(value, 'baseUrl').trim();
+  try {
+    const parsed = new URL(baseUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('invalid protocol');
+    }
+  } catch {
+    throw new Error('Malformed custom upstream config: baseUrl must be an http(s) URL');
+  }
+  return baseUrl;
+};
+
+const PATH_OVERRIDE_KEYS = new Set<Exclude<EndpointKey, 'messages_count_tokens' | 'models'>>(['chat_completions', 'responses', 'messages', 'embeddings', 'images_generations', 'images_edits']);
+
+const pathOverridesField = (value: unknown): CustomUpstreamConfig['pathOverrides'] => {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error('Malformed custom upstream config: pathOverrides must be an object');
+
+  const pathOverrides: NonNullable<CustomUpstreamConfig['pathOverrides']> = {};
+  for (const [key, path] of Object.entries(value)) {
+    if (!PATH_OVERRIDE_KEYS.has(key as Exclude<EndpointKey, 'messages_count_tokens' | 'models'>)) {
+      throw new Error(`Malformed custom upstream config: unsupported pathOverrides key ${key}`);
+    }
+    const validPath = validateUpstreamPath(path, `pathOverrides.${key}`);
+    if (!validPath.ok) throw new Error(`Malformed custom upstream config: ${validPath.error}`);
+    pathOverrides[key as Exclude<EndpointKey, 'messages_count_tokens' | 'models'>] = validPath.value;
+  }
+  return pathOverrides;
+};
+
+// The /models fetch toggle. Absent defaults to enabled: existing upstreams
+// fetched their model list before this toggle existed, and the migration
+// backfills `{ enabled: true }`. `endpoint` is the optional `/models` path
+// override; the migration writes `endpoint: null` where there was no
+// override, so null/empty must parse cleanly as "no override".
+const modelsFetchField = (value: unknown): CustomModelsFetch => {
+  if (value === undefined) return { enabled: true };
+  if (!isRecord(value)) throw new Error('Malformed custom upstream config: modelsFetch must be an object');
+  if (typeof value.enabled !== 'boolean') throw new Error('Malformed custom upstream config: modelsFetch.enabled must be a boolean');
+
+  if (value.endpoint === undefined || value.endpoint === null || value.endpoint === '') {
+    return { enabled: value.enabled };
+  }
+  const validPath = validateUpstreamPath(value.endpoint, 'modelsFetch.endpoint');
+  if (!validPath.ok) throw new Error(`Malformed custom upstream config: ${validPath.error}`);
+  return { enabled: value.enabled, endpoint: validPath.value };
+};
+
+export const assertCustomUpstreamRecord = (record: UpstreamRecord): CustomUpstreamRecord => {
+  if (record.provider !== 'custom') throw new Error(`Expected custom upstream record, got ${record.provider}`);
+  if (!isRecord(record.config)) throw new Error('Malformed custom upstream config: config must be an object');
+
+  return {
+    ...record,
+    provider: 'custom',
+    config: {
+      baseUrl: baseUrlField(record.config.baseUrl),
+      bearerToken: nonEmptyStringField(record.config.bearerToken, 'bearerToken'),
+      authStyle: authStyleField(record.config.authStyle),
+      endpoints: endpointsField(record.config.endpoints, 'custom upstream config: endpoints', { allowEmpty: true }),
+      ...(record.config.pathOverrides !== undefined ? { pathOverrides: pathOverridesField(record.config.pathOverrides) } : {}),
+      modelsFetch: modelsFetchField(record.config.modelsFetch),
+      models: modelsField(record.config.models ?? [], 'custom'),
+    },
+  };
+};

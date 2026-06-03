@@ -1,8 +1,8 @@
 import { test } from 'vitest';
 
 import { reassembleChatCompletionsEvents } from './reassemble.ts';
-import { assertEquals, assertRejects } from '../../../../../test-assert.ts';
 import type { ChatCompletionsStreamEvent, ChatCompletionsResult } from '@floway-dev/protocols/chat-completions';
+import { assertEquals, assertRejects } from '@floway-dev/test-utils';
 
 function makeEvents<T = ChatCompletionsStreamEvent>(chunks: Array<{ event?: string; data: unknown }>): AsyncIterable<T> {
   return (async function* () {

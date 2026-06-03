@@ -114,7 +114,7 @@ const commonConfig: Linter.Config = {
     'import/internal-regex': '^@floway-dev/',
     'import/resolver': {
       typescript: {
-        project: ['./apps/api/tsconfig.json', './apps/web/tsconfig.json', './packages/protocols/tsconfig.json', './packages/translate/tsconfig.json', './packages/ui/tsconfig.json'],
+        project: ['./apps/api/tsconfig.json', './apps/web/tsconfig.json', './packages/interceptor/tsconfig.json', './packages/protocols/tsconfig.json', './packages/provider/tsconfig.json', './packages/provider-azure/tsconfig.json', './packages/provider-copilot/tsconfig.json', './packages/provider-custom/tsconfig.json', './packages/test-utils/tsconfig.json', './packages/translate/tsconfig.json', './packages/ui/tsconfig.json'],
         noWarnOnMultipleProjects: true,
       },
     },
@@ -125,7 +125,7 @@ const parserOptions: Linter.ParserOptions = {
   parser: tsParser,
   ecmaVersion: 'latest',
   sourceType: 'module',
-  project: ['./apps/api/tsconfig.json', './apps/web/tsconfig.json', './packages/protocols/tsconfig.json', './packages/translate/tsconfig.json', './packages/ui/tsconfig.json'],
+  project: ['./apps/api/tsconfig.json', './apps/web/tsconfig.json', './packages/interceptor/tsconfig.json', './packages/protocols/tsconfig.json', './packages/provider/tsconfig.json', './packages/provider-azure/tsconfig.json', './packages/provider-copilot/tsconfig.json', './packages/provider-custom/tsconfig.json', './packages/test-utils/tsconfig.json', './packages/translate/tsconfig.json', './packages/ui/tsconfig.json'],
   noWarnOnMultipleProjects: true,
 };
 
@@ -178,6 +178,7 @@ const config: Linter.Config[] = [
       // Workspace-root configs (live outside any package's TS project).
       'eslint.config.ts',
       'vitest.config.ts',
+      'packages/*/vitest.config.ts',
       'scripts/**',
     ],
   },

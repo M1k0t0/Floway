@@ -1,13 +1,12 @@
 import { test } from 'vitest';
 
 import { withCyberPolicyRetried } from './retry-cyber-policy.ts';
-import { assertEquals } from '../../../../../test-assert.ts';
-import { stubProvider, stubUpstreamModel, testTelemetryModelIdentity } from '../../../../../test-helpers.ts';
 import type { RequestContext, ResponsesInvocation } from '../../../interceptors.ts';
-import { eventResult, type ExecuteResult } from '../../../shared/errors/result.ts';
 import { createHttpStatefulResponsesStore } from '../../../sources/responses/stateful-store.ts';
 import { eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
-import type { ResponsesPayload, ResponsesResult, RawResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { ResponsesPayload, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import { type ExecuteResult, eventResult } from '@floway-dev/provider';
+import { stubProvider, stubUpstreamModel, testTelemetryModelIdentity, assertEquals } from '@floway-dev/test-utils';
 
 const makePayload = (): ResponsesPayload => ({
   model: 'gpt-test',
@@ -104,19 +103,19 @@ const failedResponse = (id: string, message: string): ResponsesResult => ({
   incomplete_details: null,
 });
 
-const completedEvent = (sequence_number = 1): RawResponsesStreamEvent => ({
+const completedEvent = (sequence_number = 1): ResponsesStreamEvent => ({
   type: 'response.completed',
   sequence_number,
   response: completedResponse(),
 });
 
-const cyberPolicyEvent = (id: string, sequence_number = 1): RawResponsesStreamEvent => ({
+const cyberPolicyEvent = (id: string, sequence_number = 1): ResponsesStreamEvent => ({
   type: 'response.failed',
   sequence_number,
   response: failedResponse(id, 'This request was flagged for cyber policy.'),
 });
 
-const deltaEvent = (delta: string, sequence_number = 1): RawResponsesStreamEvent => ({
+const deltaEvent = (delta: string, sequence_number = 1): ResponsesStreamEvent => ({
   type: 'response.output_text.delta',
   sequence_number,
   item_id: 'msg_0',
@@ -125,7 +124,7 @@ const deltaEvent = (delta: string, sequence_number = 1): RawResponsesStreamEvent
   delta,
 });
 
-const protocolResult = (events: readonly RawResponsesStreamEvent[], modelIdentity = testTelemetryModelIdentity, performance?: ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>>['performance']): ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>> =>
+const protocolResult = (events: readonly ResponsesStreamEvent[], modelIdentity = testTelemetryModelIdentity, performance?: ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>['performance']): ExecuteResult<ProtocolFrame<ResponsesStreamEvent>> =>
   eventResult(
     (async function* () {
       for (const event of events) yield eventFrame(event);
@@ -134,8 +133,8 @@ const protocolResult = (events: readonly RawResponsesStreamEvent[], modelIdentit
     performance,
   );
 
-const collectFrames = async (events: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>>): Promise<ProtocolFrame<RawResponsesStreamEvent>[]> => {
-  const frames: ProtocolFrame<RawResponsesStreamEvent>[] = [];
+const collectFrames = async (events: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>): Promise<ProtocolFrame<ResponsesStreamEvent>[]> => {
+  const frames: ProtocolFrame<ResponsesStreamEvent>[] = [];
   for await (const frame of events) frames.push(frame);
   return frames;
 };
@@ -156,7 +155,7 @@ const performanceFor = (modelKey: string) => ({
   runtimeLocation: 'test',
 });
 
-const upstreamCyberPolicyError = (message: string): ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>> => ({
+const upstreamCyberPolicyError = (message: string): ExecuteResult<ProtocolFrame<ResponsesStreamEvent>> => ({
   type: 'upstream-error',
   status: 400,
   headers: new Headers({ 'content-type': 'application/json' }),
@@ -171,7 +170,7 @@ const upstreamCyberPolicyError = (message: string): ExecuteResult<ProtocolFrame<
   ),
 });
 
-const upstreamServerError = (message: string): ExecuteResult<ProtocolFrame<RawResponsesStreamEvent>> => ({
+const upstreamServerError = (message: string): ExecuteResult<ProtocolFrame<ResponsesStreamEvent>> => ({
   type: 'upstream-error',
   status: 500,
   headers: new Headers({ 'content-type': 'application/json' }),
@@ -381,7 +380,7 @@ test('withCyberPolicyRetried does not start another streaming retry after downst
   assertEquals(frames, [cyberPolicyFrame]);
 });
 
-const drainFrames = async (events: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>>): Promise<unknown> => {
+const drainFrames = async (events: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>): Promise<unknown> => {
   try {
     for await (const _frame of events) {
       // drain only; assertions inspect the thrown error

@@ -1,8 +1,7 @@
 import { test } from 'vitest';
 
 import { createTavilyWebSearchProvider } from './tavily.ts';
-import { assertEquals } from '../../../../test-assert.ts';
-import { jsonResponse, withMockedFetch } from '../../../../test-helpers.ts';
+import { assertEquals, jsonResponse, withMockedFetch } from '@floway-dev/test-utils';
 
 test('createTavilyWebSearchProvider sends bearer auth and domain filters', async () => {
   let request: Request | undefined;

@@ -1,9 +1,9 @@
 import { test } from 'vitest';
 
 import { createMessagesStreamUsageState, tokenUsageFromMessagesFrame } from './respond.ts';
-import { assertEquals } from '../../../../test-assert.ts';
 import { eventFrame } from '@floway-dev/protocols/common';
 import type { MessagesStreamEvent } from '@floway-dev/protocols/messages';
+import { assertEquals } from '@floway-dev/test-utils';
 
 const stop = () => eventFrame({ type: 'message_stop' } satisfies MessagesStreamEvent);
 

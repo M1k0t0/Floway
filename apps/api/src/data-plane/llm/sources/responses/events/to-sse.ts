@@ -1,5 +1,5 @@
 import { type ProtocolFrame, type SseFrame, sseFrame } from '@floway-dev/protocols/common';
-import type { RawResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 
-export const responsesProtocolFrameToSSEFrame = (frame: ProtocolFrame<RawResponsesStreamEvent>): SseFrame | null =>
+export const responsesProtocolFrameToSSEFrame = (frame: ProtocolFrame<ResponsesStreamEvent>): SseFrame | null =>
   frame.type === 'event' ? sseFrame(JSON.stringify(frame.event), frame.event.type) : null;

@@ -1,20 +1,10 @@
 import { getRepo } from '../../../repo/index.ts';
-import type { PerformanceApiName, PerformanceDimensions, PerformanceMetricScope } from '../../../repo/types.ts';
+import type { PerformanceDimensions, PerformanceMetricScope } from '../../../repo/types.ts';
 import type { BackgroundScheduler } from '../../../runtime/background.ts';
 import { getEnv } from '../../../runtime/env.ts';
+import type { PerformanceTelemetryContext } from '@floway-dev/provider';
 
-export interface PerformanceTelemetryContext {
-  keyId: string;
-  // Public gateway model id. Provider raw selection stays encapsulated; only
-  // the provider-owned opaque modelKey crosses this boundary.
-  model: string;
-  upstream: string | null;
-  modelKey: string;
-  sourceApi: PerformanceApiName;
-  targetApi: PerformanceApiName;
-  stream: boolean;
-  runtimeLocation: string;
-}
+export type { PerformanceTelemetryContext };
 
 const currentHour = (): string => new Date().toISOString().slice(0, 13);
 

@@ -2,7 +2,7 @@ import { test } from 'vitest';
 
 import { parseStoredResponsesPayload, serializeStoredResponsesPayload, sweepExpiredResponsesItemPayloadFiles } from './responses-payload.ts';
 import { initFileProvider, MemoryFileProvider } from '../runtime/file-provider.ts';
-import { assertEquals } from '../test-assert.ts';
+import { assertEquals } from '@floway-dev/test-utils';
 
 test('the reserved private payload field round-trips through both inline and file storage', async () => {
   initFileProvider(new MemoryFileProvider());

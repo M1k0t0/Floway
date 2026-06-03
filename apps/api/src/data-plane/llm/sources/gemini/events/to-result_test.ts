@@ -1,9 +1,9 @@
 import { test } from 'vitest';
 
 import { collectGeminiProtocolEventsToResult } from './to-result.ts';
-import { assertEquals, assertRejects } from '../../../../../test-assert.ts';
 import { eventFrame } from '@floway-dev/protocols/common';
 import type { GeminiResult, GeminiStreamEvent } from '@floway-dev/protocols/gemini';
+import { assertEquals, assertRejects } from '@floway-dev/test-utils';
 
 test('collectGeminiProtocolEventsToResult assembles candidate parts and final metadata', async () => {
   async function* events() {

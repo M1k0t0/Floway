@@ -3,10 +3,10 @@ import { test } from 'vitest';
 import { recordUpstreamHttpFailure, withUpstreamTelemetry } from './telemetry.ts';
 import { initRepo } from '../../../repo/index.ts';
 import { InMemoryRepo } from '../../../repo/memory.ts';
-import { assertEquals } from '../../../test-assert.ts';
-import { stubProvider, stubUpstreamModel } from '../../../test-helpers.ts';
 import type { Invocation, RequestContext } from '../interceptors.ts';
 import { createHttpStatefulResponsesStore } from '../sources/responses/stateful-store.ts';
+import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
+import { assertEquals, stubProvider, stubUpstreamModel } from '@floway-dev/test-utils';
 
 interface TelemetryHarness {
   repo: InMemoryRepo;
@@ -63,13 +63,15 @@ const baseRequest = (
   ...(overrides.downstreamAbortSignal !== undefined ? { downstreamAbortSignal: overrides.downstreamAbortSignal } : {}),
 });
 
+const stream = <T>(...frames: ProtocolFrame<T>[]): AsyncIterable<ProtocolFrame<T>> => (async function* () {
+  for (const frame of frames) yield frame;
+})();
+
 test('withUpstreamTelemetry records EOF-without-terminal as upstream failure', async () => {
   const harness = setup();
 
   const events = withUpstreamTelemetry(
-    (async function* () {
-      yield { type: 'sse' as const, data: '{"type":"message_start"}' };
-    })(),
+    stream(eventFrame({ type: 'message_start' })),
     baseInvocation(),
     baseRequest(harness),
     'messages',
@@ -94,7 +96,7 @@ test('withUpstreamTelemetry records upstream-thrown stream errors as upstream fa
 
   const events = withUpstreamTelemetry(
     (async function* () {
-      yield { type: 'sse' as const, data: '{"type":"message_start"}' };
+      yield eventFrame({ type: 'message_start' });
       throw new Error('stream failed');
     })(),
     baseInvocation(),
@@ -125,10 +127,10 @@ test('withUpstreamTelemetry does not record consumer-cancelled streams', async (
   const harness = setup();
 
   const iterator = withUpstreamTelemetry(
-    (async function* () {
-      yield { type: 'sse' as const, data: '{"type":"message_start"}' };
-      yield { type: 'sse' as const, data: '{"type":"content_block_delta"}' };
-    })(),
+    stream(
+      eventFrame({ type: 'message_start' }),
+      eventFrame({ type: 'content_block_delta' }),
+    ),
     baseInvocation(),
     baseRequest(harness),
     'messages',
@@ -171,14 +173,10 @@ test('withUpstreamTelemetry records Messages SSE error event as upstream failure
   const harness = setup();
 
   const events = withUpstreamTelemetry(
-    (async function* () {
-      yield { type: 'sse' as const, data: '{"type":"message_start"}' };
-      yield {
-        type: 'sse' as const,
-        event: 'error',
-        data: '{"type":"error","error":{"type":"overloaded_error","message":"slow down"}}',
-      };
-    })(),
+    stream(
+      eventFrame({ type: 'message_start' }),
+      eventFrame({ type: 'error', error: { type: 'overloaded_error', message: 'slow down' } }),
+    ),
     baseInvocation(),
     baseRequest(harness),
     'messages',
@@ -201,13 +199,10 @@ test('withUpstreamTelemetry records Responses SSE failure event as upstream fail
   const harness = setup();
 
   const events = withUpstreamTelemetry(
-    (async function* () {
-      yield { type: 'sse' as const, data: '{"type":"response.created"}' };
-      yield {
-        type: 'sse' as const,
-        data: '{"type":"response.failed","response":{"status":"failed"}}',
-      };
-    })(),
+    stream(
+      eventFrame({ type: 'response.created' }),
+      eventFrame({ type: 'response.failed', response: { status: 'failed' } }),
+    ),
     baseInvocation({ sourceApi: 'responses', model: 'gpt-failed-stream' }),
     baseRequest(harness),
     'responses',
@@ -231,9 +226,7 @@ test('withUpstreamTelemetry treats DONE as terminal only for chat-completions', 
     const harness = setup();
 
     const events = withUpstreamTelemetry(
-      (async function* () {
-        yield { type: 'sse' as const, data: '[DONE]' };
-      })(),
+      stream<unknown>(doneFrame()),
       baseInvocation({
         sourceApi: targetApi,
         model: `gpt-${targetApi}-done`,
@@ -249,7 +242,7 @@ test('withUpstreamTelemetry treats DONE as terminal only for chat-completions', 
     }
     await Promise.all(harness.background);
 
-    // [DONE] is not a terminal for messages/responses, and the stream ended
+    // `done` is not a terminal for messages/responses, and the stream ended
     // without one, so this records as an EOF-without-terminal failure.
     const rows = await harness.repo.performance.listAll();
     assertEquals(rows.length, 1);
@@ -263,9 +256,7 @@ test('withUpstreamTelemetry snapshots duration when the success frame arrives', 
   const startedAt = performance.now();
 
   const iterator = withUpstreamTelemetry(
-    (async function* () {
-      yield { type: 'sse' as const, data: '{"type":"message_stop"}' };
-    })(),
+    stream(eventFrame({ type: 'message_stop' })),
     baseInvocation({ model: 'claude-timing' }),
     baseRequest(harness),
     'messages',
@@ -304,9 +295,7 @@ test('withUpstreamTelemetry skips recording when apiKeyId is absent', async () =
   const background: Promise<unknown>[] = [];
 
   const events = withUpstreamTelemetry(
-    (async function* () {
-      yield { type: 'sse' as const, data: '{"type":"message_stop"}' };
-    })(),
+    stream(eventFrame({ type: 'message_stop' })),
     {
       sourceApi: 'messages',
       targetApi: 'messages',

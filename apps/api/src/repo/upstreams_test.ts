@@ -1,10 +1,11 @@
 import initSqlJs from 'sql.js';
 import { test } from 'vitest';
 
-import { assert, assertEquals, assertRejects } from '../test-assert.ts';
 import { type D1Database, D1Repo } from './d1.ts';
 import { InMemoryRepo } from './memory.ts';
-import type { UpstreamRecord, UpstreamRepo } from './types.ts';
+import type { UpstreamRepo } from './types.ts';
+import type { UpstreamRecord } from '@floway-dev/provider';
+import { assert, assertEquals, assertRejects } from '@floway-dev/test-utils';
 
 const upstream = (overrides: Partial<UpstreamRecord> & Pick<UpstreamRecord, 'id' | 'provider' | 'createdAt' | 'sortOrder'>): UpstreamRecord => ({
   name: overrides.id,

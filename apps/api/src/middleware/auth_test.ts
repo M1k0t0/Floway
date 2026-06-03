@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
 import { test } from 'vitest';
 
-import { assertEquals } from '../test-assert.ts';
 import { authMiddleware } from './auth.ts';
 import { setupAppTest } from '../test-helpers.ts';
+import { assertEquals } from '@floway-dev/test-utils';
 
 const authTestApp = () => {
   const app = new Hono();

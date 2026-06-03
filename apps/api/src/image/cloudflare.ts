@@ -1,6 +1,6 @@
 import { imageSize } from 'image-size';
 
-import type { ImageDimensions, ImageProcessor, ImageSizeCalculator } from './types.ts';
+import type { ImageDimensions, ImageProcessor, ImageSizeCalculator } from '@floway-dev/provider';
 
 // Fixed WebP quality for every recompressed inline image. 82 sits above the
 // cwebp / photographic default of 75 so screenshots and text-heavy UI images —

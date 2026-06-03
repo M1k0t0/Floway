@@ -1,11 +1,11 @@
 import initSqlJs from 'sql.js';
 import { test } from 'vitest';
 
-import { assert, assertEquals, assertRejects } from '../test-assert.ts';
 import { type D1Database, D1Repo } from './d1.ts';
 import { InMemoryRepo } from './memory.ts';
 import type { ResponsesItemsRepo, StoredResponsesItem } from './types.ts';
 import { initFileProvider, MemoryFileProvider } from '../runtime/file-provider.ts';
+import { assert, assertEquals, assertRejects } from '@floway-dev/test-utils';
 
 const storedItem = (overrides: Partial<StoredResponsesItem> & Pick<StoredResponsesItem, 'id' | 'apiKeyId' | 'createdAt'>): StoredResponsesItem => ({
   upstreamId: null,

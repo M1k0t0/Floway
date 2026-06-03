@@ -5,12 +5,11 @@ import { prepareStoredResponsesItemsForSource, rewriteStoredResponsesItemsForPro
 import { initRepo } from '../../../../../repo/index.ts';
 import { InMemoryRepo } from '../../../../../repo/memory.ts';
 import type { StoredResponsesItem } from '../../../../../repo/types.ts';
-import { assert, assertEquals } from '../../../../../test-assert.ts';
-import { stubProvider, stubUpstreamModel } from '../../../../../test-helpers.ts';
-import type { ModelProviderInstance, ProviderModelRecord } from '../../../../providers/types.ts';
 import { collectImageSources } from '../interceptors/server-tools/image-generation.ts';
 import { createHttpStatefulResponsesStore } from '../stateful-store.ts';
 import type { ResponsesInputItem } from '@floway-dev/protocols/responses';
+import type { ModelProviderInstance, ProviderModelRecord } from '@floway-dev/provider';
+import { stubProvider, stubUpstreamModel, assert, assertEquals } from '@floway-dev/test-utils';
 import { responsesItemsView } from '@floway-dev/translate/via-responses/responses-items';
 
 const API_KEY_ID = 'key_test';

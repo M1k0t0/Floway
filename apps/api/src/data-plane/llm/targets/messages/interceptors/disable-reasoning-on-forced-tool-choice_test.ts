@@ -1,13 +1,12 @@
 import { test } from 'vitest';
 
 import { withReasoningDisabledOnForcedToolChoice } from './disable-reasoning-on-forced-tool-choice.ts';
-import { assertEquals } from '../../../../../test-assert.ts';
-import { stubProvider, stubUpstreamModel, testTelemetryModelIdentity } from '../../../../../test-helpers.ts';
 import type { MessagesInvocation, RequestContext } from '../../../interceptors.ts';
-import { eventResult, type ExecuteResult } from '../../../shared/errors/result.ts';
 import { createHttpStatefulResponsesStore } from '../../../sources/responses/stateful-store.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { MessagesPayload, MessagesStreamEvent } from '@floway-dev/protocols/messages';
+import { type ExecuteResult, eventResult } from '@floway-dev/provider';
+import { stubProvider, stubUpstreamModel, testTelemetryModelIdentity, assertEquals } from '@floway-dev/test-utils';
 
 const okEvents = (): Promise<ExecuteResult<ProtocolFrame<MessagesStreamEvent>>> =>
   Promise.resolve(eventResult((async function* (): AsyncGenerator<ProtocolFrame<MessagesStreamEvent>> {})(), testTelemetryModelIdentity));

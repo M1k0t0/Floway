@@ -4,7 +4,7 @@ import { fetchPageAndRecordUsage, fetchPageWithoutRecordingUsage } from './fetch
 import type { WebSearchFetchPageResult, WebSearchProvider } from './types.ts';
 import { initRepo } from '../../../repo/index.ts';
 import { InMemoryRepo } from '../../../repo/memory.ts';
-import { assertEquals, assertRejects } from '../../../test-assert.ts';
+import { assertEquals, assertRejects } from '@floway-dev/test-utils';
 
 const okResult: WebSearchFetchPageResult = { type: 'ok', pages: [], failures: [] };
 const errorResult: WebSearchFetchPageResult = { type: 'error', errorCode: 'unavailable', message: 'boom' };

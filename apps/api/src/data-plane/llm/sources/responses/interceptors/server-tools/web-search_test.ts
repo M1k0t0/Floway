@@ -15,9 +15,9 @@ import {
   type ShimLogicalOperation,
   type WebSearchCallPrivatePayload,
 } from './web-search.ts';
-import { assert, assertEquals, assertFalse } from '../../../../../../test-assert.ts';
 import { truncatePreservingCodePoints } from '../../../../shared/text.ts';
 import type { ResponsesTool, ResponsesWebSearchAction, ResponsesWebSearchResult } from '@floway-dev/protocols/responses';
+import { assert, assertEquals, assertFalse } from '@floway-dev/test-utils';
 
 // ── Shim call argument parsing (parseShimOperations) ──
 

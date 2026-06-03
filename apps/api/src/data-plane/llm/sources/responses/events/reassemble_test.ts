@@ -1,8 +1,8 @@
 import { test } from 'vitest';
 
 import { reassembleResponsesEvents } from './reassemble.ts';
-import { assertEquals, assertRejects } from '../../../../../test-assert.ts';
 import type { ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import { assertEquals, assertRejects } from '@floway-dev/test-utils';
 
 type ResponsesReassembleEvent =
   | ResponsesStreamEvent

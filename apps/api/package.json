@@ -20,7 +20,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@floway-dev/interceptor": "workspace:*",
     "@floway-dev/protocols": "workspace:*",
+    "@floway-dev/provider": "workspace:*",
+    "@floway-dev/provider-azure": "workspace:*",
+    "@floway-dev/provider-copilot": "workspace:*",
+    "@floway-dev/provider-custom": "workspace:*",
     "@floway-dev/translate": "workspace:*",
     "@hono/zod-validator": "^0.8.0",
     "crc-32": "^1.2.2",
@@ -28,5 +33,8 @@
     "image-size": "^2.0.2",
     "jsonrepair": "^3.14.0",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@floway-dev/test-utils": "workspace:*"
   }
 }

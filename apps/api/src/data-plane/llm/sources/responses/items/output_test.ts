@@ -5,18 +5,18 @@ import { storeResponsesOutputItems, type StoreResponsesContext } from './output.
 import { initRepo } from '../../../../../repo/index.ts';
 import { InMemoryRepo } from '../../../../../repo/memory.ts';
 import type { ResponsesItemsRepo, StoredResponsesItem } from '../../../../../repo/types.ts';
-import { assert, assertEquals } from '../../../../../test-assert.ts';
 import type { RequestContext } from '../../../../llm/interceptors.ts';
 import { createHttpStatefulResponsesStore } from '../stateful-store.ts';
 import { eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { MessagesStreamEvent } from '@floway-dev/protocols/messages';
-import type { ResponsesOutputItem, ResponsesResult, RawResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { ResponsesOutputItem, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import { assert, assertEquals } from '@floway-dev/test-utils';
 import { translateResponsesViaMessages } from '@floway-dev/translate';
 import { responsesItemsView } from '@floway-dev/translate/via-responses/responses-items';
 
 const apiKeyId = 'key_output';
 
-type IteratorResultPromise = Promise<IteratorResult<ProtocolFrame<RawResponsesStreamEvent>>>;
+type IteratorResultPromise = Promise<IteratorResult<ProtocolFrame<ResponsesStreamEvent>>>;
 
 const makeContext = (overrides: Partial<StoreResponsesContext> = {}): StoreResponsesContext => ({
   targetApi: overrides.targetApi ?? 'responses',
@@ -60,7 +60,7 @@ const response = (output: ResponsesOutputItem[], status: ResponsesResult['status
   incomplete_details: null,
 });
 
-const framesFrom = async function* (events: readonly RawResponsesStreamEvent[]) {
+const framesFrom = async function* (events: readonly ResponsesStreamEvent[]) {
   for (const event of events) yield eventFrame(event);
 };
 
@@ -68,25 +68,25 @@ const framesFrom = async function* (events: readonly RawResponsesStreamEvent[]) 
 // the stream exercise the streaming path, where finalized items write through
 // at once. `.events` drops the commit handle, which is a no-op there.
 const storeStreaming = (
-  frames: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>>,
+  frames: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>,
   context: StoreResponsesContext,
   request: RequestContext,
-): AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>> =>
+): AsyncIterable<ProtocolFrame<ResponsesStreamEvent>> =>
   storeResponsesOutputItems(frames, responsesItemsView, context, request, true).events;
 
-const collectEvents = async (events: AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>>): Promise<RawResponsesStreamEvent[]> => {
-  const collected: RawResponsesStreamEvent[] = [];
+const collectEvents = async (events: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>): Promise<ResponsesStreamEvent[]> => {
+  const collected: ResponsesStreamEvent[] = [];
   for await (const item of events) {
     if (item.type === 'event') collected.push(item.event);
   }
   return collected;
 };
 
-const eventAt = <TType extends RawResponsesStreamEvent['type']>(
-  events: readonly RawResponsesStreamEvent[],
+const eventAt = <TType extends ResponsesStreamEvent['type']>(
+  events: readonly ResponsesStreamEvent[],
   type: TType,
-): Extract<RawResponsesStreamEvent, { type: TType }> => {
-  const event = events.find((candidate): candidate is Extract<RawResponsesStreamEvent, { type: TType }> => candidate.type === type);
+): Extract<ResponsesStreamEvent, { type: TType }> => {
+  const event = events.find((candidate): candidate is Extract<ResponsesStreamEvent, { type: TType }> => candidate.type === type);
   assert(event, `expected ${type}`);
   return event;
 };
@@ -198,7 +198,7 @@ test('persists each row before yielding the item-done frame', async () => {
   // added flows real-time without persist; mid-stream replay race is
   // accepted per design.
   const addedFrame = await iterator.next();
-  assertEquals((addedFrame.value as ProtocolFrame<RawResponsesStreamEvent>).type, 'event');
+  assertEquals((addedFrame.value as ProtocolFrame<ResponsesStreamEvent>).type, 'event');
   assertEquals(controlled.calls.length, 0);
 
   // done is held until the row insert resolves, so a client that has seen
@@ -208,7 +208,7 @@ test('persists each row before yielding the item-done frame', async () => {
   await waitForInsertCall(controlled);
   assertEquals(controlled.calls.length, 1);
   controlled.resolveInsert?.();
-  assertEquals(((await doneFrame).value as ProtocolFrame<RawResponsesStreamEvent>).type, 'event');
+  assertEquals(((await doneFrame).value as ProtocolFrame<ResponsesStreamEvent>).type, 'event');
 });
 
 test('insert failure does not sink the stream', async () => {
@@ -225,7 +225,7 @@ test('insert failure does not sink the stream', async () => {
       { type: 'response.completed', response: response([original]) },
     ]), makeContext(), makeRequest())[Symbol.asyncIterator]();
 
-    assertEquals(((await iterator.next()).value as ProtocolFrame<RawResponsesStreamEvent>).type, 'event');
+    assertEquals(((await iterator.next()).value as ProtocolFrame<ResponsesStreamEvent>).type, 'event');
 
     // done is held until the insert settles; a failing insert is swallowed and
     // the frame still flows, so storage can never sink the stream.
@@ -233,9 +233,9 @@ test('insert failure does not sink the stream', async () => {
     assertEquals(await promiseStateAfterMicrotasks(doneFrame), 'pending');
     await waitForInsertCall(controlled);
     controlled.rejectInsert?.(new Error('insert failed'));
-    assertEquals(((await doneFrame).value as ProtocolFrame<RawResponsesStreamEvent>).type, 'event');
+    assertEquals(((await doneFrame).value as ProtocolFrame<ResponsesStreamEvent>).type, 'event');
 
-    const completed = (await iterator.next()).value as ProtocolFrame<RawResponsesStreamEvent>;
+    const completed = (await iterator.next()).value as ProtocolFrame<ResponsesStreamEvent>;
     assert(completed.type === 'event' && completed.event.type === 'response.completed');
     assert((await iterator.next()).done);
     assert(errorSpy.mock.calls.length > 0);
@@ -317,7 +317,7 @@ test('two distinct upstream items receive distinct stored ids', async () => {
     { type: 'response.completed', response: response([first, second]) },
   ]), makeContext(), makeRequest()));
 
-  const done = events.filter((event): event is Extract<RawResponsesStreamEvent, { type: 'response.output_item.done' }> => event.type === 'response.output_item.done');
+  const done = events.filter((event): event is Extract<ResponsesStreamEvent, { type: 'response.output_item.done' }> => event.type === 'response.output_item.done');
   assert(done[0].item.id !== done[1].item.id);
   assert(isStoredResponsesItemId(done[0].item.id!));
   assert(isStoredResponsesItemId(done[1].item.id!));
@@ -490,7 +490,7 @@ const messagesFramesFrom = async function* (events: readonly MessagesStreamEvent
 
 const translateMessagesUpstreamToResponses = async (
   events: readonly MessagesStreamEvent[],
-): Promise<AsyncIterable<ProtocolFrame<RawResponsesStreamEvent>>> => {
+): Promise<AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>> => {
   const trip = await translateResponsesViaMessages(
     { model: 'claude-test', input: [], stream: true } as never,
     { model: 'claude-test' },
@@ -519,7 +519,7 @@ test('responses-via-messages synthesized message and function_call items persist
   );
 
   const doneEvents = events.filter(
-    (event): event is Extract<RawResponsesStreamEvent, { type: 'response.output_item.done' }> => event.type === 'response.output_item.done',
+    (event): event is Extract<ResponsesStreamEvent, { type: 'response.output_item.done' }> => event.type === 'response.output_item.done',
   );
   const messageDone = doneEvents.find(event => event.item.type === 'message');
   const functionDone = doneEvents.find(event => event.item.type === 'function_call');

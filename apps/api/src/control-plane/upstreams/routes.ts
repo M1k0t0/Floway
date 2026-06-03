@@ -1,21 +1,18 @@
 import type { Context } from 'hono';
 
 import { upstreamRecordToJson } from './serialize.ts';
-import { fetchCustomModels } from '../../data-plane/providers/custom/fetch-models.ts';
-import { getFlagCatalog } from '../../data-plane/providers/flags.ts';
-import { clearModelsStore, invalidateModelsStore, ProviderModelsUnavailableError } from '../../data-plane/providers/models-store.ts';
 import { createProviderInstance } from '../../data-plane/providers/registry.ts';
 import { type CtxWithJson } from '../../middleware/zod-validator.ts';
 import { getRepo } from '../../repo/index.ts';
-import type { UpstreamProviderKind, UpstreamRecord } from '../../repo/types.ts';
-import { clearCopilotTokenCache, isCopilotAccountType, type CopilotAccountType } from '../../shared/copilot.ts';
-import { assertAzureUpstreamRecord, createAzureUpstream } from '../../shared/upstream/azure.ts';
-import { createCopilotUpstream } from '../../shared/upstream/copilot.ts';
-import { assertCustomUpstreamRecord, createCustomUpstream } from '../../shared/upstream/custom.ts';
-import type { EndpointKey, Upstream } from '../../shared/upstream/types.ts';
 import { detectAccountType, fetchGitHubUser, pollGitHubDeviceFlow, startGitHubDeviceFlow } from '../auth/github-device-flow.ts';
 import type { copilotAuthPollBody, createUpstreamBody, fetchModelsBody, updateUpstreamBody } from '../schemas.ts';
 import type { ModelEndpointKey, ModelEndpoints } from '@floway-dev/protocols/common';
+import { clearModelsStore, invalidateModelsStore, ProviderModelsUnavailableError, getFlagCatalog } from '@floway-dev/provider';
+import type { EndpointKey, UpstreamProviderKind, UpstreamRecord } from '@floway-dev/provider';
+import { assertAzureUpstreamRecord, azureFetch } from '@floway-dev/provider-azure';
+import { copilotFetch } from '@floway-dev/provider-copilot';
+import { clearCopilotTokenCache, isCopilotAccountType, type CopilotAccountType } from '@floway-dev/provider-copilot';
+import { assertCustomUpstreamRecord, customFetch, fetchCustomModels } from '@floway-dev/provider-custom';
 
 interface CopilotUpstreamUser {
   login: string;
@@ -172,9 +169,11 @@ const azureProbeRequest = (upstreamModelId: string, endpoint: ModelEndpointKey):
 const azureModelUsesOpenAi = (model: { endpoints: ModelEndpoints }): boolean =>
   Object.keys(model.endpoints).some(endpoint => endpoint !== 'messages');
 
-const probeModelsEndpoint = async (upstream: Upstream): Promise<{ ok: boolean; status?: number; models?: string[]; body?: string; error?: string }> => {
+type ModelsProbeResult = { ok: boolean; status?: number; models?: string[]; body?: string; error?: string };
+
+const probeModelsFetch = async (fetcher: () => Promise<Response>): Promise<ModelsProbeResult> => {
   try {
-    const resp = await upstream.fetch('models', { method: 'GET' });
+    const resp = await fetcher();
     if (!resp.ok) {
       const text = await resp.text();
       return { ok: false, status: resp.status, body: text.slice(0, 1000) };
@@ -271,28 +270,21 @@ export const testUpstream = async (c: Context) => {
   const normalized = normalizeConfig(config);
   if (!normalized.ok) return c.json({ error: normalized.error }, 400);
   const record = { ...config, config: normalized.value };
-  let upstream: Upstream;
-  if (record.provider === 'azure') {
-    upstream = createAzureUpstream(record);
-  } else if (record.provider === 'copilot') {
-    const copilot = record.config as CopilotUpstreamConfig;
-    upstream = createCopilotUpstream(record.id, record.name, copilot.githubToken, copilot.accountType);
-  } else {
-    upstream = createCustomUpstream(record);
-  }
 
   await invalidateModelsStore(id);
 
   if (record.provider === 'azure') {
     const azure = assertAzureUpstreamRecord(record);
-    const modelsProbe = azure.config.models.some(azureModelUsesOpenAi) ? await probeModelsEndpoint(upstream) : undefined;
+    const modelsProbe = azure.config.models.some(azureModelUsesOpenAi)
+      ? await probeModelsFetch(() => azureFetch(azure.config, 'models', { method: 'GET' }))
+      : undefined;
     const modelProbes = [];
 
     for (const model of azure.config.models) {
       for (const endpoint of Object.keys(model.endpoints) as ModelEndpointKey[]) {
         try {
           const probe = azureProbeRequest(model.upstreamModelId, endpoint);
-          const resp = await upstream.fetch(probe.endpoint, {
+          const resp = await azureFetch(azure.config, probe.endpoint, {
             method: 'POST',
             body: JSON.stringify(probe.body),
           });
@@ -323,7 +315,13 @@ export const testUpstream = async (c: Context) => {
   }
 
   try {
-    const probe = await probeModelsEndpoint(upstream);
+    const probe = record.provider === 'copilot'
+      ? await probeModelsFetch(() => copilotFetch(
+          { githubToken: (record.config as CopilotUpstreamConfig).githubToken, accountType: (record.config as CopilotUpstreamConfig).accountType },
+          'models',
+          { method: 'GET' },
+        ))
+      : await probeModelsFetch(() => customFetch(assertCustomUpstreamRecord(record).config, 'models', { method: 'GET' }));
     if (!probe.ok) {
       return c.json(
         {
@@ -381,17 +379,18 @@ export const fetchModels = async (c: CtxWithJson<typeof fetchModelsBody>) => {
     config: { ...config, bearerToken },
   };
 
-  let upstream: Upstream;
+  let assertedConfig;
   try {
-    // createCustomUpstream asserts the record internally; a malformed draft or
-    // an empty bearerToken with no stored secret to substitute surfaces here.
-    upstream = createCustomUpstream(record);
+    // assertCustomUpstreamRecord validates the record and surfaces the typed
+    // config; a malformed draft or an empty bearerToken with no stored secret
+    // to substitute surfaces here.
+    assertedConfig = assertCustomUpstreamRecord(record).config;
   } catch (e) {
     return c.json({ error: validationError(e) }, 400);
   }
 
   try {
-    const result = await fetchCustomModels(upstream);
+    const result = await fetchCustomModels(assertedConfig);
     return c.json(result);
   } catch (e) {
     // Mirror the control-plane /models convention: squash genuine upstream

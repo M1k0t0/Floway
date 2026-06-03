@@ -19,10 +19,10 @@ import {
 } from './image-generation.ts';
 import { initRepo } from '../../../../../../repo/index.ts';
 import { InMemoryRepo } from '../../../../../../repo/memory.ts';
-import { assert, assertEquals, assertFalse, assertStringIncludes } from '../../../../../../test-assert.ts';
 import type { RequestContext, ResponsesInvocation } from '../../../../interceptors.ts';
 import { createHttpStatefulResponsesStore } from '../../stateful-store.ts';
 import type { ResponsesInputItem, ResponsesPayload, ResponsesTool } from '@floway-dev/protocols/responses';
+import { assert, assertEquals, assertFalse, assertStringIncludes } from '@floway-dev/test-utils';
 
 const PNG_B64 = 'aGVsbG8='; // "hello" — any decodable base64 works for source tests.
 

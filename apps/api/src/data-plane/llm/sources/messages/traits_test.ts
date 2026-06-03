@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 
 import { messagesTraits } from './traits.ts';
-import { assertEquals } from '../../../../test-assert.ts';
+import { assertEquals } from '@floway-dev/test-utils';
 
 // The same `LlmServeFailure` the Responses source renders as an OpenAI body must
 // answer in the Anthropic envelope here, never borrowing OpenAI's shape — the

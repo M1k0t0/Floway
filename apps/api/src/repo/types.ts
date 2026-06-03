@@ -1,6 +1,7 @@
 import type { HistogramBucket } from '../shared/performance-histogram.ts';
 import type { WebSearchProviderName } from '../shared/web-search-providers.ts';
 import type { BillingDimension, ModelPricing } from '@floway-dev/protocols/common';
+import type { PerformanceApiName, UpstreamRecord } from '@floway-dev/provider';
 
 export interface ApiKey {
   id: string;
@@ -28,16 +29,6 @@ export interface UsageRecord {
   cost: ModelPricing | null;
 }
 
-export interface TelemetryModelIdentity {
-  model: string;
-  upstream: string;
-  modelKey: string;
-  // Pricing snapshot resolved at request time by the provider that served
-  // the call. Travels alongside the identity end-to-end so telemetry writes
-  // never have to re-resolve. null when no pricing is configured.
-  cost: ModelPricing | null;
-}
-
 // Disjoint per-dimension token counts. Absent keys mean zero for that
 // dimension. No key's count overlaps another's.
 export type TokenUsage = Partial<Record<BillingDimension, number>>;
@@ -53,7 +44,6 @@ export interface SearchUsageRecord {
 }
 
 export type PerformanceMetricScope = 'request_total' | 'upstream_success';
-export type PerformanceApiName = 'messages' | 'responses' | 'chat-completions' | 'gemini' | 'embeddings' | 'images_generations' | 'images_edits';
 
 export interface PerformanceDimensions {
   hour: string;
@@ -131,25 +121,6 @@ export interface CacheRepo {
 export interface SearchConfigRepo {
   get(): Promise<unknown | null>;
   save(config: unknown): Promise<void>;
-}
-
-export type UpstreamProviderKind = 'copilot' | 'custom' | 'azure';
-
-export interface UpstreamRecord {
-  id: string;
-  provider: UpstreamProviderKind;
-  name: string;
-  enabled: boolean;
-  sortOrder: number;
-  createdAt: string;
-  updatedAt: string;
-  config: unknown;
-  flagOverrides: Record<string, boolean>;
-  // Public model ids the operator switched off for this upstream. Orthogonal to
-  // every per-model metadata field and uniform across provider kinds: a disabled
-  // id is hidden from the catalog and unroutable, but its row metadata stays
-  // editable. Entries may reference ids no longer present in the live model list.
-  disabledPublicModelIds: string[];
 }
 
 export interface UpstreamRepo {

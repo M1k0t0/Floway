@@ -6,7 +6,7 @@ import type { Context } from 'hono';
 
 import { loadModels } from './load.ts';
 import { apiKeyUpstreamIdsFromContext } from '../../middleware/auth.ts';
-import { ProviderModelsUnavailableError } from '../providers/models-store.ts';
+import { ProviderModelsUnavailableError } from '@floway-dev/provider';
 
 const modelListingFailureMessage = 'Upstream model listing failed';
 

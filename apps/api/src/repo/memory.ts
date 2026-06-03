@@ -19,7 +19,6 @@ import type {
   SearchUsageRepo,
   StoredResponsesItem,
   StoredResponsesSnapshot,
-  UpstreamRecord,
   UpstreamRepo,
   UsageRecord,
   UsageRepo,
@@ -27,6 +26,7 @@ import type {
 import { latencyBucketForMs } from '../shared/performance-histogram.ts';
 import { assertWebSearchProviderName } from '../shared/web-search-providers.ts';
 import { type BillingDimension, type ModelPricing, unitPriceForDimension } from '@floway-dev/protocols/common';
+import type { UpstreamRecord } from '@floway-dev/provider';
 
 const BILLING_DIMENSIONS: readonly BillingDimension[] = ['input', 'input_cache_read', 'input_cache_write', 'input_image', 'output', 'output_image'];
 

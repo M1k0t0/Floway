@@ -1,8 +1,6 @@
 import { messagesSourceInterceptors } from './interceptors/index.ts';
 import { respondMessages } from './respond.ts';
-import type { ProviderModelRecord } from '../../../providers/types.ts';
 import { type LlmTargetApi, type MessagesInvocation, runInterceptors } from '../../interceptors.ts';
-import type { ExecuteResult } from '../../shared/errors/result.ts';
 import { emitToChatCompletions } from '../../targets/chat-completions/emit.ts';
 import { emitToMessages } from '../../targets/messages/emit.ts';
 import { emitToResponses } from '../../targets/responses/emit.ts';
@@ -13,6 +11,7 @@ import type { ChatCompletionsPayload } from '@floway-dev/protocols/chat-completi
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { MessagesMessage, MessagesPayload, MessagesStreamEvent } from '@floway-dev/protocols/messages';
 import type { ResponsesPayload } from '@floway-dev/protocols/responses';
+import type { ExecuteResult, ProviderModelRecord } from '@floway-dev/provider';
 import { type SourceEmit, translateMessagesViaChatCompletions, translateMessagesViaResponses, viaTranslation } from '@floway-dev/translate';
 import { messagesViaResponsesItemsView } from '@floway-dev/translate/via-responses/responses-items';
 
