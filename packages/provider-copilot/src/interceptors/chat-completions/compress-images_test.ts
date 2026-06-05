@@ -1,10 +1,11 @@
 import { test } from 'vitest';
 
 import { withInlineImagesCompressed } from './compress-images.ts';
+import { type ImageProcessor, initImageProcessor } from '@floway-dev/platform';
 import type { ChatCompletionsStreamEvent, ChatCompletionsPayload } from '@floway-dev/protocols/chat-completions';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
-import type { ChatCompletionsInvocation, InterceptorRequest, ImageProcessor, ExecuteResult } from '@floway-dev/provider';
-import { eventResult, initImageProcessor } from '@floway-dev/provider';
+import type { ChatCompletionsInvocation, ExecuteResult, InterceptorRequest } from '@floway-dev/provider';
+import { eventResult } from '@floway-dev/provider';
 import { assertEquals, stubProvider, stubUpstreamModel, testTelemetryModelIdentity } from '@floway-dev/test-utils';
 
 const stubRequest: InterceptorRequest = {};

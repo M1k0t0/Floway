@@ -4,11 +4,12 @@ import { clearCopilotTokenCache } from './auth.ts';
 import { messagesCopilotInterceptors, messagesCopilotSourceInterceptors } from './interceptors/messages/index.ts';
 import { createCopilotProvider } from './provider.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
+import { createInMemoryImageProcessor, initImageProcessor } from '@floway-dev/platform';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { MessagesPayload, MessagesStreamEvent } from '@floway-dev/protocols/messages';
 import type { ExecuteResult, InterceptorRequest, MessagesInvocation, UpstreamRecord } from '@floway-dev/provider';
-import { clearModelsStore, initImageProcessor, initProviderRepo, ProviderModelsUnavailableError, eventResult } from '@floway-dev/provider';
-import { assertEquals, assertRejects, createInMemoryImageProcessor, jsonResponse, memoryCacheRepo, sseResponse, withMockedFetch } from '@floway-dev/test-utils';
+import { clearModelsStore, initProviderRepo, ProviderModelsUnavailableError, eventResult } from '@floway-dev/provider';
+import { assertEquals, assertRejects, jsonResponse, memoryCacheRepo, sseResponse, withMockedFetch } from '@floway-dev/test-utils';
 
 const buildCopilotUpstream = (overrides: Partial<UpstreamRecord> = {}): UpstreamRecord => {
   const { config: overrideConfig, ...rest } = overrides;

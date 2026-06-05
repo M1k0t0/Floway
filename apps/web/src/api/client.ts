@@ -1,7 +1,7 @@
 import { hc } from 'hono/client';
 
 import { useAuthStore } from '../stores/auth.ts';
-import type { AppType } from '@floway-dev/api/app-type';
+import type { AppType } from '@floway-dev/proxy/app-type';
 
 // Inject the live x-api-key on every outbound request and short-circuit the
 // store on 401 so the router guard can redirect to /login.

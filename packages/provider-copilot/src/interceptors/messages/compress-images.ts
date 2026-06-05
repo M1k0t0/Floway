@@ -1,6 +1,6 @@
+import { type ImageSizeCalculator, type SizeCaps, fitWithin } from '@floway-dev/platform';
 import type { MessagesImageBlock, MessagesMessage } from '@floway-dev/protocols/messages';
-import { type ImageSizeCalculator, type MessagesInvocation, type InterceptorRequest, fitWithin, type SizeCaps } from '@floway-dev/provider';
-import { compressBase64ImageToWebp } from '@floway-dev/provider';
+import { compressBase64ImageToWebp, type InterceptorRequest, type MessagesInvocation } from '@floway-dev/provider';
 
 // Per-model image caps for the Claude (Messages) egress, measured from the real
 // /v1/messages generation path (count_tokens misreports the downscale here):
@@ -14,7 +14,7 @@ import { compressBase64ImageToWebp } from '@floway-dev/provider';
 // tier; every non-Opus Claude model uses the standard cap.
 const STANDARD_CLAUDE_CAPS: SizeCaps = { maxLongEdge: 1568, maxArea: 1_176_000 };
 
-const claudeImageCaps = (upstreamModelId: string): SizeCaps => {
+export const claudeImageCaps = (upstreamModelId: string): SizeCaps => {
   const opus = /opus-(\d+)(?:\.(\d+))?/.exec(upstreamModelId);
   if (!opus) return STANDARD_CLAUDE_CAPS;
   const major = Number(opus[1]);
