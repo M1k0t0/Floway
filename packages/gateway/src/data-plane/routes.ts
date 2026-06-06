@@ -1,5 +1,6 @@
 import type { Hono } from 'hono';
 
+import { mountCodexRoutes } from './codex/routes.ts';
 import { embeddings } from './embeddings/serve.ts';
 import { imagesEdits, imagesGenerations } from './images/serve.ts';
 import { mountLlmRoutes } from './llm/routes.ts';
@@ -8,6 +9,7 @@ import { models } from './models/serve.ts';
 
 export const mountDataPlane = (app: Hono) => {
   mountLlmRoutes(app);
+  mountCodexRoutes(app);
 
   app.get('/v1/models', models);
   app.get('/models', models);
