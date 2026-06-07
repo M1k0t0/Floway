@@ -122,6 +122,18 @@ describe('codex 1p namespace', () => {
     });
   });
 
+  describe('responses WebSocket mount', () => {
+    it('returns 426 on GET /responses without an upgrade header so the mount delegates to the generic WS handler', async () => {
+      const { apiKey } = await setupAppTest();
+      const app = buildCodexApp();
+      const response = await app.request('/azure-api.codex/responses', {
+        headers: { authorization: `Bearer ${apiKey.key}` },
+      });
+      expect(response.status).toBe(426);
+      expect(await response.json()).toEqual({ error: 'Expected Upgrade: websocket' });
+    });
+  });
+
   describe('apps MCP server', () => {
     it('answers the JSON-RPC `initialize` handshake with zero-tool capabilities', async () => {
       const { apiKey } = await setupAppTest();

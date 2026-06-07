@@ -6,12 +6,15 @@
 // appends `/api/codex/apps` to it. floway's `chatgpt_base_url` is set to the
 // codex namespace root, so this is the path the rmcp client actually POSTs to.
 //
-// A static 404 or non-JSON 200 fails the rmcp `initialize` handshake and
-// surfaces a hard "MCP startup incomplete (failed: codex_apps)" notice in
-// the TUI even though `required: false` keeps the rest of the session
-// running. Implementing the protocol — JSON-RPC 2.0 over POST, single-shot
-// application/json responses, no SSE channel — is the only way to silence
-// the notice. Spec reference:
+// The dashboard's recommended `~/.codex/config.toml` snippet sets
+// `[features] apps = false`, which short-circuits the registration and
+// removes the startup hop entirely; this stub is the fallback for an
+// operator who hasn't taken the snippet (vanilla codex config). A static
+// 404 or non-JSON 200 there would fail the rmcp `initialize` handshake
+// and surface a hard "MCP startup incomplete (failed: codex_apps)" notice
+// in the TUI even though `required: false` keeps the rest of the session
+// running, so the stub speaks the protocol — JSON-RPC 2.0 over POST,
+// single-shot application/json responses, no SSE channel. Spec reference:
 // https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#streamable-http
 //
 // The Apps tool set is meant to expose ChatGPT-managed mini-apps; we have

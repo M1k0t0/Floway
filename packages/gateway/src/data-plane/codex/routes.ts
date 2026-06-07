@@ -31,7 +31,11 @@
 // handler — codex's request shape on this path is the same one the OpenAI
 // client uses against `/v1/responses/compact`, and the Copilot-aware path
 // inside the generic handler synthesises an upstream-compatible response
-// for backends that have no native compaction.
+// for backends that have no native compaction. GET on the same `/responses`
+// path is the WebSocket upgrade entry — codex flips to wss when its
+// `[model_providers.x].supports_websockets = true` and we mirror the
+// generic `/v1/responses` WS handler so codex's session-internal item
+// store works against this namespace too.
 //
 // Auth: this whole namespace is reached through the same `authMiddleware`
 // that protects every other API route. The operator forges
@@ -54,12 +58,14 @@ import {
 } from './chatgpt-backend.ts';
 import { codexModels } from './models.ts';
 import { responsesHttp } from '../llm/responses/http.ts';
+import { responsesWebSocket } from '../llm/responses/websocket.ts';
 
 const CODEX_BASE_PATH = '/azure-api.codex';
 
 export const mountCodexRoutes = (app: Hono) => {
   app.post(`${CODEX_BASE_PATH}/responses`, responsesHttp.generate);
   app.post(`${CODEX_BASE_PATH}/responses/compact`, responsesHttp.compact);
+  app.get(`${CODEX_BASE_PATH}/responses`, responsesWebSocket);
 
   app.get(`${CODEX_BASE_PATH}/codex/models`, codexModels);
   app.post(`${CODEX_BASE_PATH}/codex/analytics-events/events`, codexAnalyticsEventsEvents);

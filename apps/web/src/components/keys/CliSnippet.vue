@@ -119,6 +119,10 @@ const codexSnippet = computed(() => [
   'name = "Floway"',
   `base_url = "${codexBaseUrl.value}"`,
   'wire_api = "responses"',
+  'supports_websockets = true',
+  '',
+  '[features]',
+  'apps = false',
 ].join('\n'));
 
 // Unquoted heredoc so `$(date -u +...)` runs in the user's shell to stamp
