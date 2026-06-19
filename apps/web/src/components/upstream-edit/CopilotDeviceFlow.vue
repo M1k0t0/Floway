@@ -2,8 +2,14 @@
 import { onUnmounted, ref } from 'vue';
 
 import { callApi, useApi } from '../../api/client.ts';
-import type { DeviceFlowPoll, DeviceFlowStart, UpstreamRecord } from '../../api/types.ts';
+import type { DeviceFlowPoll, DeviceFlowStart, ProxyFallbackEntry, UpstreamRecord } from '../../api/types.ts';
 import { Button, Code, Spinner } from '@floway-dev/ui';
+
+const props = defineProps<{
+  // Current edit-form chain; forwarded into the poll body so the
+  // GitHub-side egress honors the in-progress chain.
+  proxyFallbackList: ProxyFallbackEntry[];
+}>();
 
 const emit = defineEmits<{ completed: [upstream: UpstreamRecord | undefined] }>();
 
@@ -26,7 +32,9 @@ const stopPolling = () => {
 const pollOnce = async (currentInterval: number) => {
   if (!flow.value) return;
   const { data, error: err } = await callApi<DeviceFlowPoll>(
-    () => api.api.upstreams.copilot.auth.poll.$post({ json: { device_code: flow.value!.device_code } }),
+    () => api.api.upstreams.copilot.auth.poll.$post({
+      json: { device_code: flow.value!.device_code, proxy_fallback_list: props.proxyFallbackList },
+    }),
   );
   if (err) return; // Transient — keep polling.
   if (!data) return;

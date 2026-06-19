@@ -2,12 +2,13 @@
 
 import CopilotDeviceFlow from './CopilotDeviceFlow.vue';
 import CopilotInfo from './CopilotInfo.vue';
-import type { CopilotQuotaSnapshot, CopilotUpstreamConfig, UpstreamRecord } from '../../api/types.ts';
+import type { CopilotQuotaSnapshot, CopilotUpstreamConfig, ProxyFallbackEntry, UpstreamRecord } from '../../api/types.ts';
 
 defineProps<{
   record: UpstreamRecord | null;
   initialQuota?: CopilotQuotaSnapshot | null;
   initialQuotaError?: string | null;
+  proxyFallbackList: ProxyFallbackEntry[];
 }>();
 
 defineEmits<{ completed: [upstream: UpstreamRecord | undefined] }>();
@@ -21,5 +22,5 @@ defineEmits<{ completed: [upstream: UpstreamRecord | undefined] }>();
     :initial-quota="initialQuota"
     :initial-quota-error="initialQuotaError"
   />
-  <CopilotDeviceFlow v-else @completed="u => $emit('completed', u)" />
+  <CopilotDeviceFlow v-else :proxy-fallback-list="proxyFallbackList" @completed="u => $emit('completed', u)" />
 </template>

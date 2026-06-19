@@ -5,12 +5,15 @@ import type { CodexImportTab, CodexPkceStartResult } from './codex-import-types.
 import CodexAccountCard from './CodexAccountCard.vue';
 import CodexImportTabs from './CodexImportTabs.vue';
 import { callApi, useApi } from '../../api/client.ts';
-import type { UpstreamRecord } from '../../api/types.ts';
+import type { ProxyFallbackEntry, UpstreamRecord } from '../../api/types.ts';
 import { Button, Spinner } from '@floway-dev/ui';
 
 const props = defineProps<{
   mode: 'create' | 'edit';
   record: UpstreamRecord | null;
+  // Current edit-form chain; forwarded into refresh-now so a refresh fired
+  // before saving uses the in-progress chain.
+  proxyFallbackList: ProxyFallbackEntry[];
 }>();
 
 const emit = defineEmits<{
@@ -85,7 +88,10 @@ const submit = async () => {
 const refreshTokenNow = async () => {
   refreshing.value = true;
   const { data, error } = await callApi<UpstreamRecord>(
-    () => api.api.upstreams[':id']['codex-refresh-now'].$post({ param: { id: props.record!.id }, json: {} }),
+    () => api.api.upstreams[':id']['codex-refresh-now'].$post({
+      param: { id: props.record!.id },
+      json: { proxy_fallback_list: props.proxyFallbackList },
+    }),
   );
   refreshing.value = false;
   if (error) { emit('error', error.message); return; }

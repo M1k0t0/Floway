@@ -173,6 +173,7 @@ onBeforeUnmount(() => floorObserver?.disconnect());
           :record="record"
           :initial-quota="initialCopilotQuota"
           :initial-quota-error="initialCopilotQuotaError"
+          :proxy-fallback-list="proxyFallbackList"
           @completed="u => $emit('copilot-completed', u)"
         />
       </section>
@@ -181,6 +182,7 @@ onBeforeUnmount(() => floorObserver?.disconnect());
         <CodexConfigPanel
           :mode="mode"
           :record="record"
+          :proxy-fallback-list="proxyFallbackList"
           @imported="u => $emit('codex-imported', u)"
           @error="m => $emit('codex-error', m)"
         />

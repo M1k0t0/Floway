@@ -1,3 +1,4 @@
+import { directFetcher, type Fetcher } from '@floway-dev/provider';
 import { githubHeaders, isCopilotAccountType, type CopilotAccountType } from '@floway-dev/provider-copilot';
 
 export interface GitHubUser {
@@ -18,8 +19,10 @@ interface GitHubDeviceFlowStart {
   interval: number;
 }
 
-export const startGitHubDeviceFlow = async () => {
-  const resp = await fetch('https://github.com/login/device/code', {
+// All GitHub egress accepts a Fetcher so the copilot auth poll can forward
+// the operator's edit-form proxy override; absent that, direct egress.
+export const startGitHubDeviceFlow = async (fetcher: Fetcher = directFetcher) => {
+  const resp = await fetcher('https://github.com/login/device/code', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -40,8 +43,8 @@ export const startGitHubDeviceFlow = async () => {
   return { ok: true as const, data };
 };
 
-export const pollGitHubDeviceFlow = async (deviceCode: string) => {
-  const resp = await fetch('https://github.com/login/oauth/access_token', {
+export const pollGitHubDeviceFlow = async (deviceCode: string, fetcher: Fetcher = directFetcher) => {
+  const resp = await fetcher('https://github.com/login/oauth/access_token', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -64,8 +67,8 @@ export const pollGitHubDeviceFlow = async (deviceCode: string) => {
   };
 };
 
-export const fetchGitHubUser = async (githubToken: string) => {
-  const userResp = await fetch('https://api.github.com/user', {
+export const fetchGitHubUser = async (githubToken: string, fetcher: Fetcher = directFetcher) => {
+  const userResp = await fetcher('https://api.github.com/user', {
     headers: {
       authorization: `token ${githubToken}`,
       accept: 'application/json',
@@ -77,8 +80,8 @@ export const fetchGitHubUser = async (githubToken: string) => {
   return (await userResp.json()) as GitHubUser;
 };
 
-export const detectAccountType = async (githubToken: string): Promise<CopilotAccountType> => {
-  const resp = await fetch('https://api.github.com/copilot_internal/user', {
+export const detectAccountType = async (githubToken: string, fetcher: Fetcher = directFetcher): Promise<CopilotAccountType> => {
+  const resp = await fetcher('https://api.github.com/copilot_internal/user', {
     headers: githubHeaders(githubToken),
   });
   if (!resp.ok) throw new Error(`GitHub Copilot account type detection failed: ${resp.status} ${await resp.text()}`);

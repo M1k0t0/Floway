@@ -269,6 +269,9 @@ export const fetchModelsBody = z.discriminatedUnion('provider', [
 
 export const copilotAuthPollBody = z.object({
   device_code: z.string().min(1),
+  // Edit-form override routing every GitHub-side call through the
+  // operator's in-progress chain. See proxy-resolution.ts.
+  proxy_fallback_list: proxyFallbackListSchema.optional(),
 });
 
 // --- codex import / PKCE / refresh ---
@@ -317,7 +320,11 @@ export const codexReimportBody = z.object({
   ...codexCredentialFields,
 }).refine(requireExactlyOneCredential, codexCredentialRefineMessage);
 
-export const codexRefreshNowBody = z.object({});
+export const codexRefreshNowBody = z.object({
+  // Edit-form override; absent falls back to the persisted row's list. See
+  // proxy-resolution.ts.
+  proxy_fallback_list: proxyFallbackListSchema.optional(),
+});
 
 // --- proxies ---
 //

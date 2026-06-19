@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import type { z } from 'zod';
 
+import { resolveControlPlaneFetcher } from './proxy-resolution.ts';
 import { upstreamRecordToJson, type SerializedUpstreamRecord } from './serialize.ts';
 import { MODEL_LISTING_FAILURE_MESSAGE } from '../../data-plane/models/shared.ts';
 import { fetchUpstreamModelsCached } from '../../data-plane/providers/models-cache.ts';
@@ -383,11 +384,15 @@ const copilotConfigUserId = (config: unknown): number | null => {
   return typeof config.user.id === 'number' && Number.isSafeInteger(config.user.id) ? config.user.id : null;
 };
 
+// The body's optional `proxy_fallback_list` is the operator's in-progress
+// edit-form override, forwarded into every GitHub-side fetch so the device
+// flow lands through the same proxy chain they're configuring.
 export const copilotAuthPoll = async (c: CtxWithJson<typeof copilotAuthPollBody>) => {
   try {
-    const { device_code: deviceCode } = c.req.valid('json');
+    const { device_code: deviceCode, proxy_fallback_list: proxyFallbackList } = c.req.valid('json');
+    const fetcher = await resolveControlPlaneFetcher({ override: proxyFallbackList });
 
-    const data = await pollGitHubDeviceFlow(deviceCode);
+    const data = await pollGitHubDeviceFlow(deviceCode, fetcher);
 
     if (data.error === 'authorization_pending') return c.json({ status: 'pending' });
     if (data.error === 'slow_down') return c.json({ status: 'slow_down', interval: data.interval });
@@ -395,8 +400,8 @@ export const copilotAuthPoll = async (c: CtxWithJson<typeof copilotAuthPollBody>
 
     if (!data.access_token) return c.json({ status: 'error', error: 'Unknown response' }, 500);
 
-    const user = await fetchGitHubUser(data.access_token);
-    const accountType = await detectAccountType(data.access_token);
+    const user = await fetchGitHubUser(data.access_token, fetcher);
+    const accountType = await detectAccountType(data.access_token, fetcher);
     if (!isCopilotAccountType(accountType)) {
       return c.json({ status: 'error', error: 'Unsupported Copilot account type' }, 502);
     }
@@ -427,7 +432,11 @@ export const copilotAuthPoll = async (c: CtxWithJson<typeof copilotAuthPollBody>
           updatedAt: now,
           flagOverrides: {},
           disabledPublicModelIds: [],
-          proxyFallbackList: [],
+          // Persist the override on initial create so subsequent data-plane
+          // calls honor the same chain. Existing rows keep their stored
+          // list — the override above already routes the poll itself
+          // correctly without clobbering a prior persisted choice.
+          proxyFallbackList: proxyFallbackList !== undefined ? normalizeProxyFallbackList(proxyFallbackList) : [],
           config,
           state: null,
         };
@@ -564,6 +573,9 @@ export const codexReimport = async (c: CtxWithJson<typeof codexReimportBody>) =>
   return c.json(await serializeForResponse(next));
 };
 
+// The body carries an optional `proxy_fallback_list` override so a refresh
+// fired from an unsaved edit-form uses the in-progress chain rather than
+// the persisted one. See proxy-resolution.ts for the layered policy.
 export const codexRefreshNow = async (c: CtxWithJson<typeof codexRefreshNowBody>) => {
   const id = c.req.param('id');
   if (!id) return c.json({ error: 'upstream id is required' }, 400);
@@ -584,12 +596,15 @@ export const codexRefreshNow = async (c: CtxWithJson<typeof codexRefreshNowBody>
     return c.json({ error: `Codex upstream is ${account.state}; re-import to recover` }, 400);
   }
 
+  const body = c.req.valid('json');
+  let fetcher;
   try {
-    // Thread the per-upstream proxy-aware fetcher so the operator-pressed
-    // Refresh button respects the same fallback chain as the data-plane hot
-    // path. Without this, a Codex upstream behind a corporate proxy would
-    // dial direct here and silently fail under restricted egress.
-    const fetcher = (await createPerRequestFetcherForAdmin())(id);
+    fetcher = await resolveControlPlaneFetcher({ override: body.proxy_fallback_list, upstreamId: id });
+  } catch (err) {
+    return c.json({ error: errorMessage(err) }, 400);
+  }
+
+  try {
     const tokens = await refreshCodexAccessToken(account.refresh_token, fetcher);
     const now = new Date();
     const nextAccount = {

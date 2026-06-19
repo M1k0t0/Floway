@@ -1015,3 +1015,108 @@ test('DELETE /api/upstreams sweeps orphaned proxy backoff rows', async () => {
   assertEquals(remaining.length, 1);
   assertEquals(remaining[0]!.upstreamId, 'other_upstream');
 });
+
+// --- pre-save proxy_fallback_list override ---
+
+test('POST /api/upstreams/:id/codex-refresh-now honors the proxy_fallback_list override over the persisted list', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  const created = (await (await requestApp('/api/upstreams/codex-import', authed(adminSession, codexAuthJsonImport()))).json()) as { id: string };
+
+  const resp = await requestApp(
+    `/api/upstreams/${created.id}/codex-refresh-now`,
+    authed(adminSession, { proxy_fallback_list: [{ id: 'p_unknown' }] }),
+  );
+  assertEquals(resp.status, 400);
+  const body = (await resp.json()) as { error: string };
+  assertEquals(body.error.toLowerCase().includes('unknown proxy id'), true);
+});
+
+test('POST /api/upstreams/copilot/auth/poll honors the proxy_fallback_list override', async () => {
+  const { adminSession } = await setupAppTest();
+  const resp = await requestApp(
+    '/api/upstreams/copilot/auth/poll',
+    authed(adminSession, { device_code: 'dev', proxy_fallback_list: [{ id: 'p_unknown' }] }),
+  );
+  // resolveControlPlaneFetcher throws synchronously when validating the
+  // override; the handler's outer catch maps that to a 502 with the
+  // error message intact.
+  assertEquals(resp.status, 502);
+  const body = (await resp.json()) as { error: string };
+  assertEquals(body.error.toLowerCase().includes('unknown proxy id'), true);
+});
+
+test('POST /api/upstreams/copilot/auth/poll persists the override on the freshly-created row', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+  await repo.proxies.insert({ id: 'p_real', name: 'Real', url: 'socks5://198.51.100.10:1080', dialTimeoutSeconds: null });
+
+  // Drive the device-flow poll deterministically: every GitHub-side call
+  // the handler makes (oauth token exchange, /user, /copilot_internal/user,
+  // and the post-save warmup's /copilot_internal/v2/token mint) must
+  // resolve, otherwise the warmup falls into copilot auth's withRetry
+  // backoff and the test stalls for ~7s before passing.
+  await withMockedFetch(
+    async (request: Request) => {
+      const url = new URL(request.url);
+      if (url.hostname === 'github.com' && url.pathname === '/login/oauth/access_token') {
+        return jsonResponse({ access_token: 'ghu_test', token_type: 'bearer', scope: 'read:user' });
+      }
+      if (url.hostname === 'api.github.com' && url.pathname === '/user') {
+        return jsonResponse({ login: 'octo', avatar_url: 'https://example.com/a.png', name: 'Octo', id: 99 });
+      }
+      if (url.hostname === 'api.github.com' && url.pathname === '/copilot_internal/user') {
+        return jsonResponse({ copilot_plan: 'individual' });
+      }
+      if (url.hostname === 'api.github.com' && url.pathname === '/copilot_internal/v2/token') {
+        return jsonResponse({ token: 'ct_test', expires_at: Math.floor(Date.now() / 1000) + 1500, refresh_in: 1200, endpoints: { api: 'https://api.githubcopilot.com' } });
+      }
+      // Models warmup probes the copilot api host; an empty list keeps the
+      // warmup quiet without exercising the catalog.
+      if (url.hostname === 'api.githubcopilot.com') {
+        return jsonResponse({ data: [] });
+      }
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const resp = await requestApp(
+        '/api/upstreams/copilot/auth/poll',
+        authed(adminSession, {
+          device_code: 'dev',
+          // 'direct' short-circuits the override fetcher to direct so the
+          // mocks above serve the bootstrap; persistence still records the
+          // full chain.
+          proxy_fallback_list: [{ id: 'direct' }, { id: 'p_real' }],
+        }),
+      );
+      assertEquals(resp.status, 200);
+      const body = (await resp.json()) as { status: string; upstream: { id: string; proxy_fallback_list: Array<{ id: string }> } };
+      assertEquals(body.status, 'complete');
+      assertEquals(body.upstream.proxy_fallback_list, [{ id: 'direct' }, { id: 'p_real' }]);
+      const stored = await repo.upstreams.getById(body.upstream.id);
+      assertEquals(stored?.proxyFallbackList, [{ id: 'direct' }, { id: 'p_real' }]);
+    },
+  );
+});
+
+test('POST /api/upstreams/:id/codex-refresh-now without an override falls back to the persisted list', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  const created = (await (await requestApp('/api/upstreams/codex-import', authed(adminSession, codexAuthJsonImport()))).json()) as { id: string };
+
+  // No override → persisted ([]) → direct egress → the mocked fetch
+  // serves the refresh response. A 200 proves the "no override" path
+  // skipped catalog validation entirely.
+  await withMockedFetch(
+    () => jsonResponse({ access_token: 'at_rotated', refresh_token: 'rt_rotated', id_token: fakeIdToken({}), expires_in: 600 }),
+    async () => {
+      const resp = await requestApp(
+        `/api/upstreams/${created.id}/codex-refresh-now`,
+        authed(adminSession, {}),
+      );
+      assertEquals(resp.status, 200);
+    },
+  );
+});
