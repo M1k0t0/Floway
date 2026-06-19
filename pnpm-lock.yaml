@@ -250,6 +250,9 @@ importers:
       '@floway-dev/provider-custom':
         specifier: workspace:*
         version: link:../provider-custom
+      '@floway-dev/provider-ollama':
+        specifier: workspace:*
+        version: link:../provider-ollama
       '@floway-dev/proxy':
         specifier: workspace:*
         version: link:../proxy
@@ -389,6 +392,19 @@ importers:
       '@floway-dev/interceptor':
         specifier: workspace:*
         version: link:../interceptor
+      '@floway-dev/protocols':
+        specifier: workspace:*
+        version: link:../protocols
+      '@floway-dev/provider':
+        specifier: workspace:*
+        version: link:../provider
+    devDependencies:
+      '@floway-dev/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
+
+  packages/provider-ollama:
+    dependencies:
       '@floway-dev/protocols':
         specifier: workspace:*
         version: link:../protocols

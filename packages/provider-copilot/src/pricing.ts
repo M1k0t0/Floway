@@ -14,6 +14,8 @@
 // snapshot for one-shot historical cleanup and is deliberately not kept in
 // sync — historical rows for newly-priced models are recovered by re-running
 // the cost backfill against live D1, not by editing that migration.
+//
+// Refresh procedure: .agents/skills/fetching-models-pricing/.
 import { copilotPublicModelId } from './model-name.ts';
 import type { ModelPricing } from '@floway-dev/protocols/common';
 

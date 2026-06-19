@@ -2,10 +2,10 @@ import type { ExecutionContext } from 'hono';
 import { test } from 'vitest';
 
 import { hashResponsesItemContent, isStoredResponseId } from './items/format.ts';
-import { DOWNSTREAM_KEEP_ALIVE_INTERVAL_MS } from '../shared/stream/sse.ts';
 import { app } from '../../../app.ts';
-import { FakeTime } from '../../../test-time.ts';
 import { copilotModels, setupAppTest, sseResponsesResponse } from '../../../test-helpers.ts';
+import { FakeTime } from '../../../test-time.ts';
+import { DOWNSTREAM_KEEP_ALIVE_INTERVAL_MS } from '../shared/stream/sse.ts';
 import { assert, assertEquals, assertExists, assertStringIncludes, jsonResponse, withMockedFetch } from '@floway-dev/test-utils';
 
 type WorkerResponseInit = ResponseInit & { readonly webSocket?: WebSocket };

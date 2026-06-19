@@ -3,8 +3,9 @@
 Floway is an LLM API gateway that fronts multiple model upstreams behind one
 set of standard APIs. Point a coding agent at Floway and it can use a
 GitHub Copilot account, a ChatGPT subscription via Codex CLI, a custom
-OpenAI- or Anthropic-compatible provider, or an Azure deployment through
-whichever API shape the agent already speaks.
+OpenAI- or Anthropic-compatible provider, an Azure deployment, or an Ollama
+server (ollama.com or self-hosted) through whichever API shape the agent
+already speaks.
 Cloudflare Workers is the production deployment target; a Node.js deployment
 target ships in the same repo for self-hosting on a long-lived process.
 
@@ -95,10 +96,11 @@ Open the deployed URL (or `http://localhost:8788` for Node), log in with
 
 1. **Settings -> Upstreams -> Add Upstream**. Upstreams are *Custom*
    (OpenAI/Anthropic-shaped, static credential), *Azure* (one endpoint, API key,
-   deployment list), *Copilot* (GitHub device OAuth), or *Codex* (ChatGPT
+   deployment list), *Copilot* (GitHub device OAuth), *Codex* (ChatGPT
    subscription via the Codex CLI's OAuth client; paste `~/.codex/auth.json`
-   or run the OAuth flow from the dashboard). List order is routing order;
-   earlier providers win for a shared public model id.
+   or run the OAuth flow from the dashboard), or *Ollama* (base URL +
+   optional API key — ollama.com or a self-hosted daemon). List order is
+   routing order; earlier providers win for a shared public model id.
 2. **API Keys -> New Key**. Give the generated key to your client.
 3. Copy the Claude Code or Codex CLI snippet from the API Keys panel into the
    agent config.

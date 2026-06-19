@@ -7,6 +7,7 @@ import { createAzureProvider } from '@floway-dev/provider-azure';
 import { createCodexProvider } from '@floway-dev/provider-codex';
 import { createCopilotProvider } from '@floway-dev/provider-copilot';
 import { createCustomProvider } from '@floway-dev/provider-custom';
+import { createOllamaProvider } from '@floway-dev/provider-ollama';
 
 interface ProviderModelsResult {
   models: ResolvedModel[];
@@ -23,6 +24,7 @@ const providerFactories: Record<UpstreamProviderKind, ProviderFactory> = {
   custom: createCustomProvider,
   azure: createAzureProvider,
   codex: createCodexProvider,
+  ollama: createOllamaProvider,
 };
 
 export const createProviderInstance = (record: UpstreamRecord): ModelProviderInstance | Promise<ModelProviderInstance> =>

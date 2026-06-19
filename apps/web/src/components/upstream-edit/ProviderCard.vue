@@ -3,7 +3,7 @@
 
 import { computed } from 'vue';
 
-type Tone = 'amber' | 'emerald' | 'cyan' | 'violet';
+type Tone = 'amber' | 'emerald' | 'cyan' | 'violet' | 'rose';
 
 const props = defineProps<{
   selected: boolean;
@@ -19,6 +19,7 @@ const TONE_CLASSES: Record<Tone, { border: string; swatch: string }> = {
   emerald: { border: 'border-accent-emerald/40 bg-accent-emerald/5', swatch: 'bg-accent-emerald/15 text-accent-emerald' },
   cyan: { border: 'border-accent-cyan/40 bg-accent-cyan/5', swatch: 'bg-accent-cyan/15 text-accent-cyan' },
   violet: { border: 'border-accent-violet/40 bg-accent-violet/5', swatch: 'bg-accent-violet/15 text-accent-violet' },
+  rose: { border: 'border-accent-rose/40 bg-accent-rose/5', swatch: 'bg-accent-rose/15 text-accent-rose' },
 };
 
 const toneStyle = computed(() => TONE_CLASSES[props.tone]);

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
-import type { AzureUpstreamConfig, CodexUpstreamConfig, CopilotUpstreamConfig, CustomUpstreamConfig, UpstreamProviderKind, UpstreamRecord } from '../../api/types.ts';
+import type { AzureUpstreamConfig, CodexUpstreamConfig, CopilotUpstreamConfig, CustomUpstreamConfig, OllamaUpstreamConfig, UpstreamProviderKind, UpstreamRecord } from '../../api/types.ts';
 
 const props = defineProps<{
   upstream: UpstreamRecord;
@@ -20,12 +20,13 @@ defineEmits<{
   delete: [];
 }>();
 
-const providerLabel = (kind: UpstreamProviderKind) => ({ custom: 'Custom', azure: 'Azure', copilot: 'Copilot', codex: 'Codex' }[kind]);
+const providerLabel = (kind: UpstreamProviderKind) => ({ custom: 'Custom', azure: 'Azure', copilot: 'Copilot', codex: 'Codex', ollama: 'Ollama' }[kind]);
 const providerBadgeClass = (kind: UpstreamProviderKind) => {
   switch (kind) {
   case 'azure': return 'border-accent-emerald/30 bg-accent-emerald/10 text-accent-emerald';
   case 'copilot': return 'border-accent-cyan/30 bg-accent-cyan/10 text-accent-cyan';
   case 'codex': return 'border-accent-violet/30 bg-accent-violet/10 text-accent-violet';
+  case 'ollama': return 'border-accent-rose/30 bg-accent-rose/10 text-accent-rose';
   case 'custom':
   default: return 'border-accent-amber/30 bg-accent-amber/10 text-accent-amber';
   }
@@ -51,6 +52,10 @@ const subtitle = computed(() => {
     const codex = cfg as CodexUpstreamConfig;
     const account = codex.accounts?.[0];
     return account ? [account.email, account.planType].filter(Boolean).join(' · ') : 'ChatGPT Codex account';
+  }
+  case 'ollama': {
+    const ollama = cfg as OllamaUpstreamConfig;
+    return ollama.baseUrl ?? 'Ollama endpoint';
   }
   }
 });

@@ -1,6 +1,6 @@
 // Control-plane DTOs the SPA consumes — serialized shapes the gateway emits at /api.
 
-export type UpstreamProviderKind = 'custom' | 'azure' | 'copilot' | 'codex';
+export type UpstreamProviderKind = 'custom' | 'azure' | 'copilot' | 'codex' | 'ollama';
 
 export type ModelKind = 'chat' | 'embedding' | 'image';
 
@@ -98,6 +98,15 @@ export interface CodexUpstreamConfig {
   accounts: CodexAccountIdentity[];
 }
 
+export interface OllamaUpstreamConfig {
+  baseUrl: string;
+  // apiKeySet mirrors customConfig.bearerTokenSet — the wire never carries the
+  // real secret, only a flag the dashboard uses to render the "leave blank to
+  // keep" hint and the "••••••••" placeholder.
+  apiKeySet?: boolean;
+  models: UpstreamModelConfig[];
+}
+
 export interface CodexAccountCredentialState {
   chatgptAccountId: string;
   state: 'active' | 'session_terminated' | 'refresh_failed';
@@ -138,7 +147,7 @@ export interface UpstreamRecord {
   // unroutable, but their per-model metadata stays editable. May include ids no
   // longer present in the live model list.
   disabled_public_model_ids: string[];
-  config: CustomUpstreamConfig | AzureUpstreamConfig | CopilotUpstreamConfig | CodexUpstreamConfig;
+  config: CustomUpstreamConfig | AzureUpstreamConfig | CopilotUpstreamConfig | CodexUpstreamConfig | OllamaUpstreamConfig;
   // Ordered fallback dial-list. Each entry pins a proxy id (or the literal
   // string `'direct'` for "no proxy") and an optional `colos` whitelist that
   // scopes the entry to specific Cloudflare colos / Node RUNTIME_LOCATION

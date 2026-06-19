@@ -25,6 +25,7 @@
     "@floway-dev/provider-codex": "workspace:*",
     "@floway-dev/provider-copilot": "workspace:*",
     "@floway-dev/provider-custom": "workspace:*",
+    "@floway-dev/provider-ollama": "workspace:*",
     "@floway-dev/proxy": "workspace:*",
     "@floway-dev/translate": "workspace:*",
     "@hono/zod-validator": "^0.8.0",

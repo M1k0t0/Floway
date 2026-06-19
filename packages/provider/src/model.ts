@@ -1,6 +1,6 @@
 import type { ModelKind, ModelEndpoints, ModelPricing } from '@floway-dev/protocols/common';
 
-export type UpstreamProviderKind = 'copilot' | 'custom' | 'azure' | 'codex';
+export type UpstreamProviderKind = 'copilot' | 'custom' | 'azure' | 'codex' | 'ollama';
 
 // One entry in `UpstreamRecord.proxyFallbackList`. `id` is the proxy id from
 // the proxies catalog or the literal 'direct' sentinel. `colos` is an

@@ -57,12 +57,13 @@ const toggleRow = (id: string, enabled: boolean) => {
 
 const badgeCount = computed(() => value.value.override ? rows.value.filter(r => r.enabled).length : props.available.length);
 
-interface ProviderMeta { tone: 'amber' | 'emerald' | 'cyan' | 'zinc'; label: string }
+interface ProviderMeta { tone: 'amber' | 'emerald' | 'cyan' | 'rose' | 'zinc'; label: string }
 const providerMeta = (provider: UpstreamProviderKind | null): ProviderMeta => {
   if (provider === 'custom') return { tone: 'amber', label: 'Custom' };
   if (provider === 'azure') return { tone: 'emerald', label: 'Azure' };
   if (provider === 'copilot') return { tone: 'cyan', label: 'Copilot' };
   if (provider === 'codex') return { tone: 'cyan', label: 'Codex' };
+  if (provider === 'ollama') return { tone: 'rose', label: 'Ollama' };
   return { tone: 'zinc', label: 'Unknown' };
 };
 </script>

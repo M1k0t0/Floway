@@ -42,6 +42,12 @@ export interface AzureDraft {
   models: UpstreamModelConfig[];
 }
 
+export interface OllamaDraft {
+  baseUrl: string;
+  apiKey: string;
+  models: UpstreamModelConfig[];
+}
+
 export interface CustomConfigCore {
   baseUrl: string;
   authStyle: 'bearer' | 'anthropic';
@@ -82,4 +88,13 @@ export const blankAzureDraft = (): AzureDraft => ({
   endpoint: '',
   apiKey: '',
   models: [{ upstreamModelId: '', kind: 'chat', endpoints: { responses: {} } }],
+});
+
+// Ollama's catalog is always live-fetched (/api/tags + /api/show), so the
+// draft has no manual-by-default rows — operators add overrides explicitly
+// when they want to pin metadata or pricing.
+export const blankOllamaDraft = (): OllamaDraft => ({
+  baseUrl: 'https://ollama.com',
+  apiKey: '',
+  models: [],
 });

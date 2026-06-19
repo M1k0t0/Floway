@@ -14,6 +14,8 @@
 // (gpt-5.5, gpt-5.4, gpt-5.4-mini, codex-auto-review). New slugs the upstream
 // rolls out at higher plans (Pro / Team / Enterprise) should be added here so
 // the dashboard reports their cost too.
+//
+// Refresh procedure: .agents/skills/fetching-models-pricing/.
 
 import type { ModelPricing } from '@floway-dev/protocols/common';
 

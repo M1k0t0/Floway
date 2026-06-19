@@ -21,6 +21,7 @@ const projectList = [
   './packages/provider-codex/tsconfig.json',
   './packages/provider-copilot/tsconfig.json',
   './packages/provider-custom/tsconfig.json',
+  './packages/provider-ollama/tsconfig.json',
   './packages/proxy/tsconfig.json',
   './packages/test-utils/tsconfig.json',
   './packages/translate/tsconfig.json',

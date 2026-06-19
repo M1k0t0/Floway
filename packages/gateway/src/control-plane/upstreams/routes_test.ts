@@ -335,7 +335,7 @@ test('POST /api/upstreams/fetch-models fetches a draft custom upstream model lis
       throw new Error(`Unhandled fetch ${request.url}`);
     },
     async () => {
-      const resp = await requestApp('/api/upstreams/fetch-models', authed(adminSession, { config: customConfig }));
+      const resp = await requestApp('/api/upstreams/fetch-models', authed(adminSession, { provider: 'custom', config: customConfig }));
       assertEquals(resp.status, 200);
       const body = (await resp.json()) as { data: Array<Record<string, unknown>> };
       assertEquals(body.data.map(m => m.id), ['gpt-a', 'gpt-b']);
@@ -366,12 +366,59 @@ test('POST /api/upstreams/fetch-models rejects calls that supply a saved upstrea
   // (the SWR-cached path); fetch-models stays draft-only.
   const resp = await requestApp(
     '/api/upstreams/fetch-models',
-    authed(adminSession, { id: 'up_stored_secret', config: { ...customConfig, bearerToken: '' } }),
+    authed(adminSession, { provider: 'custom', id: 'up_stored_secret', config: { ...customConfig, bearerToken: '' } }),
   );
   assertEquals(resp.status, 400);
   const body = (await resp.json()) as { error: { message: string; type: string } };
   assertEquals(body.error.type, 'invalid_request_error');
   assertEquals(body.error.message.includes('refresh=true'), true);
+});
+
+test('POST /api/upstreams/fetch-models projects an ollama draft into UpstreamModelConfig rows with capability-derived endpoints', async () => {
+  const { adminSession } = await setupAppTest();
+
+  await withMockedFetch(
+    async request => {
+      const url = new URL(request.url);
+      if (url.hostname === 'ollama.com' && url.pathname === '/api/tags') {
+        return jsonResponse({ models: [{ name: 'gpt-oss:120b' }, { name: 'nomic-embed-text:latest' }] });
+      }
+      if (url.hostname === 'ollama.com' && url.pathname === '/api/show') {
+        const body = await request.json() as { name?: string };
+        if (body.name === 'gpt-oss:120b') {
+          return jsonResponse({
+            capabilities: ['completion', 'tools', 'thinking'],
+            details: { family: 'gptoss' },
+            model_info: { 'general.architecture': 'gptoss', 'gptoss.context_length': 131072 },
+          });
+        }
+        if (body.name === 'nomic-embed-text:latest') {
+          return jsonResponse({
+            capabilities: ['embedding'],
+            details: { family: 'nomic-bert' },
+            model_info: { 'general.architecture': 'nomic-bert', 'nomic-bert.context_length': 8192 },
+          });
+        }
+      }
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const resp = await requestApp('/api/upstreams/fetch-models', authed(adminSession, {
+        provider: 'ollama',
+        config: { baseUrl: 'https://ollama.com', apiKey: 'ollama_test' },
+      }));
+      assertEquals(resp.status, 200);
+      const body = (await resp.json()) as { data: Array<Record<string, unknown>> };
+      const ids = body.data.map(m => m.upstreamModelId).sort();
+      assertEquals(ids, ['gpt-oss:120b', 'nomic-embed-text:latest']);
+      const gptoss = body.data.find(m => m.upstreamModelId === 'gpt-oss:120b')!;
+      assertEquals(gptoss.kind, 'chat');
+      assertEquals(Object.keys(gptoss.endpoints as Record<string, unknown>).sort(), ['chatCompletions', 'messages', 'responses']);
+      const embed = body.data.find(m => m.upstreamModelId === 'nomic-embed-text:latest')!;
+      assertEquals(embed.kind, 'embedding');
+      assertEquals(Object.keys(embed.endpoints as Record<string, unknown>), ['embeddings']);
+    },
+  );
 });
 
 test('POST /api/upstreams/fetch-models surfaces upstream model-listing failures as 502', async () => {
@@ -386,7 +433,30 @@ test('POST /api/upstreams/fetch-models surfaces upstream model-listing failures 
       throw new Error(`Unhandled fetch ${request.url}`);
     },
     async () => {
-      const resp = await requestApp('/api/upstreams/fetch-models', authed(adminSession, { config: customConfig }));
+      const resp = await requestApp('/api/upstreams/fetch-models', authed(adminSession, { provider: 'custom', config: customConfig }));
+      assertEquals(resp.status, 502);
+      const body = (await resp.json()) as { error: { message: string; type: string } };
+      assertEquals(body.error.type, 'api_error');
+    },
+  );
+});
+
+test('POST /api/upstreams/fetch-models surfaces an ollama /api/tags failure as 502', async () => {
+  const { adminSession } = await setupAppTest();
+
+  await withMockedFetch(
+    async request => {
+      const url = new URL(request.url);
+      if (url.hostname === 'ollama.com' && url.pathname === '/api/tags') {
+        return jsonResponse({ error: 'unauthorized' }, 401);
+      }
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const resp = await requestApp('/api/upstreams/fetch-models', authed(adminSession, {
+        provider: 'ollama',
+        config: { baseUrl: 'https://ollama.com', apiKey: 'ollama_test' },
+      }));
       assertEquals(resp.status, 502);
       const body = (await resp.json()) as { error: { message: string; type: string } };
       assertEquals(body.error.type, 'api_error');
@@ -399,7 +469,7 @@ test('POST /api/upstreams/fetch-models rejects a malformed draft config with 400
 
   // Blank token with no id and no stored secret to substitute: the runtime
   // assert rejects the empty bearerToken, surfaced as a 400 validation error.
-  const resp = await requestApp('/api/upstreams/fetch-models', authed(adminSession, { config: { ...customConfig, bearerToken: '' } }));
+  const resp = await requestApp('/api/upstreams/fetch-models', authed(adminSession, { provider: 'custom', config: { ...customConfig, bearerToken: '' } }));
   assertEquals(resp.status, 400);
   const body = (await resp.json()) as { error: string };
   assertEquals(body.error.includes('bearerToken'), true);
@@ -541,7 +611,7 @@ test('POST /api/upstreams/fetch-models without an id still serves draft preview'
       throw new Error(`Unhandled fetch ${request.url}`);
     },
     async () => {
-      const resp = await requestApp('/api/upstreams/fetch-models', authed(adminSession, { config: customConfig }));
+      const resp = await requestApp('/api/upstreams/fetch-models', authed(adminSession, { provider: 'custom', config: customConfig }));
       assertEquals(resp.status, 200);
       const body = (await resp.json()) as { data: Array<Record<string, unknown>> };
       assertEquals(body.data.map(m => m.id), ['draft-only']);
