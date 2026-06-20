@@ -10,7 +10,7 @@ import { pricingForCodexModelKey } from './pricing.ts';
 import { assertCodexUpstreamState, type CodexUpstreamState } from './state.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
 import type { ResponsesStreamEvent } from '@floway-dev/protocols/responses';
-import { getProviderRepo, type ModelProvider, type ModelProviderInstance, type ProviderCallResult, type ProviderCompactionResult, type ProviderStreamResult, type UpstreamCallOptions, type UpstreamRecord } from '@floway-dev/provider';
+import { defaultsForProvider, getProviderRepo, resolveEffectiveFlags, type ModelProvider, type ModelProviderInstance, type ProviderCallResult, type ProviderCompactionResult, type ProviderStreamResult, type UpstreamCallOptions, type UpstreamRecord } from '@floway-dev/provider';
 
 export const createCodexProvider = async (record: UpstreamRecord): Promise<ModelProviderInstance> => {
   assertCodexUpstreamRecord(record);
@@ -20,6 +20,12 @@ export const createCodexProvider = async (record: UpstreamRecord): Promise<Model
   // pool. The schema carries an array so a future fan-out can pick a
   // different active account per call without a wire migration.
   const accountIdentity = config.accounts[0];
+
+  // Computed once per provider instance: only the upstream layer applies
+  // (no per-model override layer). Threaded into every UpstreamModel emitted
+  // by getProvidedModels so interceptors can read the effective flag set
+  // without re-resolving — same pattern as the claude-code provider.
+  const enabledFlags = resolveEffectiveFlags(defaultsForProvider('codex'), [record.flagOverrides]);
 
   // Re-read upstream state on every request rather than capturing the record's
   // state at construction. Refresh-token rotation, terminal-state transitions,
@@ -88,7 +94,7 @@ export const createCodexProvider = async (record: UpstreamRecord): Promise<Model
       // operator's gateway is its own surface — they can dispatch to those
       // models even though the ChatGPT UI hides them — and the dashboard
       // toggles them per-upstream when needed.
-      return raw.map(codexRawToUpstreamModel);
+      return raw.map(r => codexRawToUpstreamModel(r, enabledFlags));
     },
 
     // Codex itself is a flat-fee subscription, but the dashboard reports

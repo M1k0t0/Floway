@@ -128,6 +128,24 @@ describe('createCodexProvider', () => {
     await expect(instance.provider.getProvidedModels(directFetcher)).rejects.toThrow(/Codex OAuth session terminated/);
   });
 
+  test('getProvidedModels resolves operator flag overrides into every UpstreamModel', async () => {
+    // The codex provider has no provider-default flags, so an operator
+    // toggling `responses-web-search-shim` on at the upstream layer is the
+    // only signal downstream interceptors get. A previous regression
+    // hardcoded `enabledFlags: new Set()` in the catalog mapper, dropping
+    // the override on the floor — this test guards against that.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(modelsResponse());
+    const recordWithOverride: UpstreamRecord = {
+      ...baseRecord,
+      flagOverrides: { 'responses-web-search-shim': true },
+    };
+    const instance = await createCodexProvider(recordWithOverride);
+    const models = await instance.provider.getProvidedModels(directFetcher);
+    for (const m of models) {
+      expect(m.enabledFlags.has('responses-web-search-shim')).toBe(true);
+    }
+  });
+
   test('callResponses round-trips through fetch transport', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
     const instance = await createCodexProvider(baseRecord);

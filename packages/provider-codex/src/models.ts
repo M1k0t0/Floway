@@ -57,7 +57,11 @@ const assertRawModel = (value: unknown): CodexRawModel => {
 // Codex exposes only the Responses endpoint. Pricing is looked up from the
 // per-slug table in pricing.ts so the dashboard can report a notional
 // API-rate cost even though Codex itself bills as a flat-fee subscription.
-export const codexRawToUpstreamModel = (raw: CodexRawModel): UpstreamModel => {
+//
+// `enabledFlags` is the upstream-resolved flag set (provider defaults
+// merged with the row's `flagOverrides`); it propagates per-model so
+// downstream interceptors can read the effective set without re-resolving.
+export const codexRawToUpstreamModel = (raw: CodexRawModel, enabledFlags: ReadonlySet<string>): UpstreamModel => {
   const cost = pricingForCodexModelKey(raw.id);
   return {
     id: raw.id,
@@ -68,7 +72,7 @@ export const codexRawToUpstreamModel = (raw: CodexRawModel): UpstreamModel => {
       max_context_window_tokens: raw.context_window || raw.max_context_window || undefined,
     },
     endpoints: { responses: {} },
-    enabledFlags: new Set<string>(),
+    enabledFlags,
     ...(cost ? { cost } : {}),
   };
 };
