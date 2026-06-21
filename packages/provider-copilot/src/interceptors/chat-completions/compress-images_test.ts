@@ -20,7 +20,7 @@ const fixedProcessor: ImageProcessor = {
 
 const invocation = (payload: ChatCompletionsPayload): ChatCompletionsBoundaryCtx => ({
   payload,
-  headers: {},
+  headers: new Headers(),
   model: stubUpstreamModel({ endpoints: { chatCompletions: {} } }),
 });
 

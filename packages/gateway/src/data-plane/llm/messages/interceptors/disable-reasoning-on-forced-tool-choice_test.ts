@@ -30,7 +30,7 @@ const invocation = (
     targetApi: 'messages',
     binding: { upstreamModel: stubUpstreamModel({ endpoints: { messages: {} } }), enabledFlags },
   }),
-  headers: {},
+  headers: new Headers(),
 });
 
 test('messages forced tool_choice disables thinking and strips output_config', async () => {

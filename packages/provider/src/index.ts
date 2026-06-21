@@ -92,8 +92,6 @@ export {
 export type { ValidatePathErr, ValidatePathOk } from './join.ts';
 export { joinBaseAndPath, validateUpstreamPath } from './join.ts';
 
-export { mergeAnthropicBetaHeader } from './anthropic-beta.ts';
-
 export type { Fetcher, UpstreamFetchOptions } from './options.ts';
 export { directFetcher } from './options.ts';
 

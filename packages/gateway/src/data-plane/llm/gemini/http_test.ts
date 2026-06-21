@@ -7,7 +7,7 @@ import type { ProviderCandidate } from '../shared/candidates.ts';
 import type { ChatCompletionsStreamEvent } from '@floway-dev/protocols/chat-completions';
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { MessagesStreamEvent } from '@floway-dev/protocols/messages';
-import { directFetcher, type ProviderCallResult, type ProviderStreamResult } from '@floway-dev/provider';
+import { directFetcher, type ProviderCallResult, type ProviderStreamResult, type UpstreamCallOptions } from '@floway-dev/provider';
 import { assert, assertEquals, stubProvider, stubUpstreamModel } from '@floway-dev/test-utils';
 
 const candidatesQueue: { readonly candidates: readonly ProviderCandidate[]; readonly sawModel: boolean }[] = [];
@@ -68,9 +68,9 @@ const makeProtocolFrames = async function* <TEvent>(events: readonly TEvent[]): 
 const makeCandidate = (overrides: {
   upstream?: string;
   targetApi?: ProviderCandidate['targetApi'];
-  callChatCompletions?: (model: unknown, body: unknown, signal?: AbortSignal, headers?: Record<string, string>) => Promise<ProviderStreamResult<ChatCompletionsStreamEvent>>;
-  callMessages?: (model: unknown, body: unknown, signal?: AbortSignal, headers?: Record<string, string>, anthropicBeta?: readonly string[]) => Promise<ProviderStreamResult<MessagesStreamEvent>>;
-  callMessagesCountTokens?: (model: unknown, body: unknown, signal?: AbortSignal, headers?: Record<string, string>, anthropicBeta?: readonly string[]) => Promise<ProviderCallResult>;
+  callChatCompletions?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderStreamResult<ChatCompletionsStreamEvent>>;
+  callMessages?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderStreamResult<MessagesStreamEvent>>;
+  callMessagesCountTokens?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderCallResult>;
 } = {}): ProviderCandidate => {
   const upstream = overrides.upstream ?? 'up_test';
   const targetApi = overrides.targetApi ?? 'chat-completions';
@@ -119,7 +119,7 @@ test('POST /v1beta/models/:model:generateContent returns a single JSON body for 
 
   const response = await makeApp().request('/v1beta/models/test-model:generateContent', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: new Headers({ 'content-type': 'application/json' }),
     body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'hi' }] }] }),
   });
 
@@ -139,7 +139,7 @@ test('POST /v1beta/models/:model:streamGenerateContent streams a Gemini SSE body
 
   const response = await makeApp().request('/v1beta/models/test-model:streamGenerateContent', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: new Headers({ 'content-type': 'application/json' }),
     body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'hi' }] }] }),
   });
 
@@ -154,7 +154,7 @@ test('POST /v1beta/models/:model:countTokens returns the Gemini totalTokens enve
   installRepo();
   const callMessagesCountTokens = vi.fn(async (): Promise<ProviderCallResult> => ({
     response: new Response(JSON.stringify({ input_tokens: 23 }), {
-      status: 200, headers: { 'content-type': 'application/json' },
+      status: 200, headers: new Headers({ 'content-type': 'application/json' }),
     }),
     modelKey: 'k',
   }));
@@ -162,7 +162,7 @@ test('POST /v1beta/models/:model:countTokens returns the Gemini totalTokens enve
 
   const response = await makeApp().request('/v1beta/models/test-model:countTokens', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: new Headers({ 'content-type': 'application/json' }),
     body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'hi' }] }] }),
   });
 
@@ -175,7 +175,7 @@ test('POST /v1beta/models/:model:countTokens accepts the generateContentRequest 
   installRepo();
   const callMessagesCountTokens = vi.fn(async (): Promise<ProviderCallResult> => ({
     response: new Response(JSON.stringify({ total_tokens: 7 }), {
-      status: 200, headers: { 'content-type': 'application/json' },
+      status: 200, headers: new Headers({ 'content-type': 'application/json' }),
     }),
     modelKey: 'k',
   }));
@@ -183,7 +183,7 @@ test('POST /v1beta/models/:model:countTokens accepts the generateContentRequest 
 
   const response = await makeApp().request('/v1beta/models/test-model:countTokens', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: new Headers({ 'content-type': 'application/json' }),
     body: JSON.stringify({
       generateContentRequest: { contents: [{ role: 'user', parts: [{ text: 'hi' }] }] },
     }),
@@ -202,7 +202,7 @@ test('POST /v1beta/models/:model:generateContent translates through Messages tar
 
   const response = await makeApp().request('/v1beta/models/test-model:generateContent', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: new Headers({ 'content-type': 'application/json' }),
     body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'hi' }] }] }),
   });
 
@@ -218,7 +218,7 @@ test('POST /v1beta/models/:model:unknownAction returns a Google RPC 404 envelope
   // No candidates queued — the action parser short-circuits before routing.
   const response = await makeApp().request('/v1beta/models/test-model:unknownAction', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: new Headers({ 'content-type': 'application/json' }),
     body: '{}',
   });
 
@@ -240,7 +240,7 @@ test('POST /v1beta/models/models/:model:generateContent accepts the models/ pref
 
   const response = await makeApp().request('/v1beta/models/models/test-model:generateContent', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: new Headers({ 'content-type': 'application/json' }),
     body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'hi' }] }] }),
   });
 

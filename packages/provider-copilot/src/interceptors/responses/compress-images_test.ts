@@ -20,7 +20,7 @@ const fixedProcessor: ImageProcessor = {
 
 const invocation = (payload: ResponsesPayload): ResponsesBoundaryCtx => ({
   payload,
-  headers: {},
+  headers: new Headers(),
   model: stubUpstreamModel({ endpoints: { responses: {} } }),
 });
 

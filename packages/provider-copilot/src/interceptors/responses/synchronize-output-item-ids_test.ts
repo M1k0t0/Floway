@@ -25,7 +25,7 @@ const invocation = (): ResponsesBoundaryCtx => ({
     store: false,
     parallel_tool_calls: true,
   },
-  headers: {},
+  headers: new Headers(),
   model: stubUpstreamModel({ endpoints: { responses: {} } }),
 });
 

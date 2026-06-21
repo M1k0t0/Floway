@@ -21,34 +21,30 @@ export interface ProviderCandidate {
 
 // Per-protocol invocation shape passed to interceptors. Carries the
 // source-shape request body (mutable, so the body can be cleaned), the
-// planner's binding decision, and a mutable HTTP-header bag passed through
-// to the wire fetch unchanged — so workarounds that only need to set or
-// drop a header stay at the owning interceptor boundary instead of widening
-// the provider call signature.
+// planner's binding decision, and a mutable `Headers` instance carried into
+// the boundary chain — so workarounds that only need to set or drop a
+// header stay at the owning interceptor boundary instead of widening the
+// provider call signature.
 export interface MessagesInvocation {
   payload: MessagesPayload;
   readonly candidate: ProviderCandidate;
-  // `anthropicBeta` is an inbound Messages concept that crosses native
-  // Messages targets; translated targets do not consume it, so it stays
-  // optional and is only populated when the source and target are Messages.
-  readonly anthropicBeta?: readonly string[];
-  readonly headers: Record<string, string>;
+  readonly headers: Headers;
 }
 
 export interface ResponsesInvocation {
   payload: ResponsesPayload;
   readonly candidate: ProviderCandidate;
-  readonly headers: Record<string, string>;
+  readonly headers: Headers;
 }
 
 export interface ChatCompletionsInvocation {
   payload: ChatCompletionsPayload;
   readonly candidate: ProviderCandidate;
-  readonly headers: Record<string, string>;
+  readonly headers: Headers;
 }
 
 export interface GeminiInvocation {
   payload: GeminiPayload;
   readonly candidate: ProviderCandidate;
-  readonly headers: Record<string, string>;
+  readonly headers: Headers;
 }

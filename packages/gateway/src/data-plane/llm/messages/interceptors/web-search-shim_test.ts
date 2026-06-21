@@ -47,7 +47,7 @@ const invocation = (payload: MessagesPayload): MessagesInvocation => ({
       enabledFlags: new Set(['messages-web-search-shim']),
     },
   }),
-  headers: {},
+  headers: new Headers(),
 });
 
 const gatewayCtx = (apiKeyId: string = 'test-key'): GatewayCtx => ({

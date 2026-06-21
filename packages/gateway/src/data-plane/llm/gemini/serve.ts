@@ -16,6 +16,7 @@ export interface GeminiServeGenerateArgs {
   // resolved by the HTTP entry and threaded through here so candidate
   // enumeration and failure rendering all see the same value.
   readonly model: string;
+  readonly headers: Headers;
 }
 
 export interface GeminiServeCountTokensArgs {
@@ -23,11 +24,12 @@ export interface GeminiServeCountTokensArgs {
   readonly ctx: GatewayCtx;
   readonly store: StatefulResponsesStore;
   readonly model: string;
+  readonly headers: Headers;
 }
 
 export const geminiServe = {
   generate: async (args: GeminiServeGenerateArgs): Promise<ExecuteResult<ProtocolFrame<GeminiStreamEvent>>> => {
-    const { payload, ctx, store, model } = args;
+    const { payload, ctx, store, model, headers } = args;
     const { candidates, sawModel } = await enumerateProviderCandidates({
       upstreamIds: ctx.upstreamIds,
       model,
@@ -53,11 +55,11 @@ export const geminiServe = {
         'generate',
       );
     }
-    return await geminiAttempt.generate({ payload, ctx, store, candidate });
+    return await geminiAttempt.generate({ payload, ctx, store, candidate, headers });
   },
 
   countTokens: async (args: GeminiServeCountTokensArgs): Promise<ExecuteResult<ProtocolFrame<GeminiStreamEvent>> | PlainResult> => {
-    const { payload, ctx, store, model } = args;
+    const { payload, ctx, store, model, headers } = args;
     const { candidates, sawModel } = await enumerateProviderCandidates({
       upstreamIds: ctx.upstreamIds,
       model,
@@ -83,6 +85,6 @@ export const geminiServe = {
         'countTokens',
       );
     }
-    return await geminiAttempt.countTokens({ payload, ctx, store, candidate });
+    return await geminiAttempt.countTokens({ payload, ctx, store, candidate, headers });
   },
 };

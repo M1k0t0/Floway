@@ -25,7 +25,7 @@ const invocation = (
 ): ChatCompletionsInvocation => ({
   payload,
   candidate: stubProviderCandidate({ targetApi: 'chat-completions', binding: { enabledFlags } }),
-  headers: {},
+  headers: new Headers(),
 });
 
 test('required tool_choice sets reasoning_effort to the canonical none sentinel', async () => {

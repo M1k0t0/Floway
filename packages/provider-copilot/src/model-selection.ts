@@ -16,8 +16,6 @@ const stripClaudeDateSuffix = (id: string): string => (id.startsWith('claude-') 
 
 const normalizedClaudeLookupId = (id: string): string => copilotRawModelId(stripClaudeDateSuffix(id));
 
-export const hasContext1mBeta = (anthropicBeta: readonly string[] | undefined): boolean => anthropicBeta?.includes(CONTEXT_1M_BETA) === true;
-
 const standardClaudeBaseId = (id: string): string | undefined => {
   if (!id.startsWith('claude-')) return undefined;
   return STANDARD_CLAUDE_BASE_ID.test(id) ? id : undefined;

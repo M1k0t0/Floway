@@ -6,6 +6,6 @@ import type { UpstreamModel } from '@floway-dev/provider';
 // the terminal result type differs (see codexResponsesChain in ./index.ts).
 export interface ResponsesBoundaryCtx {
   payload: ResponsesPayload;
-  headers: Record<string, string>;
+  headers: Headers;
   readonly model: UpstreamModel;
 }

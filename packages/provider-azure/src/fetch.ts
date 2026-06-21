@@ -54,7 +54,7 @@ const azureFetchInternal = async (
     headers.set('Content-Type', 'application/json');
   }
   if (options.extraHeaders) {
-    for (const [key, value] of Object.entries(options.extraHeaders)) headers.set(key, value);
+    for (const [key, value] of options.extraHeaders) headers.set(key, value);
   }
   const url = joinBaseAndPath(baseUrl, path);
   const dispatch = options.fetcher;

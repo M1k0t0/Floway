@@ -26,7 +26,7 @@ const makeCtx = (
     max_tokens: 128,
     ...(thinking ? { thinking } : {}),
   },
-  headers: {},
+  headers: new Headers(),
   model: stubUpstreamModel({ endpoints: { messages: {} } }),
 });
 

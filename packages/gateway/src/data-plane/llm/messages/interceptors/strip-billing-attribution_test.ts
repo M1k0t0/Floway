@@ -27,7 +27,7 @@ const invocation = (payload: MessagesPayload): MessagesInvocation => ({
     targetApi: 'messages',
     binding: { upstreamModel: stubUpstreamModel({ endpoints: { messages: {} } }) },
   }),
-  headers: {},
+  headers: new Headers(),
 });
 
 test('strips billing-header lines and cch hashes from a string system prompt while preserving the rest', async () => {

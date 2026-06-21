@@ -33,7 +33,7 @@ export interface CallCodexResponsesOptions {
   account: CodexAccountCredential;
   model: UpstreamModel;
   body: Omit<ResponsesPayload, 'model'>;
-  headers: Record<string, string>;
+  headers: Headers;
   signal?: AbortSignal;
   effects: CodexCallEffects;
   call: UpstreamCallOptions;
@@ -90,15 +90,16 @@ const performUpstreamCall = async (
   accessToken: string,
   alreadyRetried: boolean,
 ): Promise<ProviderStreamResult<ResponsesStreamEvent>> => {
-  const headers: Record<string, string> = {
-    ...opts.headers,
-    'authorization': `Bearer ${accessToken}`,
-    'chatgpt-account-id': opts.account.chatgptAccountId,
-    'originator': CODEX_ORIGINATOR,
-    'user-agent': CODEX_USER_AGENT,
-    'accept': 'text/event-stream',
-    'content-type': 'application/json',
-  };
+  // `opts.headers` is the provider's private boundary-ctx clone; mutate
+  // directly. Every header below uses `set`, so retry passes overwrite
+  // rather than accumulate.
+  const headers = opts.headers;
+  headers.set('authorization', `Bearer ${accessToken}`);
+  headers.set('chatgpt-account-id', opts.account.chatgptAccountId);
+  headers.set('originator', CODEX_ORIGINATOR);
+  headers.set('user-agent', CODEX_USER_AGENT);
+  headers.set('accept', 'text/event-stream');
+  headers.set('content-type', 'application/json');
 
   const upstreamFetch = opts.call.fetcher(`${CODEX_BACKEND_BASE}${CODEX_RESPONSES_PATH}`, {
     method: 'POST',

@@ -11,7 +11,7 @@ import { assert, assertEquals, assertStringIncludes, stubUpstreamModel, testTele
 
 const invocation = (): ChatCompletionsBoundaryCtx => ({
   payload: { model: 'test-model', messages: [] },
-  headers: {},
+  headers: new Headers(),
   model: stubUpstreamModel({ endpoints: { chatCompletions: {} } }),
 });
 

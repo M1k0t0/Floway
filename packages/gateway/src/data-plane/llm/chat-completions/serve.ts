@@ -12,11 +12,12 @@ export interface ChatCompletionsServeGenerateArgs {
   readonly payload: ChatCompletionsPayload;
   readonly ctx: GatewayCtx;
   readonly store: StatefulResponsesStore;
+  readonly headers: Headers;
 }
 
 export const chatCompletionsServe = {
   generate: async (args: ChatCompletionsServeGenerateArgs): Promise<ExecuteResult<ProtocolFrame<ChatCompletionsStreamEvent>>> => {
-    const { payload, ctx, store } = args;
+    const { payload, ctx, store, headers } = args;
     const { candidates, sawModel } = await enumerateProviderCandidates({
       upstreamIds: ctx.upstreamIds,
       model: payload.model,
@@ -43,6 +44,6 @@ export const chatCompletionsServe = {
           : { kind: 'model-missing', model: payload.model },
       );
     }
-    return await chatCompletionsAttempt.generate({ payload, ctx, store, candidate });
+    return await chatCompletionsAttempt.generate({ payload, ctx, store, candidate, headers });
   },
 };

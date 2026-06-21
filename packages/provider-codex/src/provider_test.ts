@@ -50,7 +50,7 @@ const sseResponse = (): Response => new Response(
       c.close();
     },
   }),
-  { status: 200, headers: { 'content-type': 'text/event-stream' } },
+  { status: 200, headers: new Headers({ 'content-type': 'text/event-stream' }) },
 );
 
 const modelsResponse = (): Response => new Response(JSON.stringify({
@@ -58,14 +58,14 @@ const modelsResponse = (): Response => new Response(JSON.stringify({
     { slug: 'gpt-5.4', display_name: 'GPT-5.4', visibility: 'list', context_window: 272000, max_context_window: 1000000 },
     { slug: 'codex-auto-review', display_name: 'Codex Auto Review', visibility: 'hide', context_window: 272000, max_context_window: 1000000 },
   ],
-}), { status: 200, headers: { 'content-type': 'application/json' } });
+}), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) });
 
 const oauthTokenResponse = (overrides: Partial<{ access_token: string; refresh_token: string; expires_in: number }> = {}): Response => new Response(JSON.stringify({
   access_token: overrides.access_token ?? 'at_minted',
   refresh_token: overrides.refresh_token ?? 'rt_v2',
   id_token: 'id_token_v2',
   expires_in: overrides.expires_in ?? 3600,
-}), { status: 200, headers: { 'content-type': 'application/json' } });
+}), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) });
 
 describe('createCodexProvider', () => {
   test('returns an instance carrying provider kind and identity', async () => {
@@ -121,7 +121,7 @@ describe('createCodexProvider', () => {
     getByIdSpy.mockImplementation(async () => baseRecord);
     vi.spyOn(globalThis, 'fetch').mockImplementation(async input => {
       const url = typeof input === 'string' ? input : (input instanceof URL ? input.href : (input as Request).url);
-      if (url.includes('/oauth/token')) return new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400, headers: { 'content-type': 'application/json' } });
+      if (url.includes('/oauth/token')) return new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400, headers: new Headers({ 'content-type': 'application/json' }) });
       throw new Error(`unexpected fetch ${url}`);
     });
     const instance = await createCodexProvider(baseRecord);
@@ -153,8 +153,7 @@ describe('createCodexProvider', () => {
       { id: 'gpt-5.4', display_name: 'gpt-5.4', kind: 'chat', limits: {}, endpoints: { responses: {} }, enabledFlags: new Set() },
       { input: [{ type: 'message', role: 'user', content: 'hi' }], stream: true },
       undefined,
-      undefined,
-      noopUpstreamCallOptions,
+      noopUpstreamCallOptions(),
     );
     expect(result.ok).toBe(true);
   });
@@ -166,8 +165,7 @@ describe('createCodexProvider', () => {
       { id: 'gpt-5.4', display_name: 'gpt-5.4', kind: 'chat', limits: {}, endpoints: { responses: {} }, enabledFlags: new Set() },
       { input: [], stream: true },
       undefined,
-      undefined,
-      noopUpstreamCallOptions,
+      noopUpstreamCallOptions(),
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.response.status).toBe(503);
@@ -178,28 +176,14 @@ describe('createCodexProvider', () => {
     'callImagesGenerations',
     'callImagesEdits',
     'callChatCompletions',
-  ] as const)('%s returns a synthetic 405 (data plane never dispatches these to Codex)', async method => {
-    const instance = await createCodexProvider(baseRecord);
-    const model = { id: 'gpt-5.4', display_name: 'gpt-5.4', kind: 'chat', limits: {}, endpoints: { responses: {} }, enabledFlags: new Set<string>() };
-    // @ts-expect-error: each method has a different body type; we only assert
-    // the synthetic 405 envelope is what comes back.
-    const result = await instance.provider[method](model, {}, undefined, undefined, noopUpstreamCallOptions) as { response: Response };
-    expect(result.response.status).toBe(405);
-    const body = await result.response.json() as { error: { type: string; message: string } };
-    expect(body.error.type).toBe('method_not_allowed');
-    expect(body.error.message).toMatch(/codex/i);
-  });
-
-  test.each([
     'callMessagesCountTokens',
     'callMessages',
   ] as const)('%s returns a synthetic 405 (data plane never dispatches these to Codex)', async method => {
     const instance = await createCodexProvider(baseRecord);
     const model = { id: 'gpt-5.4', display_name: 'gpt-5.4', kind: 'chat', limits: {}, endpoints: { responses: {} }, enabledFlags: new Set<string>() };
     // @ts-expect-error: each method has a different body type; we only assert
-    // the synthetic 405 envelope is what comes back. callMessages*/CountTokens
-    // additionally take an anthropicBeta slice before opts.
-    const result = await instance.provider[method](model, {}, undefined, undefined, undefined, noopUpstreamCallOptions) as { response: Response };
+    // the synthetic 405 envelope is what comes back.
+    const result = await instance.provider[method](model, {}, undefined, noopUpstreamCallOptions()) as { response: Response };
     expect(result.response.status).toBe(405);
     const body = await result.response.json() as { error: { type: string; message: string } };
     expect(body.error.type).toBe('method_not_allowed');

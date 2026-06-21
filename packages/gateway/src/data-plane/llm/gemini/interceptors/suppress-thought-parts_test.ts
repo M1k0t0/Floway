@@ -20,7 +20,7 @@ const stubCtx: GatewayCtx = {
 const invocation = (payload: GeminiPayload): GeminiInvocation => ({
   payload,
   candidate: stubProviderCandidate({ targetApi: 'messages' }),
-  headers: {},
+  headers: new Headers(),
 });
 
 const streamingResult = (events: GeminiStreamEvent[]) => (): Promise<ExecuteResult<ProtocolFrame<GeminiStreamEvent>>> =>

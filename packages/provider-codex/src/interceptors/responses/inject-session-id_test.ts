@@ -11,7 +11,7 @@ const stubRequest = {};
 const okEvents = (): Promise<ProviderStreamResult<ResponsesStreamEvent>> =>
   Promise.resolve({ ok: true, events: (async function* () {})(), modelKey: 'test', headers: new Headers() });
 
-const invocation = (payload: ResponsesPayload, headers: Record<string, string> = {}): ResponsesBoundaryCtx => ({
+const invocation = (payload: ResponsesPayload, headers: Headers = new Headers()): ResponsesBoundaryCtx => ({
   payload,
   headers,
   model: stubUpstreamModel({ endpoints: { responses: {} } }),
@@ -24,7 +24,8 @@ test('injects a UUID-shaped session-id header when none is set', async () => {
 
   await injectSessionId(ctx, stubRequest, okEvents);
 
-  assert(UUID_RE.test(ctx.headers['session-id']), `expected UUID, got ${ctx.headers['session-id']}`);
+  const sessionId = ctx.headers.get('session-id');
+  assert(sessionId !== null && UUID_RE.test(sessionId), `expected UUID, got ${sessionId}`);
 });
 
 test('produces a stable id across calls with the same prefix', async () => {
@@ -42,7 +43,7 @@ test('produces a stable id across calls with the same prefix', async () => {
   await injectSessionId(a, stubRequest, okEvents);
   await injectSessionId(b, stubRequest, okEvents);
 
-  assertEquals(a.headers['session-id'], b.headers['session-id']);
+  assertEquals(a.headers.get('session-id'), b.headers.get('session-id'));
 });
 
 test('produces different ids for different system prompts', async () => {
@@ -52,7 +53,7 @@ test('produces different ids for different system prompts', async () => {
   await injectSessionId(a, stubRequest, okEvents);
   await injectSessionId(b, stubRequest, okEvents);
 
-  assert(a.headers['session-id'] !== b.headers['session-id'], 'expected distinct session-ids');
+  assert(a.headers.get('session-id') !== b.headers.get('session-id'), 'expected distinct session-ids');
 });
 
 test('produces different ids for different first user messages', async () => {
@@ -62,24 +63,24 @@ test('produces different ids for different first user messages', async () => {
   await injectSessionId(a, stubRequest, okEvents);
   await injectSessionId(b, stubRequest, okEvents);
 
-  assert(a.headers['session-id'] !== b.headers['session-id'], 'expected distinct session-ids');
+  assert(a.headers.get('session-id') !== b.headers.get('session-id'), 'expected distinct session-ids');
 });
 
 test('honors a client-supplied session-id (hyphen form) without overwriting', async () => {
-  const ctx = invocation({ model: 'gpt-test', input: 'hi' }, { 'session-id': 'client-supplied' });
+  const ctx = invocation({ model: 'gpt-test', input: 'hi' }, new Headers({ 'session-id': 'client-supplied' }));
 
   await injectSessionId(ctx, stubRequest, okEvents);
 
-  assertEquals(ctx.headers['session-id'], 'client-supplied');
+  assertEquals(ctx.headers.get('session-id'), 'client-supplied');
 });
 
 test('honors a client-supplied session_id (underscore form) without injecting hyphen variant', async () => {
-  const ctx = invocation({ model: 'gpt-test', input: 'hi' }, { 'session_id': 'client-supplied' });
+  const ctx = invocation({ model: 'gpt-test', input: 'hi' }, new Headers({ 'session_id': 'client-supplied' }));
 
   await injectSessionId(ctx, stubRequest, okEvents);
 
-  assertEquals(ctx.headers['session_id'], 'client-supplied');
-  assertEquals(ctx.headers['session-id'], undefined);
+  assertEquals(ctx.headers.get('session_id'), 'client-supplied');
+  assertEquals(ctx.headers.get('session-id'), null);
 });
 
 test('handles array input by reading the first role:"user" item', async () => {
@@ -98,5 +99,5 @@ test('handles array input by reading the first role:"user" item', async () => {
   const compare = invocation({ model: 'gpt-test', input: 'real first user message' });
   await injectSessionId(compare, stubRequest, okEvents);
 
-  assertEquals(ctx.headers['session-id'], compare.headers['session-id']);
+  assertEquals(ctx.headers.get('session-id'), compare.headers.get('session-id'));
 });

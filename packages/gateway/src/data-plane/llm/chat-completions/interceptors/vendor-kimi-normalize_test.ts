@@ -21,7 +21,7 @@ const stubCtx: GatewayCtx = {
 const invocation = (payload: ChatCompletionsPayload, enabledFlags: ReadonlySet<string> = new Set(['vendor-kimi'])): ChatCompletionsInvocation => ({
   payload,
   candidate: stubProviderCandidate({ targetApi: 'chat-completions', binding: { enabledFlags } }),
-  headers: {},
+  headers: new Headers(),
 });
 
 const collectFrames = async (result: ExecuteResult<ProtocolFrame<ChatCompletionsStreamEvent>>): Promise<ProtocolFrame<ChatCompletionsStreamEvent>[]> => {

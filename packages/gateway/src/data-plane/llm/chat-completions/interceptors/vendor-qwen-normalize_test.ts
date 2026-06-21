@@ -20,7 +20,7 @@ const stubCtx: GatewayCtx = {
 const invocation = (payload: ChatCompletionsPayload, enabledFlags: ReadonlySet<string> = new Set(['vendor-qwen'])): ChatCompletionsInvocation => ({
   payload,
   candidate: stubProviderCandidate({ targetApi: 'chat-completions', binding: { enabledFlags } }),
-  headers: {},
+  headers: new Headers(),
 });
 
 const okEvents = () => Promise.resolve(eventResult((async function* () {})(), testTelemetryModelIdentity));

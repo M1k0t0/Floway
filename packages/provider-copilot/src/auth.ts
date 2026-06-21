@@ -215,7 +215,7 @@ async function getCopilotToken(upstreamId: string, githubToken: string, fetcher:
 }
 
 export interface CopilotFetchOptions {
-  headers?: Record<string, string>;
+  headers?: Headers;
   /** Per-request proxy-aware indirection. Used for both the data-plane
    *  request and the api.github.com token exchange so a single fallback
    *  chain covers both paths under restricted egress. */
@@ -267,7 +267,7 @@ export async function copilotAuthedFetch(path: string, init: RequestInit, auth: 
   // header value must do so by name through this sentinel; the layer does not
   // otherwise expose a per-header delete API.
   if (options.headers) {
-    for (const [name, value] of Object.entries(options.headers)) {
+    for (const [name, value] of options.headers) {
       if (value === '') headers.delete(name);
       else headers.set(name, value);
     }

@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 
 import { geminiInternalRpcErrorResponse, geminiRpcErrorResponse, respondGemini } from './respond.ts';
 import { geminiServe } from './serve.ts';
+import { inboundHeadersForUpstream } from '../../shared/inbound-headers.ts';
 import { createNonResponsesSourceStore } from '../responses/items/store.ts';
 import { createGatewayCtxFromHono } from '../shared/gateway-ctx.ts';
 import type { GeminiContent, GeminiPayload } from '@floway-dev/protocols/gemini';
@@ -88,7 +89,7 @@ const runGeminiGenerate = async (c: Context, model: string, wantsStream: boolean
   const ctx = createGatewayCtxFromHono(c, wantsStream);
   const store = createNonResponsesSourceStore(ctx.apiKeyId);
   try {
-    const result = await geminiServe.generate({ payload, ctx, store, model });
+    const result = await geminiServe.generate({ payload, ctx, store, model, headers: inboundHeadersForUpstream(c) });
     const { response } = await respondGemini(c, result, wantsStream, ctx);
     return response;
   } catch (error) {
@@ -103,7 +104,7 @@ const runGeminiCountTokens = async (c: Context, model: string): Promise<Response
   const ctx = createGatewayCtxFromHono(c, false);
   const store = createNonResponsesSourceStore(ctx.apiKeyId);
   try {
-    const result = await geminiServe.countTokens({ payload, ctx, store, model });
+    const result = await geminiServe.countTokens({ payload, ctx, store, model, headers: inboundHeadersForUpstream(c) });
     const { response } = await respondGemini(c, result, false, ctx);
     return response;
   } catch (error) {

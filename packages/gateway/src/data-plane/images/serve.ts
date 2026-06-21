@@ -51,7 +51,7 @@ export const imagesGenerations = async (c: Context): Promise<Response> => {
     bindingServesEndpoint: binding => binding.upstreamModel.endpoints.imagesGenerations !== undefined,
     call: (binding, opts) => {
       const { model: _model, ...body } = request.body;
-      return binding.provider.callImagesGenerations(binding.upstreamModel, body, undefined, undefined, opts);
+      return binding.provider.callImagesGenerations(binding.upstreamModel, body, undefined, opts);
     },
     extractUsage: tokenUsageFromImagesResponse,
     noBindingMessage: modelId => `Model ${modelId} does not support the /images/generations endpoint.`,
@@ -90,7 +90,7 @@ export const imagesEdits = async (c: Context): Promise<Response> => {
         if (name === 'model') continue;
         passthrough.append(name, value);
       }
-      return binding.provider.callImagesEdits(binding.upstreamModel, passthrough, undefined, undefined, opts);
+      return binding.provider.callImagesEdits(binding.upstreamModel, passthrough, undefined, opts);
     },
     extractUsage: tokenUsageFromImagesResponse,
     noBindingMessage: modelId => `Model ${modelId} does not support the /images/edits endpoint.`,

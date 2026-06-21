@@ -14,7 +14,7 @@ import type { CopilotResponsesBoundaryInterceptor, CopilotResponsesCompactBounda
 
 // Streaming `/responses` chain. Order matters: payload-mutating interceptors
 // run first so the header interceptors see the final outgoing payload, then
-// header interceptors populate the boundary header bag for the upstream call.
+// the header interceptors populate `ctx.headers` for the upstream call.
 export const COPILOT_RESPONSES_BOUNDARY = [
   withInlineImagesCompressed,
   withServiceTierStripped,

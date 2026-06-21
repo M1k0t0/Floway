@@ -20,7 +20,7 @@ const compactionSseResponse = (): Response => {
         c.close();
       },
     }),
-    { status: 200, headers: { 'content-type': 'text/event-stream' } },
+    { status: 200, headers: new Headers({ 'content-type': 'text/event-stream' }) },
   );
 };
 
@@ -73,7 +73,7 @@ describe('callCodexResponsesCompact', () => {
     const result = await callCodexResponsesCompact({
       upstreamId, account: activeAccount, model,
       body: { input: [{ type: 'message', role: 'user', content: 'hello' }] },
-      headers: {}, effects: { persistRefreshTokenRotation: async () => {}, persistTerminalState: async () => {} }, call: noopUpstreamCallOptions,
+      headers: new Headers(), effects: { persistRefreshTokenRotation: async () => {}, persistTerminalState: async () => {} }, call: noopUpstreamCallOptions(),
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -97,13 +97,13 @@ describe('callCodexResponsesCompact', () => {
           c.close();
         },
       }),
-      { status: 200, headers: { 'content-type': 'text/event-stream' } },
+      { status: 200, headers: new Headers({ 'content-type': 'text/event-stream' }) },
     );
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(badResponse);
     await expect(callCodexResponsesCompact({
       upstreamId, account: activeAccount, model,
       body: { input: [{ type: 'message', role: 'user', content: 'hi' }] },
-      headers: {}, effects: { persistRefreshTokenRotation: async () => {}, persistTerminalState: async () => {} }, call: noopUpstreamCallOptions,
+      headers: new Headers(), effects: { persistRefreshTokenRotation: async () => {}, persistTerminalState: async () => {} }, call: noopUpstreamCallOptions(),
     })).rejects.toThrow(/compaction/);
   });
 
@@ -112,7 +112,7 @@ describe('callCodexResponsesCompact', () => {
     const result = await callCodexResponsesCompact({
       upstreamId, account: activeAccount, model,
       body: { input: [{ type: 'message', role: 'user', content: 'hi' }] },
-      headers: {}, effects: { persistRefreshTokenRotation: async () => {}, persistTerminalState: async () => {} }, call: noopUpstreamCallOptions,
+      headers: new Headers(), effects: { persistRefreshTokenRotation: async () => {}, persistTerminalState: async () => {} }, call: noopUpstreamCallOptions(),
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.response.status).toBe(500);

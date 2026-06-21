@@ -8,7 +8,7 @@ import type { ResponsesSnapshotMode, StatefulResponsesStore } from './items/stor
 import { recordPerformanceLatency } from '../../shared/telemetry/performance.ts';
 import { chatCompletionsAttempt } from '../chat-completions/attempt.ts';
 import { messagesAttempt } from '../messages/attempt.ts';
-import { providerStreamResultToExecuteResult, telemetryModelIdentity } from '../shared/attempt-helpers.ts';
+import { providerStreamResultToExecuteResult, buildUpstreamCallOptions, telemetryModelIdentity } from '../shared/attempt-helpers.ts';
 import type { ProviderCandidate } from '../shared/candidates.ts';
 import { tryCatchLlmServeFailure } from '../shared/errors.ts';
 import type { GatewayCtx } from '../shared/gateway-ctx.ts';
@@ -30,11 +30,7 @@ export interface ResponsesAttemptGenerateArgs {
   // path (another protocol's attempt translating into Responses) passes
   // 'none' so the outer source owns snapshot persistence.
   readonly snapshotMode: ResponsesSnapshotMode;
-  // Optional invocation-headers inheritance from a source attempt that
-  // translated INTO this target protocol. Source-side interceptors write
-  // trace headers into the source invocation; passing them in here keeps
-  // them on the wire for the translated upstream call.
-  readonly inheritedInvocationHeaders?: Record<string, string>;
+  readonly headers: Headers;
 }
 
 export interface ResponsesAttemptCompactArgs {
@@ -42,11 +38,12 @@ export interface ResponsesAttemptCompactArgs {
   readonly ctx: GatewayCtx;
   readonly store: StatefulResponsesStore;
   readonly candidate: ProviderCandidate;
+  readonly headers: Headers;
 }
 
 export const responsesAttempt = {
   generate: async (args: ResponsesAttemptGenerateArgs): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => {
-    const { payload, ctx, store, candidate, snapshotMode, inheritedInvocationHeaders } = args;
+    const { payload, ctx, store, candidate, snapshotMode, headers } = args;
     // Rewrite + privatePayload seed + assistant-content normalization all run
     // BEFORE the interceptor chain so source interceptors — most importantly
     // the web-search server-tool shim — see fully inline-expanded input items
@@ -70,7 +67,7 @@ export const responsesAttempt = {
       payload: normalized,
       candidate,
       store,
-      headers: { ...(inheritedInvocationHeaders ?? {}) },
+      headers,
     };
     const chainResult = await runInterceptors(invocation, ctx, responsesInterceptors, async () =>
       await dispatchResponses(invocation.payload, ctx, store, candidate, invocation.headers));
@@ -104,7 +101,7 @@ export const responsesAttempt = {
   },
 
   compact: async (args: ResponsesAttemptCompactArgs): Promise<ResponsesAttemptResult> => {
-    const { payload, ctx, store, candidate } = args;
+    const { payload, ctx, store, candidate, headers } = args;
     if (candidate.targetApi !== 'responses') {
       throw new Error(`responsesAttempt.compact requires targetApi='responses', got '${candidate.targetApi}'`);
     }
@@ -115,7 +112,7 @@ export const responsesAttempt = {
     store.beginAttempt(rewritten.references);
     const normalized: ResponsesPayload = { ...rewritten.payload, input: normalizeAssistantInputText(rewritten.payload.input) };
 
-    const invocation: ResponsesInvocation = { payload: normalized, candidate, store, headers: {} };
+    const invocation: ResponsesInvocation = { payload: normalized, candidate, store, headers };
     const chainResult = await runInterceptors(invocation, ctx, responsesInterceptors, async () =>
       await callResponsesCompactAsExecuteResult(invocation.payload, ctx, candidate, invocation.headers));
 
@@ -183,7 +180,7 @@ const dispatchResponses = async (
   ctx: GatewayCtx,
   store: StatefulResponsesStore,
   candidate: ProviderCandidate,
-  invocationHeaders: Record<string, string>,
+  headers: Headers,
 ): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => {
   if (candidate.targetApi === 'responses') {
     const { model: _model, ...body } = payload;
@@ -192,8 +189,7 @@ const dispatchResponses = async (
       candidate.binding.upstreamModel,
       body,
       ctx.abortSignal,
-      invocationHeaders,
-      { fetcher: candidate.fetcher, recordUpstreamLatency: recorder.record, waitUntil: ctx.backgroundScheduler },
+      buildUpstreamCallOptions(candidate, ctx, recorder.record, headers),
     );
     return await providerStreamResultToExecuteResult(providerResult, candidate, ctx, recorder.durationMs());
   }
@@ -205,7 +201,7 @@ const dispatchResponses = async (
         fallbackMaxOutputTokens: candidate.binding.upstreamModel.limits.max_output_tokens,
       }),
       translated => messagesAttempt.generate({
-        payload: translated, ctx, store, candidate, inheritedInvocationHeaders: invocationHeaders,
+        payload: translated, ctx, store, candidate, headers,
       }),
     );
   }
@@ -214,7 +210,7 @@ const dispatchResponses = async (
       payload,
       p => translateResponsesViaChatCompletions(p, { model: candidate.binding.upstreamModel.id }),
       translated => chatCompletionsAttempt.generate({
-        payload: translated, ctx, store, candidate, inheritedInvocationHeaders: invocationHeaders,
+        payload: translated, ctx, store, candidate, headers,
       }),
     );
   }
@@ -232,7 +228,7 @@ const callResponsesCompactAsExecuteResult = async (
   payload: ResponsesPayload,
   ctx: GatewayCtx,
   candidate: ProviderCandidate,
-  invocationHeaders: Record<string, string>,
+  headers: Headers,
 ): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => {
   const { model: _model, stream: _stream, store: _store, ...body } = payload;
   const recorder = createUpstreamLatencyRecorder();
@@ -240,8 +236,7 @@ const callResponsesCompactAsExecuteResult = async (
     candidate.binding.upstreamModel,
     body,
     ctx.abortSignal,
-    invocationHeaders,
-    { fetcher: candidate.fetcher, recordUpstreamLatency: recorder.record, waitUntil: ctx.backgroundScheduler },
+    buildUpstreamCallOptions(candidate, ctx, recorder.record, headers),
   );
   const context = upstreamPerformanceContext(ctx, candidate, providerResult.modelKey);
   if (!providerResult.ok) {

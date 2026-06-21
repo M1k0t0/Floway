@@ -5,6 +5,7 @@ import { respondResponses } from './respond.ts';
 import { PreviousResponseNotFoundError } from './serve-prep.ts';
 import { responsesServe } from './serve.ts';
 import { CODEX_AUTO_REVIEW_ALIAS, CODEX_AUTO_REVIEW_TARGET } from '../../codex/auto-review-alias.ts';
+import { inboundHeadersForUpstream } from '../../shared/inbound-headers.ts';
 import { createGatewayCtxFromHono } from '../shared/gateway-ctx.ts';
 import { providerModelsUnavailableResponse } from '../shared/upstream-models-error.ts';
 import type { ResponsesPayload } from '@floway-dev/protocols/responses';
@@ -62,7 +63,7 @@ export const responsesHttp = {
       const wantsStream = payload.stream === true;
       const ctx = createGatewayCtxFromHono(c, wantsStream);
       const store = createResponsesHttpStore(ctx.apiKeyId, payload.store ?? undefined);
-      const result = await responsesServe.generate({ payload, ctx, store, snapshotMode: payload.store === false ? 'none' : 'append' });
+      const result = await responsesServe.generate({ payload, ctx, store, snapshotMode: payload.store === false ? 'none' : 'append', headers: inboundHeadersForUpstream(c) });
       const { response } = await respondResponses(c, result, wantsStream, ctx);
       return response;
     } catch (error) {
@@ -76,7 +77,7 @@ export const responsesHttp = {
       const payload = rewriteResponsesEntryModelAlias(await c.req.json<ResponsesPayload>(), false);
       const ctx = createGatewayCtxFromHono(c, false);
       const store = createResponsesHttpStore(ctx.apiKeyId, payload.store ?? undefined);
-      const result = await responsesServe.compact({ payload, ctx, store });
+      const result = await responsesServe.compact({ payload, ctx, store, headers: inboundHeadersForUpstream(c) });
       if (result.type === 'result') return Response.json(result.result);
       const { response } = await respondResponses(c, result, false, ctx);
       return response;

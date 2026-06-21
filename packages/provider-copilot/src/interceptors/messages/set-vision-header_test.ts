@@ -15,7 +15,7 @@ const okEvents = (): Promise<ExecuteResult<ProtocolFrame<MessagesStreamEvent>>> 
 
 const invocation = (payload: MessagesPayload): MessagesBoundaryCtx => ({
   payload,
-  headers: {},
+  headers: new Headers(),
   model: stubUpstreamModel({ endpoints: { messages: {} } }),
 });
 
@@ -36,7 +36,7 @@ test('Messages vision header set when a top-level image block is present', async
 
   await withVisionHeaderSet(ctx, stubRequest, okEvents);
 
-  assertEquals(ctx.headers['copilot-vision-request'], 'true');
+  assertEquals(ctx.headers.get('copilot-vision-request'), 'true');
 });
 
 test('Messages vision header set when an image is nested inside tool_result.content', async () => {
@@ -61,7 +61,7 @@ test('Messages vision header set when an image is nested inside tool_result.cont
 
   await withVisionHeaderSet(ctx, stubRequest, okEvents);
 
-  assertEquals(ctx.headers['copilot-vision-request'], 'true');
+  assertEquals(ctx.headers.get('copilot-vision-request'), 'true');
 });
 
 test('Messages vision header absent when no image is present', async () => {
@@ -84,5 +84,5 @@ test('Messages vision header absent when no image is present', async () => {
 
   await withVisionHeaderSet(ctx, stubRequest, okEvents);
 
-  assertEquals('copilot-vision-request' in ctx.headers, false);
+  assertEquals(ctx.headers.has('copilot-vision-request'), false);
 });

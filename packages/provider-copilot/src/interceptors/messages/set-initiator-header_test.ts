@@ -15,7 +15,7 @@ const okEvents = (): Promise<ExecuteResult<ProtocolFrame<MessagesStreamEvent>>> 
 
 const invocation = (payload: MessagesPayload): MessagesBoundaryCtx => ({
   payload,
-  headers: {},
+  headers: new Headers(),
   model: stubUpstreamModel({ endpoints: { messages: {} } }),
 });
 
@@ -28,7 +28,7 @@ test('Messages initiator is user when the last message is a plain user turn', as
 
   await withInitiatorHeaderSet(ctx, stubRequest, okEvents);
 
-  assertEquals(ctx.headers['x-initiator'], 'user');
+  assertEquals(ctx.headers.get('x-initiator'), 'user');
 });
 
 test('Messages initiator is user when the last user turn mixes text and tool_result', async () => {
@@ -48,7 +48,7 @@ test('Messages initiator is user when the last user turn mixes text and tool_res
 
   await withInitiatorHeaderSet(ctx, stubRequest, okEvents);
 
-  assertEquals(ctx.headers['x-initiator'], 'user');
+  assertEquals(ctx.headers.get('x-initiator'), 'user');
 });
 
 test('Messages initiator is agent when the last user turn is entirely tool_result blocks', async () => {
@@ -67,7 +67,7 @@ test('Messages initiator is agent when the last user turn is entirely tool_resul
 
   await withInitiatorHeaderSet(ctx, stubRequest, okEvents);
 
-  assertEquals(ctx.headers['x-initiator'], 'agent');
+  assertEquals(ctx.headers.get('x-initiator'), 'agent');
 });
 
 test('Messages initiator is agent when the final message is from the assistant', async () => {
@@ -82,5 +82,5 @@ test('Messages initiator is agent when the final message is from the assistant',
 
   await withInitiatorHeaderSet(ctx, stubRequest, okEvents);
 
-  assertEquals(ctx.headers['x-initiator'], 'agent');
+  assertEquals(ctx.headers.get('x-initiator'), 'agent');
 });

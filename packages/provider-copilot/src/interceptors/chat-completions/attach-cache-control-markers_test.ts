@@ -15,7 +15,7 @@ const okEvents = (): Promise<ExecuteResult<ProtocolFrame<ChatCompletionsStreamEv
 
 const invocation = (messages: ChatCompletionsMessage[]): ChatCompletionsBoundaryCtx => ({
   payload: { model: 'gpt-test', messages },
-  headers: {},
+  headers: new Headers(),
   model: stubUpstreamModel({ endpoints: { chatCompletions: {} } }),
 });
 

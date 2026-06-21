@@ -16,6 +16,7 @@ import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import type { NonLlmServeApiName } from './api-names.ts';
+import { inboundHeadersForUpstream } from './inbound-headers.ts';
 import type { PerformanceTelemetryContext } from './telemetry/performance.ts';
 import { createUpstreamLatencyRecorder, recordPerformanceError, recordPerformanceLatency, recordRequestPerformance, runtimeLocationFromRequest } from './telemetry/performance.ts';
 import { recordTokenUsage } from './telemetry/usage.ts';
@@ -129,7 +130,12 @@ export const passthroughServe = async (ctx: PassthroughServeContext): Promise<Re
       if (!bindingServesEndpoint(binding)) continue;
 
       const recorder = createUpstreamLatencyRecorder();
-      const { response, modelKey } = await call(binding, { fetcher: fetcherForUpstream(binding.upstream), recordUpstreamLatency: recorder.record, waitUntil: backgroundScheduler });
+      const { response, modelKey } = await call(binding, {
+        fetcher: fetcherForUpstream(binding.upstream),
+        recordUpstreamLatency: recorder.record,
+        waitUntil: backgroundScheduler,
+        headers: inboundHeadersForUpstream(c),
+      });
       const upstreamDurationMs = recorder.durationMs();
       const performanceContext: PerformanceTelemetryContext = {
         keyId: apiKeyId,

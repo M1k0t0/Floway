@@ -29,7 +29,7 @@ const invocation = (): ResponsesInvocation => ({
     snapshotWrites: [],
     stageInputs: false,
   }),
-  headers: {},
+  headers: new Headers(),
 });
 
 const result = (response: { status: 'completed'; output: unknown[] }) => (): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> =>

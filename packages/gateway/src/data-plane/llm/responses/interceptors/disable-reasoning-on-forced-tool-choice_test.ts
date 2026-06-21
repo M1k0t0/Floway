@@ -42,7 +42,7 @@ const invocation = (
     snapshotWrites: [],
     stageInputs: false,
   }),
-  headers: {},
+  headers: new Headers(),
 });
 
 test('responses required tool_choice sets reasoning.effort to none', async () => {

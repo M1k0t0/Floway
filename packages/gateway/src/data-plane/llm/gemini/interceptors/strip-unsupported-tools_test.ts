@@ -23,7 +23,7 @@ const okEvents = (): Promise<ExecuteResult<ProtocolFrame<GeminiStreamEvent>>> =>
 const invocation = (payload: GeminiPayload): GeminiInvocation => ({
   payload,
   candidate: stubProviderCandidate({ targetApi: 'messages' }),
-  headers: {},
+  headers: new Headers(),
 });
 
 test('strips non-functionDeclarations capabilities and drops groups that become empty', async () => {

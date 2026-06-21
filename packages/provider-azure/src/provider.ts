@@ -4,7 +4,7 @@ import { parseChatCompletionsStream } from '@floway-dev/protocols/chat-completio
 import { kindForEndpoints } from '@floway-dev/protocols/common';
 import { parseMessagesStream } from '@floway-dev/protocols/messages';
 import { parseResponsesStream, type ResponsesResult } from '@floway-dev/protocols/responses';
-import { type ModelProvider, type ModelProviderInstance, type ProviderStreamParser, type UpstreamCallOptions, type UpstreamFetchOptions, type UpstreamModel, type UpstreamRecord, defaultsForProvider, mergeAnthropicBetaHeader, publicModelId, resolveEffectiveFlags, streamingProviderCall } from '@floway-dev/provider';
+import { type ModelProvider, type ModelProviderInstance, type ProviderStreamParser, type UpstreamCallOptions, type UpstreamFetchOptions, type UpstreamModel, type UpstreamRecord, defaultsForProvider, publicModelId, resolveEffectiveFlags, streamingProviderCall } from '@floway-dev/provider';
 
 const providerData = (model: UpstreamModel): { upstreamModelId: string } => model.providerData as { upstreamModelId: string };
 
@@ -18,7 +18,7 @@ export const createAzureProvider = (record: UpstreamRecord): ModelProviderInstan
     model: UpstreamModel,
     body: Record<string, unknown>,
     signal: AbortSignal | undefined,
-    headers: Record<string, string> | undefined,
+    headers: Headers,
     parser: ProviderStreamParser<TEvent>,
     opts: UpstreamCallOptions,
   ) => {
@@ -35,7 +35,7 @@ export const createAzureProvider = (record: UpstreamRecord): ModelProviderInstan
     );
   };
 
-  const callNonStreaming = async (transport: AzureTypedFetch, model: UpstreamModel, body: Record<string, unknown>, signal: AbortSignal | undefined, headers: Record<string, string> | undefined, opts: UpstreamCallOptions) => {
+  const callNonStreaming = async (transport: AzureTypedFetch, model: UpstreamModel, body: Record<string, unknown>, signal: AbortSignal | undefined, headers: Headers, opts: UpstreamCallOptions) => {
     const upstreamModelId = providerData(model).upstreamModelId;
     const response = await transport(azure.config, { method: 'POST', body: JSON.stringify({ ...body, model: upstreamModelId }), signal }, { extraHeaders: headers, fetcher: opts.fetcher, recordUpstreamLatency: opts.recordUpstreamLatency });
     return { response, modelKey: upstreamModelId };
@@ -62,30 +62,30 @@ export const createAzureProvider = (record: UpstreamRecord): ModelProviderInstan
     getPricingForModelKey(modelKey) {
       return azure.config.models.find(model => model.upstreamModelId === modelKey)?.cost ?? null;
     },
-    callChatCompletions: (model, body, signal, headers, opts) => callStreaming(azureFetchChatCompletions, model, body, signal, headers, parseChatCompletionsStream, opts),
-    callResponses: (model, body, signal, headers, opts) => callStreaming(azureFetchResponses, model, body, signal, headers, parseResponsesStream, opts),
-    callResponsesCompact: async (model, body, signal, headers, opts) => {
+    callChatCompletions: (model, body, signal, opts) => callStreaming(azureFetchChatCompletions, model, body, signal, opts.headers, parseChatCompletionsStream, opts),
+    callResponses: (model, body, signal, opts) => callStreaming(azureFetchResponses, model, body, signal, opts.headers, parseResponsesStream, opts),
+    callResponsesCompact: async (model, body, signal, opts) => {
       const upstreamModelId = providerData(model).upstreamModelId;
       const response = await azureFetchResponsesCompact(
         azure.config,
         { method: 'POST', body: JSON.stringify({ ...body, model: upstreamModelId }), signal },
-        { extraHeaders: headers, fetcher: opts.fetcher, recordUpstreamLatency: opts.recordUpstreamLatency },
+        { extraHeaders: opts.headers, fetcher: opts.fetcher, recordUpstreamLatency: opts.recordUpstreamLatency },
       );
       return response.ok
         ? { ok: true, result: (await response.json()) as ResponsesResult, modelKey: upstreamModelId }
         : { ok: false, response, modelKey: upstreamModelId };
     },
-    callMessages: (model, body, signal, headers, anthropicBeta, opts) => callStreaming(azureFetchMessages, model, body, signal, mergeAnthropicBetaHeader(headers, anthropicBeta), parseMessagesStream, opts),
-    callMessagesCountTokens: (model, body, signal, headers, anthropicBeta, opts) => callNonStreaming(azureFetchMessagesCountTokens, model, body, signal, mergeAnthropicBetaHeader(headers, anthropicBeta), opts),
-    callEmbeddings: (model, body, signal, headers, opts) => callNonStreaming(azureFetchEmbeddings, model, body, signal, headers, opts),
-    callImagesGenerations: (model, body, signal, headers, opts) => callNonStreaming(azureFetchImagesGenerations, model, body, signal, headers, opts),
-    callImagesEdits: async (model, body, signal, headers, opts) => {
+    callMessages: (model, body, signal, opts) => callStreaming(azureFetchMessages, model, body, signal, opts.headers, parseMessagesStream, opts),
+    callMessagesCountTokens: (model, body, signal, opts) => callNonStreaming(azureFetchMessagesCountTokens, model, body, signal, opts.headers, opts),
+    callEmbeddings: (model, body, signal, opts) => callNonStreaming(azureFetchEmbeddings, model, body, signal, opts.headers, opts),
+    callImagesGenerations: (model, body, signal, opts) => callNonStreaming(azureFetchImagesGenerations, model, body, signal, opts.headers, opts),
+    callImagesEdits: async (model, body, signal, opts) => {
       // Azure routes by upstream model id in the multipart `model` field; the
       // runtime re-encodes the FormData with a fresh boundary and sets
       // Content-Type itself.
       const upstreamModelId = providerData(model).upstreamModelId;
       body.append('model', upstreamModelId);
-      const response = await azureFetchImagesEdits(azure.config, { method: 'POST', body, signal }, { extraHeaders: headers, fetcher: opts.fetcher, recordUpstreamLatency: opts.recordUpstreamLatency });
+      const response = await azureFetchImagesEdits(azure.config, { method: 'POST', body, signal }, { extraHeaders: opts.headers, fetcher: opts.fetcher, recordUpstreamLatency: opts.recordUpstreamLatency });
       return { response, modelKey: upstreamModelId };
     },
   };

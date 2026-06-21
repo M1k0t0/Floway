@@ -23,7 +23,7 @@ const okEvents = (): Promise<ExecuteResult<ProtocolFrame<GeminiStreamEvent>>> =>
 const invocation = (payload: GeminiPayload): GeminiInvocation => ({
   payload,
   candidate: stubProviderCandidate({ targetApi: 'messages' }),
-  headers: {},
+  headers: new Headers(),
 });
 
 test('removes safetySettings without inventing missing defaults and preserves siblings', async () => {

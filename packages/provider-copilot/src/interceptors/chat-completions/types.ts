@@ -7,7 +7,7 @@ import type { ExecuteResult, UpstreamModel } from '@floway-dev/provider';
 // for the boundary-isolation rationale.
 export interface ChatCompletionsBoundaryCtx {
   payload: ChatCompletionsPayload;
-  headers: Record<string, string>;
+  headers: Headers;
   readonly model: UpstreamModel;
 }
 

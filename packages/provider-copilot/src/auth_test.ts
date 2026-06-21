@@ -40,7 +40,7 @@ const installRepoAndClearCache = async () => {
 };
 
 const mockTokenAndCapture = async (
-  extraHeaders: Record<string, string> | undefined,
+  extraHeaders: Headers | undefined,
   assert: (headers: Headers) => void,
 ): Promise<void> => {
   await installRepoAndClearCache();
@@ -53,7 +53,7 @@ const mockTokenAndCapture = async (
         return jsonResponse({ token: 'tok-test', expires_at: Math.floor(Date.now() / 1000) + 3600, refresh_in: 1800 });
       }
       captured = new Headers(request.headers);
-      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+      return new Response('{}', { status: 200, headers: new Headers({ 'content-type': 'application/json' }) });
     },
     async () => {
       await copilotAuthedFetch(
@@ -70,7 +70,7 @@ const mockTokenAndCapture = async (
 };
 
 test('copilotAuthedFetch overlays interceptor headers on the pinned base set', async () => {
-  await mockTokenAndCapture({ 'x-initiator': 'agent', 'copilot-vision-request': 'true' }, headers => {
+  await mockTokenAndCapture(new Headers({ 'x-initiator': 'agent', 'copilot-vision-request': 'true' }), headers => {
     assertEquals(headers.get('x-initiator'), 'agent');
     assertEquals(headers.get('copilot-vision-request'), 'true');
     // Base headers we did not override stay pinned.
@@ -81,7 +81,7 @@ test('copilotAuthedFetch overlays interceptor headers on the pinned base set', a
 
 test('copilotAuthedFetch deletes a base header when the interceptor passes an empty-string value', async () => {
   // Sentinel contract: empty string means drop this base header from the pinned set.
-  await mockTokenAndCapture({ 'copilot-integration-id': '' }, headers => {
+  await mockTokenAndCapture(new Headers({ 'copilot-integration-id': '' }), headers => {
     assertEquals(headers.has('copilot-integration-id'), false);
   });
 });
@@ -96,7 +96,7 @@ test('copilotAuthedFetch persists the minted Copilot token into state_json.copil
       if (url.pathname === '/copilot_internal/v2/token') {
         return jsonResponse({ token: 'tok-persisted', expires_at: expiresAt, refresh_in: 1800 });
       }
-      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+      return new Response('{}', { status: 200, headers: new Headers({ 'content-type': 'application/json' }) });
     },
     async () => {
       await copilotAuthedFetch(
@@ -128,7 +128,7 @@ test('copilotAuthedFetch reads a still-valid Copilot token from state_json inste
       }
       upstreamFetches++;
       authHeader = request.headers.get('authorization');
-      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+      return new Response('{}', { status: 200, headers: new Headers({ 'content-type': 'application/json' }) });
     },
     async () => {
       const args = [

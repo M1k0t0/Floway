@@ -22,7 +22,7 @@ const okEvents = () => Promise.resolve(eventResult((async function* () {})(), te
 const invocation = (payload: ChatCompletionsPayload): ChatCompletionsInvocation => ({
   payload,
   candidate: stubProviderCandidate({ targetApi: 'chat-completions' }),
-  headers: {},
+  headers: new Headers(),
 });
 
 test('adds stream_options.include_usage when stream_options is absent', async () => {

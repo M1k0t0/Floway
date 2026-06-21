@@ -607,8 +607,8 @@ const issueImageCall = async (
   for (let attempt = 0; ; attempt++) {
     const recorder = createUpstreamLatencyRecorder();
     const { response, modelKey } = await (isEdit
-      ? binding.provider.callImagesEdits(binding.upstreamModel, buildEditsForm(prompt, state.config, sources, stream), state.downstreamAbortSignal, undefined, { fetcher, recordUpstreamLatency: recorder.record, waitUntil: state.backgroundScheduler })
-      : binding.provider.callImagesGenerations(binding.upstreamModel, buildGenerationsBody(prompt, state.config, stream), state.downstreamAbortSignal, undefined, { fetcher, recordUpstreamLatency: recorder.record, waitUntil: state.backgroundScheduler }));
+      ? binding.provider.callImagesEdits(binding.upstreamModel, buildEditsForm(prompt, state.config, sources, stream), state.downstreamAbortSignal, { fetcher, recordUpstreamLatency: recorder.record, waitUntil: state.backgroundScheduler, headers: new Headers() })
+      : binding.provider.callImagesGenerations(binding.upstreamModel, buildGenerationsBody(prompt, state.config, stream), state.downstreamAbortSignal, { fetcher, recordUpstreamLatency: recorder.record, waitUntil: state.backgroundScheduler, headers: new Headers() }));
     const context: PerformanceTelemetryContext = {
       keyId: state.apiKeyId,
       model: binding.upstreamModel.id,

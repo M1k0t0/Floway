@@ -4,7 +4,7 @@ import { messagesAttempt } from '../messages/attempt.ts';
 import { responsesAttempt } from '../responses/attempt.ts';
 import { rewriteStoredResponsesItemsForCandidate } from '../responses/items/rewrite.ts';
 import type { StatefulResponsesStore } from '../responses/items/store.ts';
-import { providerStreamResultToExecuteResult } from '../shared/attempt-helpers.ts';
+import { providerStreamResultToExecuteResult, buildUpstreamCallOptions } from '../shared/attempt-helpers.ts';
 import type { ProviderCandidate } from '../shared/candidates.ts';
 import { tryCatchLlmServeFailure } from '../shared/errors.ts';
 import type { GatewayCtx } from '../shared/gateway-ctx.ts';
@@ -22,19 +22,18 @@ export interface ChatCompletionsAttemptArgs {
   readonly ctx: GatewayCtx;
   readonly store: StatefulResponsesStore;
   readonly candidate: ProviderCandidate;
-  // See responses/attempt.ts for the inherited-headers contract.
-  readonly inheritedInvocationHeaders?: Record<string, string>;
+  readonly headers: Headers;
 }
 
 export const chatCompletionsAttempt = {
   generate: async (args: ChatCompletionsAttemptArgs): Promise<ExecuteResult<ProtocolFrame<ChatCompletionsStreamEvent>>> => {
-    const { payload, ctx, store, candidate, inheritedInvocationHeaders } = args;
+    const { payload, ctx, store, candidate, headers } = args;
     const rewritten = await rewriteOrRenderChatCompletionsFailure(payload, store, candidate);
     if (rewritten.failure) return rewritten.failure;
     const invocation: ChatCompletionsInvocation = {
       payload: rewritten.payload,
       candidate,
-      headers: { ...(inheritedInvocationHeaders ?? {}) },
+      headers,
     };
     return await runInterceptors(invocation, ctx, chatCompletionsInterceptors, async () => {
       if (candidate.targetApi === 'chat-completions') {
@@ -47,14 +46,14 @@ export const chatCompletionsAttempt = {
             model: candidate.binding.upstreamModel.id,
             fallbackMaxOutputTokens: candidate.binding.upstreamModel.limits.max_output_tokens,
           }),
-          translated => messagesAttempt.generate({ payload: translated, ctx, store, candidate, inheritedInvocationHeaders: invocation.headers }),
+          translated => messagesAttempt.generate({ payload: translated, ctx, store, candidate, headers: invocation.headers }),
         );
       }
       if (candidate.targetApi === 'responses') {
         return await traverseTranslation(
           invocation.payload,
           p => translateChatCompletionsViaResponses(p, { model: candidate.binding.upstreamModel.id }),
-          translated => responsesAttempt.generate({ payload: translated, ctx, store, candidate, snapshotMode: 'none', inheritedInvocationHeaders: invocation.headers }),
+          translated => responsesAttempt.generate({ payload: translated, ctx, store, candidate, snapshotMode: 'none', headers: invocation.headers }),
         );
       }
       throw new Error(`chatCompletionsAttempt.generate: unexpected targetApi '${(candidate as { targetApi: string }).targetApi}'`);
@@ -99,7 +98,7 @@ const callChatCompletionsAsExecuteResult = async (
   payload: ChatCompletionsPayload,
   ctx: GatewayCtx,
   candidate: ProviderCandidate,
-  invocationHeaders: Record<string, string>,
+  headers: Headers,
 ): Promise<ExecuteResult<ProtocolFrame<ChatCompletionsStreamEvent>>> => {
   const { model: _model, ...body } = payload;
   const recorder = createUpstreamLatencyRecorder();
@@ -107,8 +106,7 @@ const callChatCompletionsAsExecuteResult = async (
     candidate.binding.upstreamModel,
     body,
     ctx.abortSignal,
-    invocationHeaders,
-    { fetcher: candidate.fetcher, recordUpstreamLatency: recorder.record, waitUntil: ctx.backgroundScheduler },
+    buildUpstreamCallOptions(candidate, ctx, recorder.record, headers),
   );
   return await providerStreamResultToExecuteResult(providerResult, candidate, ctx, recorder.durationMs());
 };

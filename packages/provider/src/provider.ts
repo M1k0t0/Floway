@@ -85,10 +85,19 @@ export type ProviderCompactionResult =
 // isolate is not terminated when the response is returned; on Node it is a
 // no-op. Providers use it for post-response persistence the caller has
 // already stopped waiting on.
+//
+// `headers` is the single inbound-headers conduit from gateway to provider.
+// The gateway seeds it from the source request's headers. Providers with no
+// boundary scrubbing (Azure, custom) thread `opts.headers` straight to the
+// upstream wire; providers that scrub (Copilot, Codex) clone via
+// `new Headers(opts.headers)` into the boundary ctx so their interceptor
+// chain mutates the clone instead of the caller's bag. The gateway owns
+// the bag and the provider must not retain a reference past the call.
 export interface UpstreamCallOptions {
   fetcher: Fetcher;
   recordUpstreamLatency: <T>(promise: Promise<T>) => Promise<T>;
   waitUntil: (promise: Promise<unknown>) => void;
+  headers: Headers;
 }
 
 export interface ModelProvider {
@@ -98,31 +107,23 @@ export interface ModelProvider {
   getProvidedModels(fetcher: Fetcher): Promise<readonly UpstreamModel[]>;
   // Resolve pricing for a usage record's `model_key` (the raw upstream model id).
   getPricingForModelKey(modelKey: string): ModelPricing | null;
-  // `headers` is the mutable header bag the caller seeds. A provider may run
-  // its own boundary interceptor chain that populates headers (vision,
-  // initiator, anthropic-beta, ...) before reaching the wire; the provider
-  // passes the bag straight through to the upstream fetch unchanged. The
-  // shape is uniform across protocols so provider implementations never
-  // branch on which protocol they are serving. Image endpoints have no
-  // boundary chain today, but the parameter stays for interface uniformity.
-  callChatCompletions(model: UpstreamModel, body: Omit<ChatCompletionsPayload, 'model'>, signal: AbortSignal | undefined, headers: Record<string, string> | undefined, opts: UpstreamCallOptions): Promise<ProviderStreamResult<ChatCompletionsStreamEvent>>;
-  callResponses(model: UpstreamModel, body: Omit<ResponsesPayload, 'model'>, signal: AbortSignal | undefined, headers: Record<string, string> | undefined, opts: UpstreamCallOptions): Promise<ProviderStreamResult<ResponsesStreamEvent>>;
-  callResponsesCompact(model: UpstreamModel, body: Omit<ResponsesCompactPayload, 'model' | 'store'>, signal: AbortSignal | undefined, headers: Record<string, string> | undefined, opts: UpstreamCallOptions): Promise<ProviderCompactionResult>;
-  // Messages and count_tokens additionally receive the source-derived
-  // `anthropicBeta` slice as a typed read-only input separate from the wire
-  // headers. Some providers select among raw upstream model variants based
-  // on caller-declared anthropic-beta values BEFORE a boundary interceptor
-  // filters the wire header down to an upstream allow-list. The typed slice
-  // gives variant selection access to the caller's full intent even when
-  // the beta is dropped before hitting the wire.
-  callMessages(model: UpstreamModel, body: Omit<MessagesPayload, 'model'>, signal: AbortSignal | undefined, headers: Record<string, string> | undefined, anthropicBeta: readonly string[] | undefined, opts: UpstreamCallOptions): Promise<ProviderStreamResult<MessagesStreamEvent>>;
+  // Same `opts.headers` shape across every protocol so provider impls never
+  // branch on the protocol when reading inbound headers. `anthropic-beta`
+  // lives on `opts.headers` like any other header; providers that need the
+  // parsed slice for variant selection (Copilot picks a raw upstream variant
+  // before the wire header is filtered down to the Copilot allow-list)
+  // re-parse it from `opts.headers.get('anthropic-beta')` themselves.
+  callChatCompletions(model: UpstreamModel, body: Omit<ChatCompletionsPayload, 'model'>, signal: AbortSignal | undefined, opts: UpstreamCallOptions): Promise<ProviderStreamResult<ChatCompletionsStreamEvent>>;
+  callResponses(model: UpstreamModel, body: Omit<ResponsesPayload, 'model'>, signal: AbortSignal | undefined, opts: UpstreamCallOptions): Promise<ProviderStreamResult<ResponsesStreamEvent>>;
+  callResponsesCompact(model: UpstreamModel, body: Omit<ResponsesCompactPayload, 'model' | 'store'>, signal: AbortSignal | undefined, opts: UpstreamCallOptions): Promise<ProviderCompactionResult>;
+  callMessages(model: UpstreamModel, body: Omit<MessagesPayload, 'model'>, signal: AbortSignal | undefined, opts: UpstreamCallOptions): Promise<ProviderStreamResult<MessagesStreamEvent>>;
   // count_tokens is non-streaming JSON; the gateway relays the upstream
   // Response verbatim.
-  callMessagesCountTokens(model: UpstreamModel, body: Omit<MessagesPayload, 'model'>, signal: AbortSignal | undefined, headers: Record<string, string> | undefined, anthropicBeta: readonly string[] | undefined, opts: UpstreamCallOptions): Promise<ProviderCallResult>;
-  callEmbeddings(model: UpstreamModel, body: Omit<EmbeddingsPayload, 'model'>, signal: AbortSignal | undefined, headers: Record<string, string> | undefined, opts: UpstreamCallOptions): Promise<ProviderCallResult>;
-  callImagesGenerations(model: UpstreamModel, body: Omit<ImagesGenerationsPayload, 'model'>, signal: AbortSignal | undefined, headers: Record<string, string> | undefined, opts: UpstreamCallOptions): Promise<ProviderCallResult>;
+  callMessagesCountTokens(model: UpstreamModel, body: Omit<MessagesPayload, 'model'>, signal: AbortSignal | undefined, opts: UpstreamCallOptions): Promise<ProviderCallResult>;
+  callEmbeddings(model: UpstreamModel, body: Omit<EmbeddingsPayload, 'model'>, signal: AbortSignal | undefined, opts: UpstreamCallOptions): Promise<ProviderCallResult>;
+  callImagesGenerations(model: UpstreamModel, body: Omit<ImagesGenerationsPayload, 'model'>, signal: AbortSignal | undefined, opts: UpstreamCallOptions): Promise<ProviderCallResult>;
   // The provider takes ownership of `body` and may mutate it (e.g. append
   // the upstream-specific model/deployment id). Callers must allocate a
   // fresh FormData per call.
-  callImagesEdits(model: UpstreamModel, body: FormData, signal: AbortSignal | undefined, headers: Record<string, string> | undefined, opts: UpstreamCallOptions): Promise<ProviderCallResult>;
+  callImagesEdits(model: UpstreamModel, body: FormData, signal: AbortSignal | undefined, opts: UpstreamCallOptions): Promise<ProviderCallResult>;
 }

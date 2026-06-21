@@ -2,7 +2,7 @@ import type { ProviderCandidate } from './candidates.ts';
 import type { GatewayCtx } from './gateway-ctx.ts';
 import { recordUpstreamHttpFailure, upstreamPerformanceContext, withUpstreamTelemetry } from './upstream-telemetry.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
-import { eventResult, readUpstreamError, type ExecuteResult, type ProviderStreamResult, type TelemetryModelIdentity } from '@floway-dev/provider';
+import { eventResult, readUpstreamError, type ExecuteResult, type ProviderStreamResult, type TelemetryModelIdentity, type UpstreamCallOptions } from '@floway-dev/provider';
 
 // Telemetry identity for the chosen candidate plus the upstream-reported
 // model key. Pricing reads off the provider so the cost lookup respects any
@@ -12,6 +12,21 @@ export const telemetryModelIdentity = (candidate: ProviderCandidate, modelKey: s
   upstream: candidate.binding.upstream,
   modelKey,
   cost: candidate.binding.provider.getPricingForModelKey(modelKey),
+});
+
+// Per-call UpstreamCallOptions for the chosen candidate; see
+// UpstreamCallOptions in `@floway-dev/provider` for the contract on each
+// field, especially header ownership.
+export const buildUpstreamCallOptions = (
+  candidate: ProviderCandidate,
+  ctx: GatewayCtx,
+  recordUpstreamLatency: UpstreamCallOptions['recordUpstreamLatency'],
+  headers: Headers,
+): UpstreamCallOptions => ({
+  fetcher: candidate.fetcher,
+  recordUpstreamLatency,
+  waitUntil: ctx.backgroundScheduler,
+  headers,
 });
 
 // Lifts a provider's streaming-call result into the attempt's ExecuteResult

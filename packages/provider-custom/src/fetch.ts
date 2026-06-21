@@ -35,7 +35,7 @@ const customFetchInternal = async (
     headers.set('Content-Type', 'application/json');
   }
   if (options.extraHeaders) {
-    for (const [k, v] of Object.entries(options.extraHeaders)) headers.set(k, v);
+    for (const [k, v] of options.extraHeaders) headers.set(k, v);
   }
   const dispatch = options.fetcher;
   return await dispatch(joinBaseAndPath(config.baseUrl, path), { ...init, headers }, options.recordUpstreamLatency);

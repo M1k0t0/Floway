@@ -39,7 +39,7 @@ const invocation = (payload: ResponsesPayload, enabledFlags: ReadonlySet<string>
     snapshotWrites: [],
     stageInputs: false,
   }),
-  headers: {},
+  headers: new Headers(),
 });
 
 test("vendor-deepseek translates canonical reasoning.effort: 'none' into top-level thinking:{type:'disabled'}", async () => {

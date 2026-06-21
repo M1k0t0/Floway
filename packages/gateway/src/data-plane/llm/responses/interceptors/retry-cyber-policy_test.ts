@@ -34,7 +34,7 @@ const makeInvocation = (payload: ResponsesPayload): ResponsesInvocation => ({
     snapshotWrites: [],
     stageInputs: false,
   }),
-  headers: {},
+  headers: new Headers(),
 });
 
 const stubCtx = (overrides: { abortSignal?: AbortSignal } = {}): GatewayCtx => ({

@@ -11,7 +11,7 @@ import type { ChatCompletionsStreamEvent } from '@floway-dev/protocols/chat-comp
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { MessagesStreamEvent } from '@floway-dev/protocols/messages';
 import type { ResponsesPayload, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
-import { directFetcher, type ProviderStreamResult } from '@floway-dev/provider';
+import { directFetcher, type ProviderStreamResult, type UpstreamCallOptions } from '@floway-dev/provider';
 import { assert, assertEquals, stubProvider, stubUpstreamModel } from '@floway-dev/test-utils';
 
 // `enumerateProviderCandidates` is the only seam between serve and the
@@ -90,7 +90,7 @@ const makeProtocolFrames = async function* <E>(events: readonly E[]): AsyncGener
 const makeCandidate = (overrides: {
   upstream?: string;
   targetApi?: ProviderCandidate['targetApi'];
-  callResponses?: (model: unknown, body: unknown, signal?: AbortSignal, headers?: Record<string, string>) => Promise<ProviderStreamResult<ResponsesStreamEvent>>;
+  callResponses?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderStreamResult<ResponsesStreamEvent>>;
   callResponsesCompact?: (...args: unknown[]) => Promise<unknown>;
 } = {}): ProviderCandidate => {
   const upstream = overrides.upstream ?? 'up_test';
@@ -151,6 +151,7 @@ test('generate routes a native Responses candidate end to end', async () => {
     payload: makePayload(),
     ctx: makeGatewayCtx(),
     store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers(),
   });
 
   assertEquals(result.type, 'events');
@@ -180,6 +181,7 @@ test('compact returns a result envelope from the wrapped attempt', async () => {
     payload: makePayload({ input: [{ type: 'message', role: 'user', content: 'kept' }] }),
     ctx: makeGatewayCtx(),
     store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers(),
   });
 
   assertEquals(result.type, 'result');
@@ -191,7 +193,7 @@ test('compact returns a result envelope from the wrapped attempt', async () => {
 test('generate stops at the first candidate even when it yields an upstream error', async () => {
   installRepo();
   const firstError = new Response(JSON.stringify({ error: { message: 'nope' } }), {
-    status: 502, headers: { 'content-type': 'application/json' },
+    status: 502, headers: new Headers({ 'content-type': 'application/json' }),
   });
   const firstCall = vi.fn(async (): Promise<ProviderStreamResult<ResponsesStreamEvent>> => ({
     ok: false, response: firstError, modelKey: 'first-key',
@@ -212,6 +214,7 @@ test('generate stops at the first candidate even when it yields an upstream erro
     payload: makePayload(),
     ctx: makeGatewayCtx(),
     store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers(),
   });
 
   // An upstream error from the first candidate IS the final answer — the
@@ -230,6 +233,7 @@ test('generate renders model-missing when no candidates are available', async ()
     payload: makePayload({ model: 'unknown-model' }),
     ctx: makeGatewayCtx(),
     store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers(),
   });
 
   assertEquals(result.type, 'upstream-error');
@@ -264,6 +268,7 @@ test('generate renders routing-unavailable as a 400 when a forcing item names an
     payload: makePayload({ input: [{ type: 'item_reference', id }] }),
     ctx: makeGatewayCtx(),
     store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers(),
   });
 
   assertEquals(result.type, 'upstream-error');
@@ -296,6 +301,7 @@ test('compact renders routing-unavailable when no candidate exposes the response
     payload: makePayload({ input: [{ type: 'item_reference', id }] }),
     ctx: makeGatewayCtx(),
     store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers(),
   });
 
   assertEquals(result.type, 'upstream-error');
@@ -446,6 +452,7 @@ test('generate falls through translate-out to messages target', async () => {
     payload: makePayload(),
     ctx: makeGatewayCtx(),
     store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers(),
   });
 
   assertEquals(result.type, 'events');
@@ -500,6 +507,7 @@ test('generate falls through translate-out to chat-completions target', async ()
     payload: makePayload(),
     ctx: makeGatewayCtx(),
     store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers(),
   });
 
   assertEquals(result.type, 'events');
@@ -528,12 +536,12 @@ test('generate reuses an existing input row when a later turn echoes the same us
   const payload = makePayload({ input: [{ type: 'message', role: 'user', content: 'hello' }] });
 
   queueCandidates([makeCandidate({ callResponses })]);
-  const turn1 = await responsesServe.generate({ payload, ctx: makeGatewayCtx(), store });
+  const turn1 = await responsesServe.generate({ payload, ctx: makeGatewayCtx(), store, headers: new Headers() });
   if (turn1.type !== 'events') throw new Error('turn 1: expected events');
   const turn1Events = await collectEvents(turn1.events);
 
   queueCandidates([makeCandidate({ callResponses })]);
-  const turn2 = await responsesServe.generate({ payload, ctx: makeGatewayCtx(), store });
+  const turn2 = await responsesServe.generate({ payload, ctx: makeGatewayCtx(), store, headers: new Headers() });
   if (turn2.type !== 'events') throw new Error('turn 2: expected events');
   const turn2Events = await collectEvents(turn2.events);
 

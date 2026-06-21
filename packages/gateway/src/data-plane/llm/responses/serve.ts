@@ -15,17 +15,19 @@ export interface ResponsesServeGenerateArgs {
   // The cross-protocol translation-in path never reaches this entry — it goes
   // straight into `responsesAttempt.generate`.
   readonly snapshotMode?: ResponsesSnapshotMode;
+  readonly headers: Headers;
 }
 
 export interface ResponsesServeCompactArgs {
   readonly payload: ResponsesPayload;
   readonly ctx: GatewayCtx;
   readonly store: StatefulResponsesStore;
+  readonly headers: Headers;
 }
 
 export const responsesServe = {
   generate: async (args: ResponsesServeGenerateArgs): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => {
-    const { payload, ctx, store, snapshotMode = 'append' } = args;
+    const { payload, ctx, store, snapshotMode = 'append', headers } = args;
     const plan = await prepareResponsesServePlan({
       payload, ctx, store,
       pickTarget: endpoints =>
@@ -35,11 +37,11 @@ export const responsesServe = {
               : null,
     });
     if (plan.kind === 'failure') return plan.result;
-    return await responsesAttempt.generate({ payload: plan.prepared, ctx, store, candidate: plan.candidate, snapshotMode });
+    return await responsesAttempt.generate({ payload: plan.prepared, ctx, store, candidate: plan.candidate, snapshotMode, headers });
   },
 
   compact: async (args: ResponsesServeCompactArgs): Promise<ResponsesAttemptResult> => {
-    const { payload, ctx, store } = args;
+    const { payload, ctx, store, headers } = args;
     // Compact accepts `previous_response_id` (the official endpoint documents
     // it). When present we expand it the same way generate does so the
     // upstream sees the same item_reference + current input shape.
@@ -48,6 +50,6 @@ export const responsesServe = {
       pickTarget: endpoints => endpoints.responses ? 'responses' : null,
     });
     if (plan.kind === 'failure') return plan.result;
-    return await responsesAttempt.compact({ payload: plan.prepared, ctx, store, candidate: plan.candidate });
+    return await responsesAttempt.compact({ payload: plan.prepared, ctx, store, candidate: plan.candidate, headers });
   },
 };

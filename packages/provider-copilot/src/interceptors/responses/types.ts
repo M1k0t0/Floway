@@ -4,14 +4,13 @@ import type { ResponsesPayload, ResponsesStreamEvent } from '@floway-dev/protoco
 import type { ExecuteResult, ProviderCompactionResult, UpstreamModel } from '@floway-dev/provider';
 
 // Boundary ctx for Copilot Responses interceptors. See messages/types.ts for
-// the boundary-isolation rationale; the shape mirrors the Messages boundary
-// minus `anthropicBeta` (Responses has no upstream beta-flag input). The same
-// ctx shape feeds both the streaming `/responses` chain and the non-streaming
-// `/responses/compact` chain; the difference is the result type the terminal
-// produces, which is the type parameter on the interceptor aliases below.
+// the boundary-isolation rationale. The same ctx shape feeds both the
+// streaming `/responses` chain and the non-streaming `/responses/compact`
+// chain; the difference is the result type the terminal produces, which is
+// the type parameter on the interceptor aliases below.
 export interface ResponsesBoundaryCtx {
   payload: ResponsesPayload;
-  headers: Record<string, string>;
+  headers: Headers;
   readonly model: UpstreamModel;
 }
 

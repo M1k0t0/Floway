@@ -4,6 +4,7 @@ import { RESPONSES_MISSING_TERMINAL_MESSAGE } from './events/to-result.ts';
 import { createResponsesWsSession } from './items/store.ts';
 import { PreviousResponseNotFoundError } from './serve-prep.ts';
 import { responsesServe } from './serve.ts';
+import { inboundHeadersForUpstream } from '../../shared/inbound-headers.ts';
 import { tokenUsage } from '../../shared/telemetry/usage.ts';
 import { createGatewayCtxForWs, type GatewayCtx } from '../shared/gateway-ctx.ts';
 import { SourceStreamState, eventResultMetadata, recordPerformance, recordUsage } from '../shared/respond.ts';
@@ -155,7 +156,7 @@ const handleClientMessage = async (
 
     let result;
     try {
-      result = await responsesServe.generate({ payload, ctx, store, snapshotMode });
+      result = await responsesServe.generate({ payload, ctx, store, snapshotMode, headers: inboundHeadersForUpstream(c) });
     } catch (error) {
       if (signal.aborted || isClosed()) return;
       // The HTTP entry renders this verbatim envelope as a 400; WS surfaces the

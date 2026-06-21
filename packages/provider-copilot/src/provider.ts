@@ -10,14 +10,14 @@ import type { ResponsesBoundaryCtx } from './interceptors/responses/types.ts';
 import { emptyKnownModels, mergeKnownModels, projectKnownModels } from './known-models.ts';
 import { mergeClaudeVariants } from './merge-claude-variants.ts';
 import { copilotPublicModelId, copilotRequestedModelAliasTarget } from './model-name.ts';
-import { hasContext1mBeta, type ModelSelectionHints, resolveCopilotRawModel } from './model-selection.ts';
+import { CONTEXT_1M_BETA, type ModelSelectionHints, resolveCopilotRawModel } from './model-selection.ts';
 import { pricingForCopilotModelKey, pricingForCopilotPublicModelId } from './pricing.ts';
 import { readCopilotUpstreamState, type CopilotUpstreamState } from './state.ts';
 import type { CopilotRawModel } from './types.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
 import { parseChatCompletionsStream, type ChatCompletionsPayload, type ChatCompletionsStreamEvent } from '@floway-dev/protocols/chat-completions';
 import { type ModelEndpointKey, type ModelEndpoints, type ProtocolFrame, kindForEndpoints } from '@floway-dev/protocols/common';
-import { parseMessagesStream, type MessagesPayload, type MessagesStreamEvent } from '@floway-dev/protocols/messages';
+import { parseAnthropicBetaHeader, parseMessagesStream, type MessagesPayload, type MessagesStreamEvent } from '@floway-dev/protocols/messages';
 import { parseResponsesStream, type ResponsesInputItem, type ResponsesPayload, type ResponsesResult, type ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 import { COMPACTION_TRIGGER, compactionResponse, eventResult, getProviderRepo, readUpstreamError, streamingProviderCall, upstreamErrorToResponse, defaultsForProvider, resolveEffectiveFlags, type ExecuteResult, type ModelProvider, type ModelProviderInstance, type ProviderCallResult, type ProviderCompactionResult, type ProviderStreamResult, type TelemetryModelIdentity, type UpstreamCallOptions, type UpstreamFetchOptions, type UpstreamModel, type UpstreamRecord } from '@floway-dev/provider';
 
@@ -170,7 +170,7 @@ export const createCopilotProvider = async (record: UpstreamRecord): Promise<Mod
     body: Record<string, unknown>,
     signal: AbortSignal | undefined,
     rawModel: CopilotRawModel,
-    headers: Record<string, string> | undefined,
+    headers: Headers,
     opts: UpstreamCallOptions,
   ): Promise<ProviderCallResult> => {
     const response = await transport(
@@ -190,7 +190,7 @@ export const createCopilotProvider = async (record: UpstreamRecord): Promise<Mod
     body: Record<string, unknown>,
     signal: AbortSignal | undefined,
     rawModel: CopilotRawModel,
-    headers: Record<string, string> | undefined,
+    headers: Headers,
     parser: Parameters<typeof streamingProviderCall<TEvent>>[1],
     opts: UpstreamCallOptions,
   ) =>
@@ -260,14 +260,6 @@ export const createCopilotProvider = async (record: UpstreamRecord): Promise<Mod
     throw new Error(`Copilot boundary chain produced unexpected ExecuteResult shape '${result.type}'`);
   };
 
-  const messagesRawModel = (model: UpstreamModel, body: Omit<MessagesPayload, 'model'>, anthropicBeta: readonly string[] | undefined) =>
-    // Both the native Messages call and count_tokens select the same raw
-    // `messages` variant; they differ only in the upstream endpoint path.
-    rawModelFor(model, 'messages', {
-      context1m: hasContext1mBeta(anthropicBeta),
-      reasoningEffort: messagesReasoningEffort(body),
-    });
-
   const provider: ModelProvider = {
     getProvidedModels: async fetcher => {
       const fresh = await getProviderRepo().upstreams.getById(copilot.id);
@@ -300,11 +292,11 @@ export const createCopilotProvider = async (record: UpstreamRecord): Promise<Mod
       return finalizeCopilotModels(projectKnownModels(merged, now), upstreamFlags);
     },
     getPricingForModelKey: pricingForCopilotModelKey,
-    callChatCompletions: async (model, body, signal, headers, opts) => {
+    callChatCompletions: async (model, body, signal, opts) => {
       const rawModel = rawModelFor(model, 'chatCompletions', { reasoningEffort: chatReasoningEffort(body) });
       const ctx: ChatCompletionsBoundaryCtx = {
         payload: { ...body, model: model.id },
-        headers: { ...(headers ?? {}) },
+        headers: new Headers(opts.headers),
         model,
       };
       const result = await runInterceptors<ChatCompletionsBoundaryCtx, object, ExecuteResult<ProtocolFrame<ChatCompletionsStreamEvent>>>(
@@ -315,11 +307,11 @@ export const createCopilotProvider = async (record: UpstreamRecord): Promise<Mod
       );
       return lowerToStream(result, rawModel.id);
     },
-    callResponses: async (model, body, signal, headers, opts) => {
+    callResponses: async (model, body, signal, opts) => {
       const rawModel = rawModelFor(model, 'responses', { reasoningEffort: responsesReasoningEffort(body) });
       const ctx: ResponsesBoundaryCtx = {
         payload: { ...body, model: model.id },
-        headers: { ...(headers ?? {}) },
+        headers: new Headers(opts.headers),
         model,
       };
       const result = await runInterceptors<ResponsesBoundaryCtx, object, ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>>(
@@ -330,11 +322,11 @@ export const createCopilotProvider = async (record: UpstreamRecord): Promise<Mod
       );
       return lowerToStream(result, rawModel.id);
     },
-    callResponsesCompact: async (model, body, signal, headers, opts) => {
+    callResponsesCompact: async (model, body, signal, opts) => {
       const rawModel = rawModelFor(model, 'responses', { reasoningEffort: responsesReasoningEffort(body) });
       const ctx: ResponsesBoundaryCtx = {
         payload: { ...body, model: model.id },
-        headers: { ...(headers ?? {}) },
+        headers: new Headers(opts.headers),
         model,
       };
       return await runInterceptors<ResponsesBoundaryCtx, object, ProviderCompactionResult>(
@@ -360,13 +352,21 @@ export const createCopilotProvider = async (record: UpstreamRecord): Promise<Mod
         },
       );
     },
-    callMessages: async (model, body, signal, headers, anthropicBeta, opts) => {
-      const rawModel = messagesRawModel(model, body, anthropicBeta);
+    callMessages: async (model, body, signal, opts) => {
+      // Both the native Messages call and count_tokens select the same raw
+      // `messages` variant; they differ only in the upstream endpoint path.
+      // Variant selection runs BEFORE the boundary chain's allow-list filter
+      // mutates `anthropic-beta` on the wire, so we read the caller's
+      // untouched intent here.
+      const betas = parseAnthropicBetaHeader(opts.headers.get('anthropic-beta'));
+      const rawModel = rawModelFor(model, 'messages', {
+        context1m: betas.includes(CONTEXT_1M_BETA),
+        reasoningEffort: messagesReasoningEffort(body),
+      });
       const ctx: MessagesBoundaryCtx = {
         payload: { ...body, model: model.id },
-        headers: { ...(headers ?? {}) },
+        headers: new Headers(opts.headers),
         model,
-        ...(anthropicBeta !== undefined ? { anthropicBeta } : {}),
       };
       const result = await runInterceptors<MessagesBoundaryCtx, object, ExecuteResult<ProtocolFrame<MessagesStreamEvent>>>(
         ctx, {}, COPILOT_MESSAGES_BOUNDARY, async () => {
@@ -376,13 +376,16 @@ export const createCopilotProvider = async (record: UpstreamRecord): Promise<Mod
       );
       return lowerToStream(result, rawModel.id);
     },
-    callMessagesCountTokens: async (model, body, signal, headers, anthropicBeta, opts) => {
-      const rawModel = messagesRawModel(model, body, anthropicBeta);
+    callMessagesCountTokens: async (model, body, signal, opts) => {
+      const betas = parseAnthropicBetaHeader(opts.headers.get('anthropic-beta'));
+      const rawModel = rawModelFor(model, 'messages', {
+        context1m: betas.includes(CONTEXT_1M_BETA),
+        reasoningEffort: messagesReasoningEffort(body),
+      });
       const ctx: MessagesCountTokensBoundaryCtx = {
         payload: { ...body, model: model.id },
-        headers: { ...(headers ?? {}) },
+        headers: new Headers(opts.headers),
         model,
-        ...(anthropicBeta !== undefined ? { anthropicBeta } : {}),
       };
       const response = await runInterceptors<MessagesCountTokensBoundaryCtx, object, Response>(
         ctx, {}, COPILOT_MESSAGES_COUNT_TOKENS_BOUNDARY, async () => {
@@ -393,7 +396,7 @@ export const createCopilotProvider = async (record: UpstreamRecord): Promise<Mod
       );
       return { response, modelKey: rawModel.id };
     },
-    callEmbeddings: (model, body, signal, headers, opts) => call(copilotFetchEmbeddings, copilotEmbeddingsBody(body), signal, rawModelFor(model, 'embeddings'), headers, opts),
+    callEmbeddings: (model, body, signal, opts) => call(copilotFetchEmbeddings, copilotEmbeddingsBody(body), signal, rawModelFor(model, 'embeddings'), opts.headers, opts),
     // Copilot has no /images/... upstream. getProvidedModels never emits a
     // kind='image' model for Copilot, so these stubs are unreachable; they
     // exist only to satisfy the ModelProvider interface.

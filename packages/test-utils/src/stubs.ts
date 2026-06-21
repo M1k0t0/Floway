@@ -1,15 +1,18 @@
 import { directFetcher, type LlmTargetApi, type ModelProvider, type ModelProviderInstance, type ProviderCandidate, type ProviderModelRecord, type TelemetryModelIdentity, type UpstreamCallOptions, type UpstreamModel } from '@floway-dev/provider';
 
-// No-op UpstreamCallOptions for tests calling provider methods directly:
-// identity recordUpstreamLatency satisfies the contract without piping
-// latency anywhere; the fetcher uses runtime fetch so `globalThis.fetch`
-// spies still intercept; waitUntil drops the promise (the runtime would
-// have absorbed it in production).
-export const noopUpstreamCallOptions: UpstreamCallOptions = {
+// No-op UpstreamCallOptions factory for tests calling provider methods
+// directly: identity recordUpstreamLatency satisfies the contract without
+// piping latency anywhere; the fetcher uses runtime fetch so
+// `globalThis.fetch` spies still intercept; waitUntil drops the promise
+// (the runtime would have absorbed it in production). Each invocation hands
+// back a fresh `Headers` instance so tests that mutate the bag do not bleed
+// state across cases.
+export const noopUpstreamCallOptions = (): UpstreamCallOptions => ({
   fetcher: directFetcher,
   recordUpstreamLatency: <T>(promise: Promise<T>): Promise<T> => promise,
   waitUntil: () => {},
-};
+  headers: new Headers(),
+});
 
 export const stubUpstreamModel = (overrides: Partial<UpstreamModel> = {}): UpstreamModel => ({
   id: 'test-model',

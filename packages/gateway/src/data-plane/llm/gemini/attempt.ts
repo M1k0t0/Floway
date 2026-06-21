@@ -20,6 +20,7 @@ export interface GeminiAttemptGenerateArgs {
   readonly ctx: GatewayCtx;
   readonly store: StatefulResponsesStore;
   readonly candidate: ProviderCandidate;
+  readonly headers: Headers;
 }
 
 export interface GeminiAttemptCountTokensArgs {
@@ -27,12 +28,13 @@ export interface GeminiAttemptCountTokensArgs {
   readonly ctx: GatewayCtx;
   readonly store: StatefulResponsesStore;
   readonly candidate: ProviderCandidate;
+  readonly headers: Headers;
 }
 
 export const geminiAttempt = {
   generate: async (args: GeminiAttemptGenerateArgs): Promise<ExecuteResult<ProtocolFrame<GeminiStreamEvent>>> => {
-    const { payload, ctx, store, candidate } = args;
-    const invocation: GeminiInvocation = { payload, candidate, headers: {} };
+    const { payload, ctx, store, candidate, headers } = args;
+    const invocation: GeminiInvocation = { payload, candidate, headers };
     return await runInterceptors(invocation, ctx, geminiInterceptors, async () => {
       // Gemini has no native upstream target today — every targetApi we
       // pickTarget for is reached via translation. The dispatch threads each
@@ -47,7 +49,7 @@ export const geminiAttempt = {
           invocation.payload,
           p => translateGeminiViaMessages(p, transCtx),
           translated => messagesAttempt.generate({
-            payload: translated, ctx, store, candidate, inheritedInvocationHeaders: invocation.headers,
+            payload: translated, ctx, store, candidate, headers: invocation.headers,
           }),
         );
       }
@@ -56,7 +58,7 @@ export const geminiAttempt = {
           invocation.payload,
           p => translateGeminiViaResponses(p, transCtx),
           translated => responsesAttempt.generate({
-            payload: translated, ctx, store, candidate, snapshotMode: 'none', inheritedInvocationHeaders: invocation.headers,
+            payload: translated, ctx, store, candidate, snapshotMode: 'none', headers: invocation.headers,
           }),
         );
       }
@@ -65,7 +67,7 @@ export const geminiAttempt = {
           invocation.payload,
           p => translateGeminiViaChatCompletions(p, transCtx),
           translated => chatCompletionsAttempt.generate({
-            payload: translated, ctx, store, candidate, inheritedInvocationHeaders: invocation.headers,
+            payload: translated, ctx, store, candidate, headers: invocation.headers,
           }),
         );
       }
@@ -74,11 +76,11 @@ export const geminiAttempt = {
   },
 
   countTokens: async (args: GeminiAttemptCountTokensArgs): Promise<PlainResult> => {
-    const { payload, ctx, store, candidate } = args;
+    const { payload, ctx, store, candidate, headers } = args;
     if (candidate.targetApi !== 'messages') {
       throw new Error(`geminiAttempt.countTokens requires targetApi='messages', got '${candidate.targetApi}'`);
     }
-    const invocation: GeminiInvocation = { payload, candidate, headers: {} };
+    const invocation: GeminiInvocation = { payload, candidate, headers };
     return await runInterceptors(invocation, ctx, geminiCountTokensInterceptors, async () => {
       // Gemini countTokens has no native upstream; translate to Messages and
       // delegate to `messagesAttempt.countTokens`, then reshape the Messages
@@ -99,7 +101,7 @@ export const geminiAttempt = {
       const trip = await translateGeminiViaMessages(cleaned, transCtx);
       const { stream: _stream, ...target } = trip.target;
       const messagesResult = await messagesAttempt.countTokens({
-        payload: target, ctx, store, candidate, inheritedInvocationHeaders: invocation.headers,
+        payload: target, ctx, store, candidate, headers: invocation.headers,
       });
       return reshapeMessagesCountAsGemini(messagesResult);
     });

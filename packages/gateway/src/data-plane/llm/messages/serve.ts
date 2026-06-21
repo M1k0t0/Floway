@@ -12,19 +12,19 @@ export interface MessagesServeGenerateArgs {
   readonly payload: MessagesPayload;
   readonly ctx: GatewayCtx;
   readonly store: StatefulResponsesStore;
-  readonly anthropicBeta?: readonly string[];
+  readonly headers: Headers;
 }
 
 export interface MessagesServeCountTokensArgs {
   readonly payload: MessagesPayload;
   readonly ctx: GatewayCtx;
   readonly store: StatefulResponsesStore;
-  readonly anthropicBeta?: readonly string[];
+  readonly headers: Headers;
 }
 
 export const messagesServe = {
   generate: async (args: MessagesServeGenerateArgs): Promise<ExecuteResult<ProtocolFrame<MessagesStreamEvent>>> => {
-    const { payload, ctx, store, anthropicBeta } = args;
+    const { payload, ctx, store, headers } = args;
     const { candidates, sawModel } = await enumerateProviderCandidates({
       upstreamIds: ctx.upstreamIds,
       model: payload.model,
@@ -52,11 +52,11 @@ export const messagesServe = {
         'generate',
       );
     }
-    return await messagesAttempt.generate({ payload, ctx, store, candidate, anthropicBeta });
+    return await messagesAttempt.generate({ payload, ctx, store, candidate, headers });
   },
 
   countTokens: async (args: MessagesServeCountTokensArgs): Promise<ExecuteResult<ProtocolFrame<MessagesStreamEvent>> | PlainResult> => {
-    const { payload, ctx, store, anthropicBeta } = args;
+    const { payload, ctx, store, headers } = args;
     const { candidates, sawModel } = await enumerateProviderCandidates({
       upstreamIds: ctx.upstreamIds,
       model: payload.model,
@@ -79,6 +79,6 @@ export const messagesServe = {
         'countTokens',
       );
     }
-    return await messagesAttempt.countTokens({ payload, ctx, store, candidate, anthropicBeta });
+    return await messagesAttempt.countTokens({ payload, ctx, store, candidate, headers });
   },
 };

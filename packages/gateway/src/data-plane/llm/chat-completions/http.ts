@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 
 import { respondChatCompletions } from './respond.ts';
 import { chatCompletionsServe } from './serve.ts';
+import { inboundHeadersForUpstream } from '../../shared/inbound-headers.ts';
 import { createNonResponsesSourceStore } from '../responses/items/store.ts';
 import { createGatewayCtxFromHono } from '../shared/gateway-ctx.ts';
 import { providerModelsUnavailableResponse } from '../shared/upstream-models-error.ts';
@@ -35,7 +36,7 @@ export const chatCompletionsHttp = {
       const includeUsageChunk = payload.stream_options?.include_usage === true;
       const ctx = createGatewayCtxFromHono(c, wantsStream);
       const store = createNonResponsesSourceStore(ctx.apiKeyId);
-      const result = await chatCompletionsServe.generate({ payload, ctx, store });
+      const result = await chatCompletionsServe.generate({ payload, ctx, store, headers: inboundHeadersForUpstream(c) });
       const { response } = await respondChatCompletions(c, result, wantsStream, includeUsageChunk, ctx);
       return response;
     } catch (error) {

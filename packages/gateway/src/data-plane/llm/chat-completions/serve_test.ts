@@ -9,7 +9,7 @@ import type { ChatCompletionsPayload, ChatCompletionsStreamEvent } from '@floway
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { MessagesStreamEvent } from '@floway-dev/protocols/messages';
 import type { ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
-import { directFetcher, type ProviderStreamResult } from '@floway-dev/provider';
+import { directFetcher, type ProviderStreamResult, type UpstreamCallOptions } from '@floway-dev/provider';
 import { assert, assertEquals, stubProvider, stubUpstreamModel } from '@floway-dev/test-utils';
 
 // Mock the candidates seam so each test hands the serve exactly the
@@ -108,9 +108,9 @@ const makeProtocolFrames = async function* <TEvent>(events: readonly TEvent[]): 
 const makeCandidate = (overrides: {
   upstream?: string;
   targetApi?: ProviderCandidate['targetApi'];
-  callChatCompletions?: (model: unknown, body: unknown, signal?: AbortSignal, headers?: Record<string, string>) => Promise<ProviderStreamResult<ChatCompletionsStreamEvent>>;
-  callMessages?: (model: unknown, body: unknown, signal?: AbortSignal, headers?: Record<string, string>, anthropicBeta?: readonly string[]) => Promise<ProviderStreamResult<MessagesStreamEvent>>;
-  callResponses?: (model: unknown, body: unknown, signal?: AbortSignal, headers?: Record<string, string>) => Promise<ProviderStreamResult<ResponsesStreamEvent>>;
+  callChatCompletions?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderStreamResult<ChatCompletionsStreamEvent>>;
+  callMessages?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderStreamResult<MessagesStreamEvent>>;
+  callResponses?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderStreamResult<ResponsesStreamEvent>>;
 } = {}): ProviderCandidate => {
   const upstream = overrides.upstream ?? 'up_test';
   const targetApi = overrides.targetApi ?? 'chat-completions';
@@ -154,6 +154,7 @@ test('generate routes a native Chat Completions candidate end to end', async () 
     payload: makePayload(),
     ctx: makeGatewayCtx(),
     store: createNonResponsesSourceStore(API_KEY_ID),
+    headers: new Headers(),
   });
 
   assertEquals(result.type, 'events');
@@ -174,6 +175,7 @@ test('generate translates through the Messages target when only that endpoint is
     payload: makePayload(),
     ctx: makeGatewayCtx(),
     store: createNonResponsesSourceStore(API_KEY_ID),
+    headers: new Headers(),
   });
 
   assertEquals(result.type, 'events');
@@ -193,6 +195,7 @@ test('generate translates through the Responses target when only that endpoint i
     payload: makePayload(),
     ctx: makeGatewayCtx(),
     store: createNonResponsesSourceStore(API_KEY_ID),
+    headers: new Headers(),
   });
 
   assertEquals(result.type, 'events');
@@ -204,7 +207,7 @@ test('generate translates through the Responses target when only that endpoint i
 test('generate stops at the first candidate even when it yields an upstream error', async () => {
   installRepo();
   const firstError = new Response(JSON.stringify({ error: { message: 'nope' } }), {
-    status: 502, headers: { 'content-type': 'application/json' },
+    status: 502, headers: new Headers({ 'content-type': 'application/json' }),
   });
   const firstCall = vi.fn(async (): Promise<ProviderStreamResult<ChatCompletionsStreamEvent>> => ({
     ok: false, response: firstError, modelKey: 'first-key',
@@ -221,6 +224,7 @@ test('generate stops at the first candidate even when it yields an upstream erro
     payload: makePayload(),
     ctx: makeGatewayCtx(),
     store: createNonResponsesSourceStore(API_KEY_ID),
+    headers: new Headers(),
   });
 
   // An upstream error from the first candidate IS the final answer — the
@@ -247,6 +251,7 @@ test('generate is a routing no-op when the payload carries no reasoning carriers
     payload: makePayload({ messages: [{ role: 'user', content: 'hi' }] }),
     ctx: makeGatewayCtx(),
     store: createNonResponsesSourceStore(API_KEY_ID),
+    headers: new Headers(),
   });
 
   assertEquals(result.type, 'events');
@@ -263,6 +268,7 @@ test('generate renders model-missing when no candidates are available', async ()
     payload: makePayload({ model: 'unknown-model' }),
     ctx: makeGatewayCtx(),
     store: createNonResponsesSourceStore(API_KEY_ID),
+    headers: new Headers(),
   });
 
   assertEquals(result.type, 'upstream-error');

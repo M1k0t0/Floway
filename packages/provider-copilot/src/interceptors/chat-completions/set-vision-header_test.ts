@@ -15,7 +15,7 @@ const okEvents = (): Promise<ExecuteResult<ProtocolFrame<ChatCompletionsStreamEv
 
 const invocation = (payload: ChatCompletionsPayload): ChatCompletionsBoundaryCtx => ({
   payload,
-  headers: {},
+  headers: new Headers(),
   model: stubUpstreamModel({ endpoints: { chatCompletions: {} } }),
 });
 
@@ -35,7 +35,7 @@ test('Chat Completions vision header set when an image_url content part is prese
 
   await withVisionHeaderSet(ctx, stubRequest, okEvents);
 
-  assertEquals(ctx.headers['copilot-vision-request'], 'true');
+  assertEquals(ctx.headers.get('copilot-vision-request'), 'true');
 });
 
 test('Chat Completions vision header absent when content is pure text', async () => {
@@ -49,5 +49,5 @@ test('Chat Completions vision header absent when content is pure text', async ()
 
   await withVisionHeaderSet(ctx, stubRequest, okEvents);
 
-  assertEquals('copilot-vision-request' in ctx.headers, false);
+  assertEquals(ctx.headers.has('copilot-vision-request'), false);
 });

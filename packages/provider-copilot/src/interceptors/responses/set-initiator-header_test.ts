@@ -15,7 +15,7 @@ const okEvents = (): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>>
 
 const invocation = (payload: ResponsesPayload): ResponsesBoundaryCtx => ({
   payload,
-  headers: {},
+  headers: new Headers(),
   model: stubUpstreamModel({ endpoints: { responses: {} } }),
 });
 
@@ -33,7 +33,7 @@ test('Responses initiator is user when the last input item is a plain user messa
 
   await withInitiatorHeaderSet(ctx, stubRequest, okEvents);
 
-  assertEquals(ctx.headers['x-initiator'], 'user');
+  assertEquals(ctx.headers.get('x-initiator'), 'user');
 });
 
 test('Responses initiator is user when input is a plain string', async () => {
@@ -44,7 +44,7 @@ test('Responses initiator is user when input is a plain string', async () => {
 
   await withInitiatorHeaderSet(ctx, stubRequest, okEvents);
 
-  assertEquals(ctx.headers['x-initiator'], 'user');
+  assertEquals(ctx.headers.get('x-initiator'), 'user');
 });
 
 test('Responses initiator is user when input is an empty array', async () => {
@@ -52,7 +52,7 @@ test('Responses initiator is user when input is an empty array', async () => {
 
   await withInitiatorHeaderSet(ctx, stubRequest, okEvents);
 
-  assertEquals(ctx.headers['x-initiator'], 'user');
+  assertEquals(ctx.headers.get('x-initiator'), 'user');
 });
 
 test('Responses initiator is agent when the last input item is a function_call_output', async () => {
@@ -81,7 +81,7 @@ test('Responses initiator is agent when the last input item is a function_call_o
 
   await withInitiatorHeaderSet(ctx, stubRequest, okEvents);
 
-  assertEquals(ctx.headers['x-initiator'], 'agent');
+  assertEquals(ctx.headers.get('x-initiator'), 'agent');
 });
 
 test('Responses initiator is agent when the last input item is a custom_tool_call_output', async () => {
@@ -109,7 +109,7 @@ test('Responses initiator is agent when the last input item is a custom_tool_cal
 
   await withInitiatorHeaderSet(ctx, stubRequest, okEvents);
 
-  assertEquals(ctx.headers['x-initiator'], 'agent');
+  assertEquals(ctx.headers.get('x-initiator'), 'agent');
 });
 
 test('Responses initiator is agent when the last input item is a hosted-tool output without a role field', async () => {
@@ -131,7 +131,7 @@ test('Responses initiator is agent when the last input item is a hosted-tool out
 
   await withInitiatorHeaderSet(ctx, stubRequest, okEvents);
 
-  assertEquals(ctx.headers['x-initiator'], 'agent');
+  assertEquals(ctx.headers.get('x-initiator'), 'agent');
 });
 
 test('Responses initiator is agent when the last input item is an assistant message replay', async () => {
@@ -153,5 +153,5 @@ test('Responses initiator is agent when the last input item is an assistant mess
 
   await withInitiatorHeaderSet(ctx, stubRequest, okEvents);
 
-  assertEquals(ctx.headers['x-initiator'], 'agent');
+  assertEquals(ctx.headers.get('x-initiator'), 'agent');
 });

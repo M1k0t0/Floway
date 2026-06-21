@@ -25,7 +25,7 @@ const stubCtx: GatewayCtx = {
 const invocation = (payload: ChatCompletionsPayload, enabledFlags: ReadonlySet<string> = new Set(['vendor-deepseek'])): ChatCompletionsInvocation => ({
   payload,
   candidate: stubProviderCandidate({ targetApi: 'chat-completions', binding: { enabledFlags } }),
-  headers: {},
+  headers: new Headers(),
 });
 
 const baseRequest = (): ChatCompletionsPayload => ({

@@ -22,13 +22,13 @@ export const injectSessionId = async <TResult>(
   _request: object,
   run: () => Promise<TResult>,
 ): Promise<TResult> => {
-  if (ctx.headers['session-id'] || ctx.headers['session_id']) return await run();
+  if (ctx.headers.get('session-id') || ctx.headers.get('session_id')) return await run();
 
   const instructions = typeof ctx.payload.instructions === 'string' ? ctx.payload.instructions : '';
   const firstUser = firstUserMessageText(ctx.payload.input);
   // U+0001 separates the two seed components so an empty instructions can't
   // collide with an empty first-user-message via prefix concatenation.
-  ctx.headers = { ...ctx.headers, 'session-id': await sha256Uuid(`${instructions}${firstUser}`) };
+  ctx.headers.set('session-id', await sha256Uuid(`${instructions}${firstUser}`));
   return await run();
 };
 

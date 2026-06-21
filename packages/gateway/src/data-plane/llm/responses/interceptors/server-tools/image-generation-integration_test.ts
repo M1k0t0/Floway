@@ -40,13 +40,13 @@ vi.mock('../../../../providers/registry.ts', () => ({
         upstreamModel: { id: 'gpt-image-2', endpoints: { imagesGenerations: {}, imagesEdits: {} } },
         provider: {
           getPricingForModelKey: () => null,
-          callImagesGenerations: async (_model: unknown, body: Record<string, unknown>, _signal: unknown, _headers: unknown, opts: { recordUpstreamLatency: <T>(p: Promise<T>) => Promise<T> }) => {
+          callImagesGenerations: async (_model: unknown, body: Record<string, unknown>, _signal: unknown, opts: { recordUpstreamLatency: <T>(p: Promise<T>) => Promise<T> }) => {
             stub.generationsCalls.push(body);
             const response = stub.nextGenerations.shift();
             if (response === undefined) throw new Error('test did not enqueue a generations response');
             return { response: await opts.recordUpstreamLatency(Promise.resolve(response)), modelKey: 'gpt-image-2' };
           },
-          callImagesEdits: async (_model: unknown, form: FormData, _signal: unknown, _headers: unknown, opts: { recordUpstreamLatency: <T>(p: Promise<T>) => Promise<T> }) => {
+          callImagesEdits: async (_model: unknown, form: FormData, _signal: unknown, opts: { recordUpstreamLatency: <T>(p: Promise<T>) => Promise<T> }) => {
             stub.editsForms.push(form);
             const response = stub.nextEdits.shift();
             if (response === undefined) throw new Error('test did not enqueue an edits response');
@@ -71,10 +71,10 @@ const emptyResult = (status: ResponsesResult['status']): ResponsesResult => ({
 });
 
 const jsonResponse = (b64: string): Response =>
-  new Response(JSON.stringify({ data: [{ b64_json: b64 }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  new Response(JSON.stringify({ data: [{ b64_json: b64 }] }), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) });
 
 const sseResponse = (lines: string[]): Response =>
-  new Response(lines.map(l => `data: ${l}\n\n`).join(''), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+  new Response(lines.map(l => `data: ${l}\n\n`).join(''), { status: 200, headers: new Headers({ 'content-type': 'text/event-stream' }) });
 
 const rateLimitResponse = (retryAfterMs: number | null): Response => {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
@@ -131,7 +131,7 @@ const makeCtx = (input: unknown[], action: 'generate' | 'edit' | 'auto' = 'auto'
     stageInputs: false,
   }),
   payload: { model: 'orchestrator', input, tools: [{ type: 'image_generation', action, ...extraTool }] } as never,
-  headers: {},
+  headers: new Headers(),
 });
 const gatewayCtx = (): GatewayCtx => ({
   apiKeyId: 'test-key',
@@ -290,7 +290,7 @@ test('does not retry non-rate-limit upstream failures', async () => {
   stub.nextGenerations = [
     new Response(
       JSON.stringify({ error: { code: 'invalid_value', type: 'invalid_request_error', message: 'bad size' } }),
-      { status: 400, headers: { 'content-type': 'application/json' } },
+      { status: 400, headers: new Headers({ 'content-type': 'application/json' }) },
     ),
   ];
   const result = await shim(makeCtx([{ type: 'message', role: 'user', content: 'draw' }]), gatewayCtx(), scriptedRun([

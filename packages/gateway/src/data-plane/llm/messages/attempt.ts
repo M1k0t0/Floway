@@ -4,7 +4,7 @@ import { chatCompletionsAttempt } from '../chat-completions/attempt.ts';
 import { responsesAttempt } from '../responses/attempt.ts';
 import { rewriteStoredResponsesItemsForCandidate } from '../responses/items/rewrite.ts';
 import type { StatefulResponsesStore } from '../responses/items/store.ts';
-import { providerStreamResultToExecuteResult } from '../shared/attempt-helpers.ts';
+import { providerStreamResultToExecuteResult, buildUpstreamCallOptions } from '../shared/attempt-helpers.ts';
 import type { ProviderCandidate } from '../shared/candidates.ts';
 import { tryCatchLlmServeFailure } from '../shared/errors.ts';
 import type { GatewayCtx } from '../shared/gateway-ctx.ts';
@@ -23,9 +23,7 @@ export interface MessagesAttemptGenerateArgs {
   readonly ctx: GatewayCtx;
   readonly store: StatefulResponsesStore;
   readonly candidate: ProviderCandidate;
-  readonly anthropicBeta?: readonly string[];
-  // See responses/attempt.ts for the inherited-headers contract.
-  readonly inheritedInvocationHeaders?: Record<string, string>;
+  readonly headers: Headers;
 }
 
 export interface MessagesAttemptCountTokensArgs {
@@ -33,20 +31,18 @@ export interface MessagesAttemptCountTokensArgs {
   readonly ctx: GatewayCtx;
   readonly store: StatefulResponsesStore;
   readonly candidate: ProviderCandidate;
-  readonly anthropicBeta?: readonly string[];
-  readonly inheritedInvocationHeaders?: Record<string, string>;
+  readonly headers: Headers;
 }
 
 export const messagesAttempt = {
   generate: async (args: MessagesAttemptGenerateArgs): Promise<ExecuteResult<ProtocolFrame<MessagesStreamEvent>>> => {
-    const { payload, ctx, store, candidate, anthropicBeta, inheritedInvocationHeaders } = args;
+    const { payload, ctx, store, candidate, headers } = args;
     const rewritten = await rewriteOrRenderMessagesFailure(payload, store, candidate);
     if (rewritten.failure) return rewritten.failure;
     const invocation: MessagesInvocation = {
       payload: rewritten.payload,
       candidate,
-      ...(anthropicBeta !== undefined ? { anthropicBeta } : {}),
-      headers: { ...(inheritedInvocationHeaders ?? {}) },
+      headers,
     };
     return await runInterceptors(invocation, ctx, messagesInterceptors, async () => {
       if (candidate.targetApi === 'messages') {
@@ -56,9 +52,7 @@ export const messagesAttempt = {
           candidate.binding.upstreamModel,
           body,
           ctx.abortSignal,
-          invocation.headers,
-          invocation.anthropicBeta,
-          { fetcher: candidate.fetcher, recordUpstreamLatency: recorder.record, waitUntil: ctx.backgroundScheduler },
+          buildUpstreamCallOptions(candidate, ctx, recorder.record, invocation.headers),
         );
         return await providerStreamResultToExecuteResult(providerResult, candidate, ctx, recorder.durationMs());
       }
@@ -67,7 +61,7 @@ export const messagesAttempt = {
           invocation.payload,
           p => translateMessagesViaResponses(p, { model: candidate.binding.upstreamModel.id }),
           translated => responsesAttempt.generate({
-            payload: translated, ctx, store, candidate, snapshotMode: 'none', inheritedInvocationHeaders: invocation.headers,
+            payload: translated, ctx, store, candidate, snapshotMode: 'none', headers: invocation.headers,
           }),
         );
       }
@@ -76,7 +70,7 @@ export const messagesAttempt = {
           invocation.payload,
           p => translateMessagesViaChatCompletions(p, { model: candidate.binding.upstreamModel.id }),
           translated => chatCompletionsAttempt.generate({
-            payload: translated, ctx, store, candidate, inheritedInvocationHeaders: invocation.headers,
+            payload: translated, ctx, store, candidate, headers: invocation.headers,
           }),
         );
       }
@@ -85,7 +79,7 @@ export const messagesAttempt = {
   },
 
   countTokens: async (args: MessagesAttemptCountTokensArgs): Promise<PlainResult> => {
-    const { payload, ctx, store, candidate, anthropicBeta, inheritedInvocationHeaders } = args;
+    const { payload, ctx, store, candidate, headers } = args;
     if (candidate.targetApi !== 'messages') {
       throw new Error(`messagesAttempt.countTokens requires targetApi='messages', got '${candidate.targetApi}'`);
     }
@@ -98,8 +92,7 @@ export const messagesAttempt = {
     const invocation: MessagesInvocation = {
       payload: rewritten.payload,
       candidate,
-      ...(anthropicBeta !== undefined ? { anthropicBeta } : {}),
-      headers: { ...(inheritedInvocationHeaders ?? {}) },
+      headers,
     };
     const recorder = createUpstreamLatencyRecorder();
     const response = await runInterceptors(invocation, ctx, messagesCountTokensInterceptors, async () => {
@@ -108,9 +101,7 @@ export const messagesAttempt = {
         candidate.binding.upstreamModel,
         body,
         ctx.abortSignal,
-        invocation.headers,
-        invocation.anthropicBeta,
-        { fetcher: candidate.fetcher, recordUpstreamLatency: recorder.record, waitUntil: ctx.backgroundScheduler },
+        buildUpstreamCallOptions(candidate, ctx, recorder.record, invocation.headers),
       );
       return response;
     });

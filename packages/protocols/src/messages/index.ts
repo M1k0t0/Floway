@@ -338,3 +338,10 @@ export interface MessagesErrorEvent {
 }
 
 export { parseMessagesStream, type ParseMessagesStreamOptions } from './stream.ts';
+
+// Parse an inbound `anthropic-beta` header into the comma-separated beta
+// slice that variant selection and policy filters consume. Returns an empty
+// array for a null/empty header so callers can `.includes(...)` without an
+// extra guard.
+export const parseAnthropicBetaHeader = (raw: string | null | undefined): readonly string[] =>
+  raw ? raw.split(',').map(part => part.trim()).filter(part => part.length > 0) : [];
