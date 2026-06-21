@@ -11,10 +11,11 @@ import { type Fetcher, type UpstreamModel } from '@floway-dev/provider';
 export interface CodexRawModel {
   id: string;
   display_name: string;
-  // Per-request hard context window.
+  // Per-request context window. Upstream also returns a sibling
+  // `max_context_window` field as the upper bound for config overrides
+  // (https://github.com/openai/codex/blob/d66708232299bdbf373ec55b0d6b938c246cfa60/codex-rs/protocol/src/openai_models.rs#L383-L386);
+  // floway has no override path, so only the operational value is kept.
   context_window: number;
-  // Plan-level upper bound; used when context_window is unset.
-  max_context_window: number;
 }
 
 // `fetcher` is required so the catalog refresh traverses the same proxy/
@@ -42,16 +43,17 @@ export const fetchCodexCatalog = async (opts: { accessToken: string; accountId: 
 
 const isPlainRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
+// Fail loud on malformed upstream catalog responses: a missing field
+// signals an upstream contract change we need to notice.
 const assertRawModel = (value: unknown): CodexRawModel => {
   if (!isPlainRecord(value)) throw new TypeError('Codex model entry is not an object');
   const slug = value.slug;
   if (typeof slug !== 'string') throw new TypeError('Codex model entry missing slug');
-  return {
-    id: slug,
-    display_name: typeof value.display_name === 'string' ? value.display_name : slug,
-    context_window: typeof value.context_window === 'number' ? value.context_window : 0,
-    max_context_window: typeof value.max_context_window === 'number' ? value.max_context_window : 0,
-  };
+  const display_name = value.display_name;
+  if (typeof display_name !== 'string') throw new TypeError(`Codex model entry ${slug} missing display_name`);
+  const context_window = value.context_window;
+  if (typeof context_window !== 'number') throw new TypeError(`Codex model entry ${slug} missing context_window`);
+  return { id: slug, display_name, context_window };
 };
 
 // Codex exposes only the Responses endpoint. Pricing is looked up from the
@@ -69,7 +71,7 @@ export const codexRawToUpstreamModel = (raw: CodexRawModel, enabledFlags: Readon
     owned_by: 'openai',
     kind: 'chat',
     limits: {
-      max_context_window_tokens: raw.context_window || raw.max_context_window || undefined,
+      max_context_window_tokens: raw.context_window,
     },
     endpoints: { responses: {} },
     enabledFlags,

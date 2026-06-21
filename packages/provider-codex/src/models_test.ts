@@ -19,8 +19,8 @@ describe('fetchCodexCatalog', () => {
     }));
     const catalog = await fetchCodexCatalog({ accessToken: 'at', accountId: 'acc', fetcher: directFetcher });
     expect(catalog).toHaveLength(3);
-    expect(catalog[0]).toEqual({ id: 'gpt-5.4', display_name: 'GPT-5.4', context_window: 272000, max_context_window: 1000000 });
-    expect(catalog[2]).toEqual({ id: 'codex-auto-review', display_name: 'Codex Auto Review', context_window: 272000, max_context_window: 1000000 });
+    expect(catalog[0]).toEqual({ id: 'gpt-5.4', display_name: 'GPT-5.4', context_window: 272000 });
+    expect(catalog[2]).toEqual({ id: 'codex-auto-review', display_name: 'Codex Auto Review', context_window: 272000 });
     expect(spy).toHaveBeenCalledTimes(1);
     const [url, init] = spy.mock.calls[0];
     expect(url).toBe(`https://chatgpt.com/backend-api/codex/models?client_version=${CODEX_CLI_VERSION}`);
@@ -46,6 +46,16 @@ describe('fetchCodexCatalog', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(okJson({ models: [{ display_name: 'no slug here' }] }));
     await expect(fetchCodexCatalog({ accessToken: 'at', accountId: 'acc', fetcher: directFetcher })).rejects.toThrow(/slug/);
   });
+
+  test('throws on entry missing display_name', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(okJson({ models: [{ slug: 'gpt-x', context_window: 1 }] }));
+    await expect(fetchCodexCatalog({ accessToken: 'at', accountId: 'acc', fetcher: directFetcher })).rejects.toThrow(/display_name/);
+  });
+
+  test('throws on entry missing context_window', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(okJson({ models: [{ slug: 'gpt-x', display_name: 'GPT-X' }] }));
+    await expect(fetchCodexCatalog({ accessToken: 'at', accountId: 'acc', fetcher: directFetcher })).rejects.toThrow(/context_window/);
+  });
 });
 
 describe('codexRawToUpstreamModel', () => {
@@ -55,7 +65,7 @@ describe('codexRawToUpstreamModel', () => {
   const noFlags: ReadonlySet<string> = new Set();
 
   test('shapes raw → UpstreamModel with responses-only endpoint and per-request context window', () => {
-    const m = codexRawToUpstreamModel({ id: 'gpt-5.4', display_name: 'GPT-5.4', context_window: 272000, max_context_window: 1000000 }, noFlags);
+    const m = codexRawToUpstreamModel({ id: 'gpt-5.4', display_name: 'GPT-5.4', context_window: 272000 }, noFlags);
     expect(m.id).toBe('gpt-5.4');
     expect(m.display_name).toBe('GPT-5.4');
     expect(m.endpoints).toEqual({ responses: {} });
@@ -64,26 +74,21 @@ describe('codexRawToUpstreamModel', () => {
     expect(m.owned_by).toBe('openai');
   });
 
-  test('falls back to max_context_window when context_window is zero', () => {
-    const m = codexRawToUpstreamModel({ id: 'm', display_name: 'm', context_window: 0, max_context_window: 50000 }, noFlags);
-    expect(m.limits.max_context_window_tokens).toBe(50000);
-  });
-
   test('attaches OpenAI-API-rate cost for known slugs and treats codex-auto-review as gpt-5.4', () => {
-    const flagship = codexRawToUpstreamModel({ id: 'gpt-5.4', display_name: 'GPT-5.4', context_window: 272000, max_context_window: 1000000 }, noFlags);
+    const flagship = codexRawToUpstreamModel({ id: 'gpt-5.4', display_name: 'GPT-5.4', context_window: 272000 }, noFlags);
     expect(flagship.cost).toEqual({ input: 2.5, input_cache_read: 0.25, output: 15 });
-    const review = codexRawToUpstreamModel({ id: 'codex-auto-review', display_name: 'Codex Auto Review', context_window: 272000, max_context_window: 1000000 }, noFlags);
+    const review = codexRawToUpstreamModel({ id: 'codex-auto-review', display_name: 'Codex Auto Review', context_window: 272000 }, noFlags);
     expect(review.cost).toEqual(flagship.cost);
   });
 
   test('omits cost for unknown slugs (forward-compat with new upstream models)', () => {
-    const m = codexRawToUpstreamModel({ id: 'gpt-future-unreleased', display_name: 'X', context_window: 1, max_context_window: 1 }, noFlags);
+    const m = codexRawToUpstreamModel({ id: 'gpt-future-unreleased', display_name: 'X', context_window: 1 }, noFlags);
     expect(m.cost).toBeUndefined();
   });
 
   test('threads the supplied enabledFlags onto the produced model', () => {
     const flags: ReadonlySet<string> = new Set(['responses-web-search-shim']);
-    const m = codexRawToUpstreamModel({ id: 'gpt-5.4', display_name: 'GPT-5.4', context_window: 272000, max_context_window: 1000000 }, flags);
+    const m = codexRawToUpstreamModel({ id: 'gpt-5.4', display_name: 'GPT-5.4', context_window: 272000 }, flags);
     expect(m.enabledFlags).toBe(flags);
   });
 });
