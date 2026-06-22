@@ -229,31 +229,27 @@ active version id, the active deployment timestamp, the latest applied
 migration, and the migrations this deploy will apply (or that there are
 none).
 
-If migrations are pending, take an explicit D1 backup to a temp file
-outside the repo so the working tree stays clean:
+If migrations are pending, capture a Time Travel bookmark of the current
+database state so a rollback can restore to that exact point:
 
 ```bash
-pnpm wrangler d1 export <DB_NAME> --remote \
-  --output "${TMPDIR:-/tmp}/<DB_NAME>-$(date -u +%Y%m%dT%H%M%SZ).sql"
+pnpm wrangler d1 time-travel info <DB_NAME> --json
 ```
 
-The export includes `password_hash` for every user (active and
-soft-deleted) — treat the file as a credential bundle. Anyone with it
-can sign in as every user whose password has not rotated since.
+The output is `{ "bookmark": "..." }`; that bookmark string is the
+restore target. Nothing leaves Cloudflare, and D1 retains bookmarks for
+30 days.
 
-Report the resolved backup path, then give the user two rollback commands,
+Report the captured bookmark, then give the user two rollback commands,
 in this order:
 
-- Restore the database from that dump, e.g. `pnpm wrangler d1 execute
-  <DB_NAME> --remote --file <backup-path>` (drop the migrated tables first
-  if the dump's `CREATE`s would collide), or `pnpm wrangler d1 time-travel
-  restore <DB_NAME> --bookmark <bookmark>` if a pre-deploy bookmark was
-  captured.
+- Restore the database: `pnpm wrangler d1 time-travel restore <DB_NAME>
+  --bookmark <bookmark>`.
 - Roll back the Worker code: `pnpm wrangler rollback <PREVIOUS_VERSION_ID>`.
 
-If no migrations are pending, skip the backup and the database-rollback
-command; give only the code-rollback command and proceed straight to
-Step 3.
+If no migrations are pending, skip the bookmark capture and the
+database-rollback command; give only the code-rollback command and
+proceed straight to Step 3.
 
 **Step 3 — deploy with one chained command.** Migrate (when needed) and
 publish in the same command so the system spends as little time as
@@ -283,8 +279,8 @@ Worker-first route list) — so plain code rollback stays safe; D1 state is
 rolled back separately as above.
 
 A complete deploy fits in a strict turn budget: **three agent turns when
-migrations are pending** (Step 1 = gather, Step 2 = backup + report + two
-rollback commands, Step 3 = deploy) and **two agent turns when no
+migrations are pending** (Step 1 = gather, Step 2 = bookmark + report +
+two rollback commands, Step 3 = deploy) and **two agent turns when no
 migrations are pending** (Step 2 collapses into Turn 1: gather + report +
 single code-rollback command; Turn 2 = deploy). A turn boundary in this
 flow exists only because a tool result has to arrive before the next tool
