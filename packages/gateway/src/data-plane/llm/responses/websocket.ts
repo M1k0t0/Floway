@@ -153,7 +153,7 @@ const handleClientMessage = async (
     const payload = responsesPayloadFromClientSource(source);
     const ctx = createGatewayCtxFromHono(c, { wantsStream: true, downstreamAbortController });
     const store = session.createStore(payload.store ?? undefined);
-    const snapshotMode = payload.store === false ? 'none' : 'append';
+    const snapshotMode = 'append';
 
     let result;
     try {
