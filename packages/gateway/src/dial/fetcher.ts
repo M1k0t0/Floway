@@ -109,10 +109,12 @@ export const createFetcher = (input: CreateFetcherInput): Fetcher => {
       return proxied;
     };
     const errors: unknown[] = [];
+    const logContext = backendApiLogContext(input, url, effectiveInit, list);
 
     const active = await input.repo.proxyBackoffs.listForUpstream(input.upstreamId);
     const now = Math.floor(Date.now() / 1000);
     const skip = new Set(active.filter(b => b.expiresAt > now).map(b => b.proxyId));
+    logBackendApi(logContext, 'info', 'start', { active_backoff_proxy_ids: [...skip] });
 
     // Track which entries have already been attempted in this call so the
     // second pass only retries the ones we actively skipped. Without this,
@@ -123,13 +125,13 @@ export const createFetcher = (input: CreateFetcherInput): Fetcher => {
     for (const id of list) {
       if (skip.has(id)) continue;
       triedThisCall.add(id);
-      const result = await tryOne(id, input, proxiedFor, url, effectiveInit, errors, recordUpstreamLatency);
+      const result = await tryOne(id, input, proxiedFor, url, effectiveInit, errors, recordUpstreamLatency, logContext);
       if (result) return result;
     }
 
     for (const id of list) {
       if (triedThisCall.has(id)) continue;
-      const result = await tryOne(id, input, proxiedFor, url, effectiveInit, errors, recordUpstreamLatency);
+      const result = await tryOne(id, input, proxiedFor, url, effectiveInit, errors, recordUpstreamLatency, logContext);
       if (result) return result;
     }
 
@@ -174,15 +176,20 @@ const tryOne = async (
   init: RequestInit,
   errors: unknown[],
   recordUpstreamLatency: (<T>(promise: Promise<T>) => Promise<T>) | undefined,
+  logContext: BackendApiLogContext | null,
 ): Promise<Response | null> => {
   const wrap = recordUpstreamLatency ?? (<T>(p: Promise<T>) => p);
   try {
     if (id === DIRECT_PROXY_ID) {
+      logBackendApi(logContext, 'info', 'attempt', { route: 'direct', proxy_id: null });
       // Direct egress is the runtime's fetch — it never raises ProxyDialError,
       // so we don't touch the backoff table for this entry.
-      return await wrap(input.runDirect(url, init));
+      const response = await wrap(input.runDirect(url, init));
+      logBackendApi(logContext, 'info', 'result', { route: 'direct', proxy_id: null, status: response.status });
+      return response;
     }
     const config = input.proxyById.get(id);
+    logBackendApi(logContext, 'info', 'attempt', { route: 'proxy', proxy_id: id, proxy_kind: config?.config.kind ?? null });
     if (!config) {
       // The proxies catalog was loaded once at the top of the request, but
       // an admin can delete a row mid-flight. Treat the missing id as a
@@ -191,7 +198,9 @@ const tryOne = async (
       // sibling entries further down the list). We don't write to backoff
       // here — the row is gone, and the upstream's fallback_list will
       // surface the dangling reference next time the dashboard renders it.
-      errors.push(new ProxyDialError(`unknown proxy id in fallback list: ${id}`, 'config'));
+      const err = new ProxyDialError(`unknown proxy id in fallback list: ${id}`, 'config');
+      logBackendApi(logContext, 'warn', 'failure', { route: 'proxy', proxy_id: id, stage: err.stage, message: err.message });
+      errors.push(err);
       return null;
     }
     const proxied = await proxiedFor();
@@ -209,6 +218,7 @@ const tryOne = async (
       proxied.request,
       options,
     ));
+    logBackendApi(logContext, 'info', 'result', { route: 'proxy', proxy_id: id, proxy_kind: config.config.kind, status: response.status });
     // A successful dial after a previous failure must clear the backoff so
     // the next failure restarts at n=1 instead of resuming the geometric
     // schedule from where it left off. Mirror the failure-path policy: a
@@ -236,10 +246,12 @@ const tryOne = async (
       // reached an upstream. Advance to the next entry like we would for a
       // proxy, just without touching the backoff table (no proxy entity to
       // throttle here).
+      logBackendApi(logContext, 'warn', 'failure', { route: 'direct', proxy_id: null, message: errorMessage(err) });
       errors.push(err);
       return null;
     }
     if (err instanceof ProxyDialError) {
+      logBackendApi(logContext, 'warn', 'failure', { route: 'proxy', proxy_id: id, stage: err.stage, message: err.message });
       errors.push(err);
       // Tag the persisted message with the dial stage so a dashboard reader
       // can tell a tcp-connect refusal from an inner-tls cert mismatch
@@ -253,9 +265,62 @@ const tryOne = async (
       }
       return null;
     }
+    logBackendApi(logContext, 'warn', 'failure', { route: 'proxy', proxy_id: id, message: errorMessage(err) });
     throw err;
   }
 };
+
+interface BackendApiLogContext {
+  upstreamId: string;
+  method: string;
+  url: string;
+  fallbackChain: string[];
+  currentColo: string | null;
+}
+
+const backendApiLogContext = (
+  input: Pick<CreateFetcherInput, 'upstreamId' | 'currentColo'>,
+  url: string,
+  init: RequestInit,
+  fallbackChain: string[],
+): BackendApiLogContext | null => {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (!parsed.pathname.startsWith('/backend-api')) return null;
+  return {
+    upstreamId: input.upstreamId,
+    method: init.method ?? 'GET',
+    url: `${parsed.origin}${parsed.pathname}${parsed.search}`,
+    fallbackChain,
+    currentColo: input.currentColo,
+  };
+};
+
+const logBackendApi = (
+  context: BackendApiLogContext | null,
+  level: 'info' | 'warn',
+  event: string,
+  fields: Record<string, unknown>,
+): void => {
+  if (!context) return;
+  const payload = {
+    event,
+    upstream_id: context.upstreamId,
+    method: context.method,
+    url: context.url,
+    fallback_chain: context.fallbackChain,
+    current_colo: context.currentColo,
+    ...fields,
+  };
+  console[level](`[backend-api] ${JSON.stringify(payload)}`);
+};
+
+const errorMessage = (err: unknown): string =>
+  (err instanceof Error ? err.message : String(err)).replace(/\s+/g, ' ').slice(0, 300);
 
 const buildProxiedRequest = async (url: string, init: RequestInit): Promise<ProxiedRequest> => {
   const u = new URL(url);

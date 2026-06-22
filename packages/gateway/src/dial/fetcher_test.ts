@@ -16,10 +16,14 @@ describe('createFetcher', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-06-01T00:00:00Z'));
   });
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
 
   const proxyA: ProxyEntry = { config: { kind: 'socks5', host: 'a', port: 1, name: 'a' }, dialTimeoutMs: null };
   const proxyB: ProxyEntry = { config: { kind: 'socks5', host: 'b', port: 1, name: 'b' }, dialTimeoutMs: null };
+  const parseBackendApiLog = (line: unknown) => JSON.parse(String(line).replace(/^\[backend-api\] /, '')) as Record<string, unknown>;
 
   it('first-pass tries each non-backoff entry in order and short-circuits on success', async () => {
     const repo = new InMemoryRepo();
@@ -44,6 +48,78 @@ describe('createFetcher', () => {
     const res = await fetcher('https://api.openai.com/v1/models', { method: 'GET' });
     expect(await res.text()).toBe('ok');
     expect(calls).toEqual(['b']);
+  });
+
+  it('logs backend-api attempts with selected proxy route and response status', async () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const repo = new InMemoryRepo();
+    const fetcher = createFetcher({
+      repo,
+      upstreamId: 'u_codex',
+      fallbackList: [{ id: 'a' }, { id: 'direct' }],
+      currentColo: 'HKG',
+      proxyById: new Map([['a', proxyA]]),
+      runProxied: async () => new Response('ok', { status: 202 }),
+      runDirect: async () => new Response('direct'),
+      socketDial: () => stubSocketDial,
+    });
+
+    await fetcher('https://chatgpt.com/backend-api/codex/responses', { method: 'POST', body: '{}' });
+
+    const payloads = infoSpy.mock.calls.map(([line]) => parseBackendApiLog(line));
+    expect(payloads).toEqual([
+      {
+        event: 'start',
+        upstream_id: 'u_codex',
+        method: 'POST',
+        url: 'https://chatgpt.com/backend-api/codex/responses',
+        fallback_chain: ['a', 'direct'],
+        current_colo: 'HKG',
+        active_backoff_proxy_ids: [],
+      },
+      {
+        event: 'attempt',
+        upstream_id: 'u_codex',
+        method: 'POST',
+        url: 'https://chatgpt.com/backend-api/codex/responses',
+        fallback_chain: ['a', 'direct'],
+        current_colo: 'HKG',
+        route: 'proxy',
+        proxy_id: 'a',
+        proxy_kind: 'socks5',
+      },
+      {
+        event: 'result',
+        upstream_id: 'u_codex',
+        method: 'POST',
+        url: 'https://chatgpt.com/backend-api/codex/responses',
+        fallback_chain: ['a', 'direct'],
+        current_colo: 'HKG',
+        route: 'proxy',
+        proxy_id: 'a',
+        proxy_kind: 'socks5',
+        status: 202,
+      },
+    ]);
+  });
+
+  it('does not log non-backend-api requests', async () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const repo = new InMemoryRepo();
+    const fetcher = createFetcher({
+      repo,
+      upstreamId: 'u',
+      fallbackList: [{ id: 'direct' }],
+      currentColo: null,
+      proxyById: new Map(),
+      runProxied: async () => new Response('proxy'),
+      runDirect: async () => new Response('direct'),
+      socketDial: () => stubSocketDial,
+    });
+
+    await fetcher('https://chatgpt.com/api/auth/session', { method: 'GET' });
+
+    expect(infoSpy).not.toHaveBeenCalled();
   });
 
   it('records exactly one dial failure per call when the same entry is the only fallback', async () => {
