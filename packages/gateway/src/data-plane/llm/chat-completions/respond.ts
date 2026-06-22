@@ -50,7 +50,7 @@ export const respondChatCompletions = async (
       return { success: true, response: Response.json(response, { headers: mergeForwardedUpstreamHeaders(undefined, result.headers) }) };
     } catch (error) {
       recordPerformance(ctx, result.performance, true);
-      return { success: false, response: internalChatCompletionsErrorResponse(502, toInternalDebugError(error, 'chat-completions')) };
+      return { success: false, response: internalChatCompletionsErrorResponse(502, toInternalDebugError(error)) };
     }
   }
 
@@ -86,7 +86,6 @@ const internalChatCompletionsErrorPayload = (error: InternalDebugError) => ({
     message: error.message,
     stack: error.stack,
     cause: error.cause,
-    source_api: error.source_api,
     target_api: error.target_api,
   },
 });
@@ -121,6 +120,6 @@ const chatCompletionsSseFrames = async function* (frames: AsyncIterable<Protocol
     }
   } catch (error) {
     state.failed = true;
-    yield sseFrame(JSON.stringify(internalChatCompletionsErrorPayload(toInternalDebugError(error, 'chat-completions'))), 'error');
+    yield sseFrame(JSON.stringify(internalChatCompletionsErrorPayload(toInternalDebugError(error))), 'error');
   }
 };

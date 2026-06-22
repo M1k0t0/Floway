@@ -391,12 +391,11 @@ const internalErrorEnvelope = (error: Extract<ExecuteResult<ProtocolFrame<Respon
   message: error.message,
   stack: error.stack,
   cause: error.cause,
-  source_api: error.source_api,
   target_api: error.target_api,
 });
 
 const serverErrorEnvelope = (error: unknown): Record<string, unknown> => ({
-  ...toInternalDebugError(error, 'responses'),
+  ...toInternalDebugError(error),
   code: 'internal_error',
 });
 

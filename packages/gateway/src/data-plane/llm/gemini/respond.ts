@@ -93,7 +93,7 @@ const tokenUsageFromGeminiResponse = (r: GeminiResult) => (r.usageMetadata ? tok
 
 // --- error rendering: Google-RPC envelope ---
 
-type GeminiErrorDebugFields = Partial<Pick<InternalDebugError, 'type' | 'name' | 'stack' | 'cause'>> & { source_api?: string; target_api?: string };
+type GeminiErrorDebugFields = Partial<Pick<InternalDebugError, 'type' | 'name' | 'stack' | 'cause'>> & { target_api?: string };
 
 type GeminiErrorStatusPayload = {
   error: GeminiErrorResponse['error'] & GeminiErrorDebugFields;
@@ -119,12 +119,11 @@ const internalDebugFields = (error: InternalDebugError): GeminiErrorDebugFields 
   name: error.name,
   stack: error.stack,
   cause: error.cause,
-  source_api: error.source_api,
   ...(error.target_api ? { target_api: error.target_api } : {}),
 });
 
 const geminiInternalRpcErrorPayload = (status: number, error: unknown): GeminiErrorStatusPayload => {
-  const debug = toInternalDebugError(error, 'gemini');
+  const debug = toInternalDebugError(error);
   return geminiRpcErrorPayload(status, debug.message, internalDebugFields(debug));
 };
 

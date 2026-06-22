@@ -698,7 +698,6 @@ type ResponsesStreamEventVariant =
     name?: string;
     stack?: string;
     cause?: unknown;
-    source_api?: string;
     target_api?: string;
   }
   | { type: 'ping' };

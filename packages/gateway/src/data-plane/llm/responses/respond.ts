@@ -47,7 +47,7 @@ export const respondResponses = async (
       return { success: true, response: Response.json(response, { headers: mergeForwardedUpstreamHeaders(undefined, result.headers) }) };
     } catch (error) {
       recordPerformance(ctx, result.performance, true);
-      return { success: false, response: internalResponsesErrorResponse(502, toInternalDebugError(error, 'responses')) };
+      return { success: false, response: internalResponsesErrorResponse(502, toInternalDebugError(error)) };
     }
   }
 
@@ -84,13 +84,12 @@ const internalResponsesErrorResponse = (status: number, error: InternalDebugErro
       message: error.message,
       stack: error.stack,
       cause: error.cause,
-      source_api: error.source_api,
       target_api: error.target_api,
     },
   }, { status });
 
 const internalResponsesStreamErrorFrame = (error: unknown) => {
-  const debug = toInternalDebugError(error, 'responses');
+  const debug = toInternalDebugError(error);
   return sseFrame(
     JSON.stringify({
       type: 'error',
@@ -99,7 +98,6 @@ const internalResponsesStreamErrorFrame = (error: unknown) => {
       name: debug.name,
       stack: debug.stack,
       cause: debug.cause,
-      source_api: debug.source_api,
       target_api: debug.target_api,
     }),
     'error',

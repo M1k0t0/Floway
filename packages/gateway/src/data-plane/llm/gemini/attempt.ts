@@ -157,7 +157,6 @@ const geminiInternalPlainResult = (status: number, error: Error): PlainResult =>
       type: 'internal_error',
       name: error.name,
       stack: error.stack,
-      source_api: 'gemini',
     },
   })),
 );

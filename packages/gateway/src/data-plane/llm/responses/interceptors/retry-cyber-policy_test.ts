@@ -453,7 +453,6 @@ test('withCyberPolicyRetried throws a later internal failure with the original e
     message: 'retry setup failed',
     stack: 'Error: retry setup failed\n    at test',
     cause: { message: 'nested' },
-    source_api: 'responses' as const,
     target_api: 'responses' as const,
   };
 

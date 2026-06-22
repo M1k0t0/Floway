@@ -7,10 +7,7 @@ export type {
   ResponsesInvocation,
 } from './invocation.ts';
 
-export type {
-  InternalDebugError,
-  DebugSourceApi,
-} from './error.ts';
+export type { InternalDebugError } from './error.ts';
 export { toInternalDebugError } from './error.ts';
 
 export type {

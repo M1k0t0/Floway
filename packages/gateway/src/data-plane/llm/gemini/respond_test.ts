@@ -82,7 +82,6 @@ test('respondGemini internal errors include debug fields in Google RPC Status', 
     message: 'boom',
     stack: 'TypeError: boom\n    at test',
     cause: { upstream: 'bad shape' },
-    source_api: 'messages',
     target_api: 'responses',
   };
 
@@ -98,7 +97,6 @@ test('respondGemini internal errors include debug fields in Google RPC Status', 
   assertEquals(body.error.status, 'UNAVAILABLE');
   assertEquals(body.error.message, 'boom');
   assertEquals(body.error.stack, error.stack);
-  assertEquals(body.error.source_api, 'messages');
   assertEquals(body.error.target_api, 'responses');
   assertExists(body.error.cause);
 });

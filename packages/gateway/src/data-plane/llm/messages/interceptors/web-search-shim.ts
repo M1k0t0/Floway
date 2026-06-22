@@ -911,7 +911,6 @@ const resolveActiveMessagesWebSearchProvider = async (apiKeyId: string): Promise
           ? 'Native Messages web search requires an enabled search provider.'
           : `Native Messages web search is missing the configured ${configuredProvider.provider} credential.`,
       ),
-      'messages',
     ),
   );
 };

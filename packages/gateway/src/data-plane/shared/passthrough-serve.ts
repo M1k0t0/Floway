@@ -184,7 +184,7 @@ export const passthroughServe = async (ctx: PassthroughServeContext): Promise<Re
       if (forwarded) return forwarded;
     }
     recordRequestPerformance(backgroundScheduler, lastPerformance, true, performance.now() - requestStartedAt);
-    return c.json({ error: toInternalDebugError(e, sourceApi) }, 502);
+    return c.json({ error: toInternalDebugError(e) }, 502);
   }
 };
 
