@@ -194,12 +194,6 @@ export interface ModelsCacheRepo {
   delete(upstreamId: string): Promise<void>;
 }
 
-export interface CodexPkcePendingRepo {
-  put(state: string, verifier: string, expiresAt: number): Promise<void>;
-  consume(state: string): Promise<{ verifier: string } | null>;
-  sweepExpired(now: number): Promise<void>;
-}
-
 export interface SearchConfigRepo {
   get(): Promise<unknown>;
   save(config: unknown): Promise<void>;
@@ -330,7 +324,6 @@ export interface Repo {
   searchUsage: SearchUsageRepo;
   performance: PerformanceRepo;
   modelsCache: ModelsCacheRepo;
-  codexPkcePending: CodexPkcePendingRepo;
   searchConfig: SearchConfigRepo;
   upstreams: UpstreamRepo;
   proxies: ProxyRepo;

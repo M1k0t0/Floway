@@ -68,6 +68,7 @@ const providerMeta = (provider: UpstreamProviderKind | null): ProviderMeta => {
   case 'azure': return { tone: 'emerald', label: 'Azure' };
   case 'copilot': return { tone: 'cyan', label: 'Copilot' };
   case 'codex': return { tone: 'cyan', label: 'Codex' };
+  case 'claude-code': return { tone: 'rose', label: 'Claude Code' };
   case 'ollama': return { tone: 'rose', label: 'Ollama' };
   }
   return assertNever(provider);

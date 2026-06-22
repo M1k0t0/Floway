@@ -1,8 +1,7 @@
 <script setup lang="ts">
-// Top-level upstream editor page. Owns the entire draft state (provider,
-// name, enabled, flag overrides, disabled model ids, plus the
-// provider-specific custom/azure drafts) and the live /models fetch for
-// custom upstreams.
+// Owns the entire draft state (provider, name, enabled, flag overrides,
+// disabled model ids, plus the provider-specific custom/azure drafts) and
+// the live /models fetch for custom upstreams.
 
 import type { InferRequestType } from 'hono/client';
 import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue';
@@ -24,13 +23,10 @@ import { authFetch, callApi, useApi } from '../../api/client.ts';
 import type { CopilotQuotaSnapshot, CustomRawModel, FlagDef, ModelEndpoints, OllamaUpstreamConfig, ProxyFallbackEntry, UpstreamModelConfig, UpstreamProviderKind, UpstreamRecord } from '../../api/types.ts';
 import { useRuntimeInfo } from '../../composables/useRuntimeInfo.ts';
 import { useUpstreamsStore } from '../../composables/useUpstreams.ts';
+import { providerMeta } from '../upstreams/provider-meta.ts';
 import { Button } from '@floway-dev/ui';
 
-const props = defineProps<{
-  mode: 'create' | 'edit';
-  record: UpstreamRecord | null;
-  // Default provider for create mode; ignored in edit mode (taken from record).
-  initialProvider?: UpstreamProviderKind;
+type CommonPageProps = {
   nextSortOrder: number;
   flags: FlagDef[];
   // Resolved model list pre-fetched by the route loader from
@@ -41,7 +37,21 @@ const props = defineProps<{
   initialUpstreamModelsError?: string | null;
   initialCopilotQuota?: CopilotQuotaSnapshot | null;
   initialCopilotQuotaError?: string | null;
-}>();
+};
+
+const props = defineProps<
+  | (CommonPageProps & {
+    mode: 'create';
+    record: null;
+    // Default provider for create mode; ignored in edit mode (taken from record).
+    initialProvider: UpstreamProviderKind;
+  })
+  | (CommonPageProps & {
+    mode: 'edit';
+    record: UpstreamRecord;
+    initialProvider?: undefined;
+  })
+>();
 
 const emit = defineEmits<{
   saved: [record: UpstreamRecord | null];
@@ -57,7 +67,20 @@ const currentColo = computed(() => runtimeInfo.value?.colo ?? null);
 type CreateBody = InferRequestType<typeof api.api.upstreams.$post>['json'];
 type PatchBody = InferRequestType<(typeof api.api.upstreams)[':id']['$patch']>['json'];
 
-const activeProvider = ref<UpstreamProviderKind>(props.record?.provider ?? props.initialProvider ?? 'custom');
+// Edit mode: provider follows the record. Create mode: locked in by the
+// route param at mount time.
+const activeProvider = computed<UpstreamProviderKind>(() => props.mode === 'edit' ? props.record.provider : props.initialProvider);
+
+// Discriminated (mode, record) pair forwarded to UpstreamConfigPanel. The
+// page's own union already guarantees this shape; the explicit pairing
+// re-narrows for the template binding so Vue's prop-type check accepts it
+// alongside the live `liveRecord` ref (which is typed as `UpstreamRecord | null`
+// since it must survive a brief null window during `upstreamsStore.load()`).
+const modeRecord = computed<{ mode: 'create'; record: null } | { mode: 'edit'; record: UpstreamRecord }>(
+  () => liveRecord.value && props.mode === 'edit'
+    ? { mode: 'edit', record: liveRecord.value }
+    : { mode: 'create', record: null },
+);
 const name = ref('');
 const enabled = ref(true);
 const sortOrder = ref<number>(props.nextSortOrder);
@@ -80,15 +103,7 @@ const upstreamModelsError = ref<string | null>(props.initialUpstreamModelsError 
 const liveRecord = ref<UpstreamRecord | null>(props.record);
 watch(() => props.record, r => { liveRecord.value = r; });
 
-const defaultName = (p: UpstreamProviderKind) =>
-  p === 'azure' ? 'Azure AI'
-    : p === 'copilot' ? 'GitHub Copilot'
-      : p === 'codex' ? 'ChatGPT Codex'
-        : p === 'ollama' ? 'Ollama'
-          : 'Custom upstream';
-
 const seedFromRecord = (r: UpstreamRecord) => {
-  activeProvider.value = r.provider;
   name.value = r.name;
   enabled.value = r.enabled;
   sortOrder.value = r.sort_order;
@@ -131,7 +146,7 @@ const seedFromRecord = (r: UpstreamRecord) => {
 };
 
 const seedFresh = () => {
-  name.value = defaultName(activeProvider.value);
+  name.value = providerMeta(activeProvider.value).defaultName;
   enabled.value = true;
   sortOrder.value = props.nextSortOrder;
   flagOverrides.value = {};
@@ -142,18 +157,8 @@ const seedFresh = () => {
   ollamaDraft.value = blankOllamaDraft();
 };
 
-if (props.mode === 'edit' && props.record) seedFromRecord(props.record);
+if (props.mode === 'edit') seedFromRecord(props.record);
 else seedFresh();
-
-// In create mode, switching providers also rewrites the name field when it
-// still matches the previous provider's default (i.e. it has not been
-// customized).
-const setActiveProvider = (next: UpstreamProviderKind) => {
-  if (activeProvider.value === next) return;
-  const prevDefault = defaultName(activeProvider.value);
-  if (props.mode === 'create' && name.value === prevDefault) name.value = defaultName(next);
-  activeProvider.value = next;
-};
 
 const customBearerTokenSet = computed(() => {
   if (props.record?.provider !== 'custom') return false;
@@ -364,13 +369,13 @@ const save = async () => {
       const { data, error } = await callApi<UpstreamRecord>(() => api.api.upstreams.$post({ json: body }));
       if (error) { saveError.value = error.message; return; }
       emit('saved', data);
-    } else if (props.record) {
+    } else {
       const patch: PatchBody = baseFields();
       if (activeProvider.value === 'custom') patch.config = buildCustomConfig();
       else if (activeProvider.value === 'azure') patch.config = buildAzureConfig();
       else if (activeProvider.value === 'ollama') patch.config = buildOllamaConfig();
       const { error } = await callApi(
-        () => api.api.upstreams[':id'].$patch({ param: { id: props.record!.id }, json: patch }),
+        () => api.api.upstreams[':id'].$patch({ param: { id: props.record.id }, json: patch }),
       );
       if (error) { saveError.value = error.message; return; }
       emit('saved', props.record);
@@ -385,23 +390,24 @@ const cancel = async () => {
   await router.push('/dashboard/settings');
 };
 
-const onCopilotCompleted = async (newRecord: UpstreamRecord | undefined) => {
-  emit('saved', newRecord ?? null);
-  if (newRecord) await router.replace(`/dashboard/upstreams/${newRecord.id}`);
-};
-
-const onCodexImported = async (newRecord: UpstreamRecord) => {
+const onImported = async (newRecord: UpstreamRecord) => {
   emit('saved', newRecord);
   await router.replace(`/dashboard/upstreams/${newRecord.id}`);
 };
 
-const onCodexError = (message: string) => {
+// Quota refresh is data-only: the gateway persisted the new
+// `usageProbeSnapshot` slot and the panel handed us a locally-merged record.
+// Land it on `liveRecord` so AccountCard re-renders, but do not emit `saved`
+// or navigate — neither the route nor the store list view changes.
+const onClaudeCodeQuotaRefreshed = (newRecord: UpstreamRecord) => {
+  liveRecord.value = newRecord;
+};
+
+const onImportError = (message: string) => {
   saveError.value = message;
 };
 
-// Copilot's and codex's catalogs are read-only — `ModelsPanel` runs in
-// `read-only` mode for both, so the v-model setter is never invoked. The
-// getter just hands back an empty list to keep the type contract honest.
+// Read-only providers never invoke the v-model setter; the getter returns [] to satisfy the type contract.
 const modelsManualForActive = computed<UpstreamModelConfig[]>({
   get: () => {
     if (activeProvider.value === 'custom') return customDraft.value.models;
@@ -417,12 +423,13 @@ const modelsManualForActive = computed<UpstreamModelConfig[]>({
 });
 
 // Auto rows are the live catalog the upstream itself decides. For copilot,
-// codex, and saved custom/ollama upstreams that comes from the SWR cache via
-// `upstreamModels`. Create-mode custom and ollama drafts fall back to the
-// inline POST /fetch-models preview — custom rows are translated through the
-// draft's endpoints; ollama rows arrive already projected.
+// codex, claude-code, and saved custom/ollama upstreams that comes from the
+// SWR cache via `upstreamModels`. Create-mode custom and ollama drafts fall
+// back to the inline POST /fetch-models preview — custom rows are translated
+// through the draft's endpoints; ollama rows arrive already projected. Azure
+// has no auto rows (the loader does not fetch for it), so `upstreamModels`
+// is empty and the same fall-through is correct.
 const autoForActive = computed<UpstreamModelConfig[]>(() => {
-  if (activeProvider.value === 'azure') return [];
   if (activeProvider.value === 'custom') {
     if (!customDraft.value.modelsFetch.enabled) return [];
     if (props.mode === 'edit') return upstreamModels.value;
@@ -436,11 +443,8 @@ const autoForActive = computed<UpstreamModelConfig[]>(() => {
 });
 
 const upstreamIdLabelForActive = computed(() => activeProvider.value === 'azure' ? 'Deployment' : 'Upstream Model ID');
-// Copilot's create flow lands the row from the device-flow panel; codex's
-// create flow lands the row from the codex-import panel. In both cases the
-// page-level Save button is the wrong trigger, so it stays hidden until
-// the panel emits the new record.
-const showSaveButton = computed(() => props.mode === 'edit' || (activeProvider.value !== 'copilot' && activeProvider.value !== 'codex'));
+// Provider import panels (copilot/codex/claude-code) land the row themselves on create, so the page-level Save button stays hidden until they emit.
+const showSaveButton = computed(() => props.mode === 'edit' || (activeProvider.value !== 'copilot' && activeProvider.value !== 'codex' && activeProvider.value !== 'claude-code'));
 
 // The cache-status panel reads the row's `modelsCache` summary and offers a
 // force-refresh shortcut. Azure is the one provider whose catalog is pure
@@ -461,7 +465,7 @@ const availableModelItems = computed<{ value: string; label: string }[]>(() => {
       // not shadow the upstream id.
       // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
       const id = m.publicModelId?.trim() || m.upstreamModelId;
-      if (!id || seen.has(id)) continue;
+      if (seen.has(id)) continue;
       seen.add(id);
       items.push({ value: id, label: id });
     }
@@ -485,7 +489,7 @@ const measureRight = () => {
   const kids = Array.from(root.children) as HTMLElement[];
   let h = 0;
   for (const k of kids) h += k.getBoundingClientRect().height;
-  const gap = parseFloat(getComputedStyle(root).rowGap) || 0;
+  const gap = parseFloat(getComputedStyle(root).rowGap);
   if (kids.length > 1) h += gap * (kids.length - 1);
   rightContentH.value = h;
 };
@@ -508,7 +512,8 @@ const workbenchStyle = computed(() => ({ '--right-pane-h': `${Math.ceil(rightCon
         <span class="text-white/15">/</span>
         <RouterLink to="/dashboard/settings" class="hover:text-gray-300">Upstreams</RouterLink>
         <span class="text-white/15">/</span>
-        <span class="font-semibold text-white">{{ mode === 'create' ? 'New upstream' : (record?.name ?? 'Upstream') }}</span>
+        <span v-if="record" class="font-semibold text-white">{{ record.name }}</span>
+        <span v-else class="font-semibold text-white">New upstream</span>
       </nav>
       <div class="ml-auto flex items-center gap-2">
         <Button variant="secondary" :disabled="saving" @click="cancel">Cancel</Button>
@@ -530,6 +535,7 @@ const workbenchStyle = computed(() => ({ '--right-pane-h': `${Math.ceil(rightCon
          clips or scrolls; the page does. -->
     <div :style="workbenchStyle" class="grid grid-cols-1 gap-5 lg:grid-cols-[400px_minmax(0,1fr)]">
       <UpstreamConfigPanel
+        v-bind="modeRecord"
         :provider="activeProvider"
         v-model:name="name"
         v-model:enabled="enabled"
@@ -539,8 +545,6 @@ const workbenchStyle = computed(() => ({ '--right-pane-h': `${Math.ceil(rightCon
         v-model:custom="customDraft"
         v-model:azure="azureDraft"
         v-model:ollama="ollamaDraft"
-        :mode="mode"
-        :record="record"
         :flags="flags"
         :colo-aware="coloAware"
         :current-colo="currentColo"
@@ -555,12 +559,11 @@ const workbenchStyle = computed(() => ({ '--right-pane-h': `${Math.ceil(rightCon
         :initial-copilot-quota-error="initialCopilotQuotaError"
         :models-cache="showCacheStatus ? liveRecord!.modelsCache : null"
         :refreshing="refreshing"
-        @update:provider="setActiveProvider"
         @fetch-models="fetchDraftModels"
         @refresh-cache="refreshCachedModels"
-        @copilot-completed="onCopilotCompleted"
-        @codex-imported="onCodexImported"
-        @codex-error="onCodexError"
+        @imported="onImported"
+        @error="onImportError"
+        @claude-code-quota-refreshed="onClaudeCodeQuotaRefreshed"
       />
       <ModelsPanel
         ref="modelsPanelRef"
@@ -571,7 +574,7 @@ const workbenchStyle = computed(() => ({ '--right-pane-h': `${Math.ceil(rightCon
         :upstream-flag-overrides="flagOverrides"
         :flag-provider-kind="activeProvider"
         :upstream-id-label="upstreamIdLabelForActive"
-        :read-only="activeProvider === 'copilot' || activeProvider === 'codex'"
+        :read-only="activeProvider === 'copilot' || activeProvider === 'codex' || activeProvider === 'claude-code'"
         :all-manual="activeProvider === 'azure'"
       />
     </div>

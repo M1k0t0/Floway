@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
-import { extractCodexCallbackParams, importCodexFromAuthJson, importCodexFromCallback } from './import.ts';
+import { importCodexFromAuthJson, importCodexFromCallback } from './import.ts';
 import { directFetcher, type Fetcher } from '@floway-dev/provider';
 
 const encodeBase64Url = (input: string): string => {
@@ -22,14 +22,14 @@ afterEach(() => vi.restoreAllMocks());
 
 describe('importCodexFromAuthJson', () => {
   test('happy path returns identity + tokens', async () => {
-    const authJson = {
+    const authJson = JSON.stringify({
       tokens: {
         access_token: 'at1',
         refresh_token: 'rt1',
         id_token: makeJwt(identityPayload),
         account_id: 'acc',
       },
-    };
+    });
     const result = await importCodexFromAuthJson(authJson);
     expect(result.config.accounts).toEqual([{ email: 'a@b.com', chatgptAccountId: 'acc', chatgptUserId: 'usr', planType: 'plus' }]);
     expect(result.state.accounts[0].chatgptAccountId).toBe('acc');
@@ -40,32 +40,16 @@ describe('importCodexFromAuthJson', () => {
   });
 
   test('rejects malformed payload', async () => {
-    await expect(importCodexFromAuthJson(null)).rejects.toThrow();
-    await expect(importCodexFromAuthJson({})).rejects.toThrow(/tokens/);
-    await expect(importCodexFromAuthJson({ tokens: { refresh_token: 'r', id_token: makeJwt(identityPayload) } })).rejects.toThrow(/access_token/);
+    await expect(importCodexFromAuthJson('not json')).rejects.toThrow(/not valid JSON/);
+    await expect(importCodexFromAuthJson('null')).rejects.toThrow();
+    await expect(importCodexFromAuthJson('{}')).rejects.toThrow(/tokens/);
+    await expect(importCodexFromAuthJson(JSON.stringify({ tokens: { refresh_token: 'r', id_token: makeJwt(identityPayload) } }))).rejects.toThrow(/access_token/);
   });
 
   test('id_token must contain identity claims', async () => {
-    await expect(importCodexFromAuthJson({
+    await expect(importCodexFromAuthJson(JSON.stringify({
       tokens: { access_token: 'a', refresh_token: 'r', id_token: makeJwt({ /* empty */ }) },
-    })).rejects.toThrow();
-  });
-});
-
-describe('extractCodexCallbackParams', () => {
-  test('parses a full localhost URL', () => {
-    const params = extractCodexCallbackParams('http://localhost:1455/auth/callback?code=CODE&state=STATE');
-    expect(params).toEqual({ code: 'CODE', state: 'STATE' });
-  });
-
-  test('parses a raw query string', () => {
-    expect(extractCodexCallbackParams('code=CODE&state=STATE')).toEqual({ code: 'CODE', state: 'STATE' });
-    expect(extractCodexCallbackParams('?code=CODE&state=STATE')).toEqual({ code: 'CODE', state: 'STATE' });
-  });
-
-  test('throws on missing code/state', () => {
-    expect(() => extractCodexCallbackParams('http://localhost:1455/auth/callback')).toThrow();
-    expect(() => extractCodexCallbackParams('http://localhost:1455/auth/callback?code=CODE')).toThrow(/state/);
+    }))).rejects.toThrow();
   });
 });
 

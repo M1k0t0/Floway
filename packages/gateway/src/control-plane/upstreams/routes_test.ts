@@ -3,6 +3,8 @@ import { test } from 'vitest';
 import { requestApp, setupAppTest } from '../../test-helpers.ts';
 import { assertEquals, jsonResponse, withMockedFetch } from '@floway-dev/test-utils';
 
+type JsonObject = Record<string, any>;
+
 const customConfig = {
   baseUrl: 'https://custom.example.com',
   bearerToken: 'sk-test',
@@ -55,7 +57,7 @@ test('POST /api/upstreams creates custom upstreams and redacts bearer tokens', a
   const resp = await requestApp('/api/upstreams', authed(adminSession, createBody({ flag_overrides: { 'vendor-kimi': true } })));
 
   assertEquals(resp.status, 201);
-  const created = (await resp.json()) as Record<string, any>;
+  const created = (await resp.json()) as JsonObject;
   assertEquals(created.provider, 'custom');
   assertEquals(created.config.bearerToken, undefined);
   assertEquals(created.config.bearerTokenSet, true);
@@ -66,7 +68,7 @@ test('POST /api/upstreams creates custom upstreams and redacts bearer tokens', a
   assertEquals((stored?.config as Record<string, unknown>).bearerToken, 'sk-test');
 
   const list = await requestApp('/api/upstreams', { headers: { 'x-floway-session': adminSession } });
-  const items = (await list.json()) as Array<Record<string, any>>;
+  const items = (await list.json()) as JsonObject[];
   assertEquals(items[0].config.bearerToken, undefined);
 });
 
@@ -81,7 +83,7 @@ test('POST /api/upstreams validates Azure models and redacts API keys', async ()
 
   const createdResp = await requestApp('/api/upstreams', authed(adminSession, createBody({ provider: 'azure', name: 'Azure', config: azureConfig })));
   assertEquals(createdResp.status, 201);
-  const created = (await createdResp.json()) as Record<string, any>;
+  const created = (await createdResp.json()) as JsonObject;
   assertEquals(created.provider, 'azure');
   assertEquals(created.config.apiKey, undefined);
   assertEquals(created.config.apiKeySet, true);
@@ -102,7 +104,7 @@ test('POST /api/upstreams creates Copilot upstream rows with redacted GitHub tok
     async () => {
       const resp = await requestApp('/api/upstreams', authed(adminSession, createBody({ provider: 'copilot', name: 'Copilot', config: copilotConfig })));
       assertEquals(resp.status, 201);
-      const body = (await resp.json()) as Record<string, any>;
+      const body = (await resp.json()) as JsonObject;
       return body;
     },
   );
@@ -258,7 +260,7 @@ test('GET /api/upstreams attaches models-cache freshness to every row', async ()
 
   const list = await requestApp('/api/upstreams', { headers: { 'x-floway-session': adminSession } });
   assertEquals(list.status, 200);
-  const items = (await list.json()) as Array<Record<string, any>>;
+  const items = (await list.json()) as JsonObject[];
   const byId = Object.fromEntries(items.map(i => [i.id, i]));
 
   assertEquals(byId.up_fresh.modelsCache, { fetchedAt: null, lastError: null });
@@ -522,7 +524,6 @@ test('GET /api/upstreams/:id/models?refresh=true forces a fresh upstream fetch',
     },
   );
 
-  // The forced refresh persisted the new row.
   const stored = await repo.modelsCache.get('up_refresh');
   assertEquals(stored?.models.map(m => m.id), ['fresh-model']);
 });
@@ -535,8 +536,13 @@ test('GET /api/upstreams/:id/models resolves a saved upstream catalog and 404s f
 
   const resp = await requestApp(`/api/upstreams/${created.id}/models`, { headers: { 'x-floway-session': adminSession } });
   assertEquals(resp.status, 200);
-  const body = (await resp.json()) as { data: Array<{ upstreamModelId: string; kind: string; endpoints: Record<string, unknown> }> };
-  assertEquals(body.data[0].upstreamModelId, 'gpt-public');
+  const body = (await resp.json()) as { data: Array<{ upstreamModelId: string; publicModelId: string; kind: string; endpoints: Record<string, unknown> }> };
+  // Azure config carries `upstreamModelId: 'gpt-prod', publicModelId: 'gpt-public'`,
+  // so the GET response round-trips both ids: the operator's wire-side
+  // deployment id under `upstreamModelId`, and the public alias (the catalog
+  // `model.id`) under `publicModelId`.
+  assertEquals(body.data[0].upstreamModelId, 'gpt-prod');
+  assertEquals(body.data[0].publicModelId, 'gpt-public');
   assertEquals(body.data[0].kind, 'chat');
 
   const missing = await requestApp('/api/upstreams/nope/models', { headers: { 'x-floway-session': adminSession } });
@@ -643,44 +649,42 @@ const fakeIdToken = (claims: Record<string, unknown>): string => {
 
 const codexAuthJsonImport = (overrides: Record<string, unknown> = {}) => ({
   name: 'ChatGPT Codex',
-  auth_json: {
+  auth_json: JSON.stringify({
     tokens: {
       access_token: 'at_test',
       refresh_token: 'rt_test',
       id_token: fakeIdToken({}),
     },
     ...overrides,
-  },
+  }),
 });
 
-test('POST /api/upstreams/codex-pkce-start returns an authorize URL and stashes the verifier', async () => {
-  const { repo, adminSession } = await setupAppTest();
+test('POST /api/upstreams/codex-authorize-url stamps SPA-provided challenge + state into the auth.openai.com URL', async () => {
+  const { adminSession } = await setupAppTest();
 
-  const resp = await requestApp('/api/upstreams/codex-pkce-start', authed(adminSession, {}));
+  const resp = await requestApp(
+    '/api/upstreams/codex-authorize-url',
+    authed(adminSession, { challenge: 'TEST_CHALLENGE', state: 'TEST_STATE' }),
+  );
   assertEquals(resp.status, 200);
-  const body = (await resp.json()) as { state: string; authorize_url: string; expires_in_seconds: number };
-  assertEquals(typeof body.state, 'string');
-  assertEquals(body.authorize_url.startsWith('https://auth.openai.com/oauth/authorize?'), true);
-  assertEquals(body.expires_in_seconds, 300);
-
-  const stashed = await repo.codexPkcePending.consume(body.state);
-  assertEquals(stashed !== null, true);
-  assertEquals(typeof stashed!.verifier, 'string');
+  const body = (await resp.json()) as { authorize_url: string };
+  const url = new URL(body.authorize_url);
+  assertEquals(url.origin + url.pathname, 'https://auth.openai.com/oauth/authorize');
+  assertEquals(url.searchParams.get('code_challenge'), 'TEST_CHALLENGE');
+  assertEquals(url.searchParams.get('code_challenge_method'), 'S256');
+  assertEquals(url.searchParams.get('state'), 'TEST_STATE');
 });
 
-test('POST /api/upstreams/codex-import (callback) consumes the PKCE state and returns the verifier exchange result', async () => {
+test('POST /api/upstreams/codex-import (callback) exchanges the SPA-supplied verifier for tokens and persists the row', async () => {
   const { repo, adminSession } = await setupAppTest();
   await repo.upstreams.deleteAll();
-
-  const startResp = await requestApp('/api/upstreams/codex-pkce-start', authed(adminSession, {}));
-  const { state } = (await startResp.json()) as { state: string };
 
   await withMockedFetch(
     () => jsonResponse({ access_token: 'at_cb', refresh_token: 'rt_cb', id_token: fakeIdToken({}), expires_in: 600 }),
     async () => {
       const resp = await requestApp(
         '/api/upstreams/codex-import',
-        authed(adminSession, { name: 'ChatGPT Codex', callback: { code: 'AUTH_CODE', state } }),
+        authed(adminSession, { name: 'ChatGPT Codex', callback: { code: 'AUTH_CODE', verifier: 'TEST_VERIFIER' } }),
       );
       assertEquals(resp.status, 201);
       const created = (await resp.json()) as { provider: string; state: { accounts: Array<{ refresh_token_set: boolean }> } };
@@ -688,52 +692,6 @@ test('POST /api/upstreams/codex-import (callback) consumes the PKCE state and re
       assertEquals(created.state.accounts[0].refresh_token_set, true);
     },
   );
-
-  // Single-use: consume() removed the row, so a follow-up consume returns null.
-  const replay = await repo.codexPkcePending.consume(state);
-  assertEquals(replay, null);
-});
-
-test('POST /api/upstreams/codex-import rejects a replayed PKCE callback', async () => {
-  const { adminSession } = await setupAppTest();
-
-  const startResp = await requestApp('/api/upstreams/codex-pkce-start', authed(adminSession, {}));
-  const { state } = (await startResp.json()) as { state: string };
-
-  await withMockedFetch(
-    () => jsonResponse({ access_token: 'at_cb', refresh_token: 'rt_cb', id_token: fakeIdToken({}), expires_in: 600 }),
-    async () => {
-      const first = await requestApp(
-        '/api/upstreams/codex-import',
-        authed(adminSession, { name: 'ChatGPT Codex', callback: { code: 'AUTH_CODE', state } }),
-      );
-      assertEquals(first.status, 201);
-
-      const replay = await requestApp(
-        '/api/upstreams/codex-import',
-        authed(adminSession, { name: 'ChatGPT Codex', callback: { code: 'AUTH_CODE', state } }),
-      );
-      assertEquals(replay.status, 400);
-      const body = (await replay.json()) as { error: string };
-      assertEquals(body.error.includes('PKCE state not found or expired'), true);
-    },
-  );
-});
-
-test('POST /api/upstreams/codex-import rejects an expired PKCE state', async () => {
-  const { repo, adminSession } = await setupAppTest();
-
-  // Plant a pending row that has already expired so the consume() filter drops it.
-  const expiredState = 'expired_state';
-  await repo.codexPkcePending.put(expiredState, 'verifier_x', Date.now() - 1000);
-
-  const resp = await requestApp(
-    '/api/upstreams/codex-import',
-    authed(adminSession, { name: 'ChatGPT Codex', callback: { code: 'AUTH_CODE', state: expiredState } }),
-  );
-  assertEquals(resp.status, 400);
-  const body = (await resp.json()) as { error: string };
-  assertEquals(body.error.includes('PKCE state not found or expired'), true);
 });
 
 test('POST /api/upstreams/codex-import (auth_json) creates a codex upstream with state', async () => {
@@ -742,7 +700,7 @@ test('POST /api/upstreams/codex-import (auth_json) creates a codex upstream with
 
   const resp = await requestApp('/api/upstreams/codex-import', authed(adminSession, codexAuthJsonImport()));
   assertEquals(resp.status, 201);
-  const created = (await resp.json()) as Record<string, any>;
+  const created = (await resp.json()) as JsonObject;
   assertEquals(created.provider, 'codex');
   assertEquals(created.config.accounts[0].email, 'alice@example.com');
   assertEquals(created.config.accounts[0].chatgptAccountId, 'acc_test');
@@ -759,8 +717,7 @@ test('POST /api/upstreams/codex-import without an explicit name auto-derives one
   const { repo, adminSession } = await setupAppTest();
   await repo.upstreams.deleteAll();
 
-  const { name: _ignored, ...bodyWithoutName } = codexAuthJsonImport();
-  const resp = await requestApp('/api/upstreams/codex-import', authed(adminSession, bodyWithoutName));
+  const resp = await requestApp('/api/upstreams/codex-import', authed(adminSession, { auth_json: codexAuthJsonImport().auth_json }));
   assertEquals(resp.status, 201);
   const created = (await resp.json()) as { name: string };
   assertEquals(created.name, 'ChatGPT Codex (alice@example.com)');
@@ -774,20 +731,6 @@ test('POST /api/upstreams/codex-import rejects when both auth_json and callback 
   const body = (await resp.json()) as { error: { issues?: Array<{ message: string }> } | string };
   // The schema-level XOR refine surfaces as a zod validation error envelope.
   assertEquals(JSON.stringify(body).includes('Provide exactly one of auth_json or callback'), true);
-});
-
-test('POST /api/upstreams/codex-import rejects a malformed PKCE callback URL', async () => {
-  const { adminSession } = await setupAppTest();
-
-  const resp = await requestApp(
-    '/api/upstreams/codex-import',
-    authed(adminSession, { name: 'Codex', callback: { callback_url: 'http://localhost:1455/auth/callback' } }),
-  );
-  assertEquals(resp.status, 400);
-  const body = (await resp.json()) as { error: string };
-  // The handler unwraps the URL and reports "missing `code`" before ever
-  // touching the token endpoint.
-  assertEquals(body.error.includes('missing'), true);
 });
 
 test('POST /api/upstreams/:id/codex-refresh-now rejects non-codex rows with 404', async () => {
@@ -856,10 +799,10 @@ test('POST /api/upstreams/:id/codex-refresh-now flips the row to refresh_failed 
     ),
     async () => {
       const resp = await requestApp(`/api/upstreams/${created.id}/codex-refresh-now`, authed(adminSession, {}));
-      // 502, not 401 — the dashboard's auth client treats any 401 as a
-      // logout signal, and a dead codex credential must not log the
-      // operator out of the dashboard.
-      assertEquals(resp.status, 502);
+      // 400, not 502: the upstream answered — it's the stored credential
+      // that's dead. Not 401 either, since the dashboard's auth client
+      // treats any 401 as a logout signal.
+      assertEquals(resp.status, 400);
       const body = await resp.json() as { error: string };
       assertEquals(body.error.includes('Re-import'), true);
     },
@@ -885,10 +828,10 @@ test('POST /api/upstreams/:id/codex-refresh-now still answers when the failure-s
   const storedState = stored!.state as { accounts: Array<Record<string, unknown>> };
 
   await withMockedFetch(
-    () => {
+    async () => {
       // Simulate the concurrent writer mid-OAuth by mutating the row before
       // the route reaches its CAS write. The OAuth call itself fails terminally.
-      void repo.upstreams.save({
+      await repo.upstreams.save({
         ...stored!,
         state: { accounts: storedState.accounts.map(a => ({ ...a, refresh_token: 'rt_concurrent_winner' })) },
       });
@@ -899,7 +842,7 @@ test('POST /api/upstreams/:id/codex-refresh-now still answers when the failure-s
     },
     async () => {
       const resp = await requestApp(`/api/upstreams/${created.id}/codex-refresh-now`, authed(adminSession, {}));
-      assertEquals(resp.status, 502);
+      assertEquals(resp.status, 400);
     },
   );
 
@@ -909,6 +852,425 @@ test('POST /api/upstreams/:id/codex-refresh-now still answers when the failure-s
   const afterState = after?.state as { accounts: Array<{ state: string; refresh_token: string }> };
   assertEquals(afterState.accounts[0].refresh_token, 'rt_concurrent_winner');
   assertEquals(afterState.accounts[0].state, 'active');
+});
+
+// --- Claude Code routes ---
+//
+// Test setup mirrors the codex routes: we drive the OAuth + profile fetches
+// through withMockedFetch so the import handler runs end-to-end without
+// hitting the real upstream.
+
+const claudeCodeProfileBody = {
+  account: { uuid: 'acc-uuid-1', email: 'alice@example.com' },
+  organization: { uuid: 'org-uuid-1', organization_type: 'claude_max', rate_limit_tier: 'default_claude_max_20x' },
+};
+
+const claudeCodeTokenBody = (overrides: Record<string, unknown> = {}) => ({
+  access_token: 'at_test',
+  token_type: 'Bearer',
+  expires_in: 3600,
+  refresh_token: 'rt_test',
+  scope: 'user:inference',
+  ...overrides,
+});
+
+const claudeCodeCredentialsJson = (overrides: { accessToken?: string; refreshToken?: string; expiresAt?: number } = {}) => JSON.stringify({
+  claudeAiOauth: {
+    accessToken: overrides.accessToken ?? 'cli_at',
+    refreshToken: overrides.refreshToken ?? 'cli_rt',
+    expiresAt: overrides.expiresAt ?? Date.now() + 3_600_000,
+    subscriptionType: 'max',
+    rateLimitTier: 'default_claude_max_20x',
+  },
+});
+
+test('POST /api/upstreams/claude-code-authorize-url stamps SPA-provided challenge + state into the OAuth URL', async () => {
+  const { adminSession } = await setupAppTest();
+
+  const resp = await requestApp(
+    '/api/upstreams/claude-code-authorize-url',
+    authed(adminSession, { challenge: 'TEST_CHALLENGE', state: 'TEST_STATE', kind: 'oauth' }),
+  );
+  assertEquals(resp.status, 200);
+  const body = (await resp.json()) as { authorize_url: string };
+  const url = new URL(body.authorize_url);
+  assertEquals(url.origin + url.pathname, 'https://claude.ai/oauth/authorize');
+  assertEquals(url.searchParams.get('code_challenge'), 'TEST_CHALLENGE');
+  assertEquals(url.searchParams.get('code_challenge_method'), 'S256');
+  assertEquals(url.searchParams.get('state'), 'TEST_STATE');
+});
+
+test('POST /api/upstreams/claude-code-import (callback) exchanges the SPA-supplied verifier and persists a row with access token + refresh-token-set flag', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  await withMockedFetch(
+    async (request: Request) => {
+      if (request.url === 'https://platform.claude.com/v1/oauth/token') return jsonResponse(claudeCodeTokenBody());
+      if (request.url === 'https://api.anthropic.com/api/oauth/profile') return jsonResponse(claudeCodeProfileBody);
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const resp = await requestApp(
+        '/api/upstreams/claude-code-import',
+        authed(adminSession, { name: 'Claude Code', callback: { code: 'AUTH_CODE', verifier: 'TEST_VERIFIER', state: 'TEST_STATE' } }),
+      );
+      assertEquals(resp.status, 201);
+      const created = (await resp.json()) as { provider: string; state: { accounts: Array<{ refreshTokenSet: boolean; accessToken: { expiresAt: number } | null }> } };
+      assertEquals(created.provider, 'claude-code');
+      assertEquals(created.state.accounts[0].refreshTokenSet, true);
+      assertEquals(typeof created.state.accounts[0].accessToken?.expiresAt, 'number');
+    },
+  );
+});
+
+test('POST /api/upstreams/claude-code-import (credentials_json) creates a row with the cached access token', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  await withMockedFetch(
+    () => jsonResponse(claudeCodeProfileBody),
+    async () => {
+      const resp = await requestApp(
+        '/api/upstreams/claude-code-import',
+        authed(adminSession, { credentials_json: claudeCodeCredentialsJson() }),
+      );
+      assertEquals(resp.status, 201);
+      const created = (await resp.json()) as JsonObject;
+      assertEquals(created.provider, 'claude-code');
+      assertEquals(created.config.accounts[0].email, 'alice@example.com');
+      assertEquals(created.config.accounts[0].accountUuid, 'acc-uuid-1');
+      // CLI subscriptionType + rateLimitTier verbatim from the persisted
+      // credentials.json win over what the live profile endpoint would
+      // derive (which would also be 'max' in this fixture, but the
+      // assertion proves the persisted-wins path).
+      assertEquals(created.config.accounts[0].subscriptionType, 'max');
+      assertEquals((created.config.accounts[0] as { rateLimitTier: string | null }).rateLimitTier, 'default_claude_max_20x');
+      assertEquals(created.state.accounts[0].state, 'active');
+      assertEquals(created.state.accounts[0].refreshTokenSet, true);
+    },
+  );
+});
+
+test('POST /api/upstreams/claude-code-import without an explicit name auto-derives one from the imported email', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  await withMockedFetch(
+    () => jsonResponse(claudeCodeProfileBody),
+    async () => {
+      const resp = await requestApp(
+        '/api/upstreams/claude-code-import',
+        authed(adminSession, { credentials_json: claudeCodeCredentialsJson() }),
+      );
+      assertEquals(resp.status, 201);
+      const created = (await resp.json()) as { name: string };
+      assertEquals(created.name, 'Claude Code (alice@example.com)');
+    },
+  );
+});
+
+test('POST /api/upstreams/claude-code-import rejects when both credentials_json and callback are absent', async () => {
+  const { adminSession } = await setupAppTest();
+
+  const resp = await requestApp('/api/upstreams/claude-code-import', authed(adminSession, { name: 'Claude Code' }));
+  assertEquals(resp.status, 400);
+  const body = (await resp.json()) as unknown;
+  assertEquals(JSON.stringify(body).includes('Provide exactly one of credentials_json or callback'), true);
+});
+
+test('POST /api/upstreams/claude-code-import rejects a callback missing the verifier', async () => {
+  const { adminSession } = await setupAppTest();
+
+  const resp = await requestApp(
+    '/api/upstreams/claude-code-import',
+    authed(adminSession, { name: 'Claude Code', callback: { code: 'AUTH_CODE' } }),
+  );
+  assertEquals(resp.status, 400);
+});
+
+test('PATCH /api/upstreams rejects config edits on a claude-code row', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  const created = await withMockedFetch(
+    () => jsonResponse(claudeCodeProfileBody),
+    async () => {
+      const r = await requestApp(
+        '/api/upstreams/claude-code-import',
+        authed(adminSession, { credentials_json: claudeCodeCredentialsJson() }),
+      );
+      return (await r.json()) as { id: string };
+    },
+  );
+
+  const patch = await requestApp(`/api/upstreams/${created.id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', 'x-floway-session': adminSession },
+    body: JSON.stringify({ config: { accounts: [] } }),
+  });
+  assertEquals(patch.status, 400);
+  const body = (await patch.json()) as { error: string };
+  assertEquals(body.error.includes('claude-code-reimport'), true);
+});
+
+test('PATCH /api/upstreams accepts metadata edits on a claude-code row', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  const created = await withMockedFetch(
+    () => jsonResponse(claudeCodeProfileBody),
+    async () => {
+      const r = await requestApp(
+        '/api/upstreams/claude-code-import',
+        authed(adminSession, { credentials_json: claudeCodeCredentialsJson() }),
+      );
+      return (await r.json()) as { id: string };
+    },
+  );
+
+  const patch = await requestApp(`/api/upstreams/${created.id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', 'x-floway-session': adminSession },
+    body: JSON.stringify({ name: 'My Claude Max', enabled: false }),
+  });
+  assertEquals(patch.status, 200);
+  const body = (await patch.json()) as { name: string; enabled: boolean };
+  assertEquals(body.name, 'My Claude Max');
+  assertEquals(body.enabled, false);
+});
+
+test('POST /api/upstreams rejects a direct claude-code create with a redirect message', async () => {
+  const { adminSession } = await setupAppTest();
+
+  const resp = await requestApp('/api/upstreams', authed(adminSession, {
+    provider: 'claude-code',
+    name: 'Claude Code',
+    config: {},
+  }));
+  assertEquals(resp.status, 400);
+  const body = (await resp.json()) as { error: string };
+  assertEquals(body.error.includes('claude-code-import'), true);
+});
+
+test('POST /api/upstreams/:id/claude-code-refresh-now rejects non-claude-code rows with 404', async () => {
+  const { adminSession } = await setupAppTest();
+
+  const created = (await (await requestApp('/api/upstreams', authed(adminSession, createBody()))).json()) as { id: string };
+  const resp = await requestApp(`/api/upstreams/${created.id}/claude-code-refresh-now`, authed(adminSession, {}));
+  assertEquals(resp.status, 404);
+});
+
+test('POST /api/upstreams/:id/claude-code-refresh-now rejects upstreams in a terminal state with 400', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  // Plant a row in `refresh_failed` by importing then hand-mutating the row.
+  const created = await withMockedFetch(
+    () => jsonResponse(claudeCodeProfileBody),
+    async () => {
+      const r = await requestApp(
+        '/api/upstreams/claude-code-import',
+        authed(adminSession, { credentials_json: claudeCodeCredentialsJson() }),
+      );
+      return (await r.json()) as { id: string };
+    },
+  );
+  const stored = await repo.upstreams.getById(created.id);
+  const storedState = stored!.state as { accounts: Array<Record<string, unknown>> };
+  await repo.upstreams.save({
+    ...stored!,
+    state: {
+      accounts: storedState.accounts.map(a => ({
+        ...a,
+        state: 'refresh_failed',
+        stateMessage: 'token revoked',
+        accessToken: null,
+      })),
+    },
+  });
+
+  const resp = await requestApp(`/api/upstreams/${created.id}/claude-code-refresh-now`, authed(adminSession, {}));
+  assertEquals(resp.status, 400);
+  const body = (await resp.json()) as { error: string };
+  assertEquals(body.error.includes('refresh_failed'), true);
+});
+
+test('POST /api/upstreams/:id/claude-code-refresh-now rotates the refresh token on success', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  const created = await withMockedFetch(
+    () => jsonResponse(claudeCodeProfileBody),
+    async () => {
+      const r = await requestApp(
+        '/api/upstreams/claude-code-import',
+        authed(adminSession, { credentials_json: claudeCodeCredentialsJson() }),
+      );
+      return (await r.json()) as { id: string };
+    },
+  );
+
+  await withMockedFetch(
+    () => jsonResponse(claudeCodeTokenBody({ access_token: 'at_rotated', refresh_token: 'rt_rotated' })),
+    async () => {
+      const resp = await requestApp(`/api/upstreams/${created.id}/claude-code-refresh-now`, authed(adminSession, {}));
+      assertEquals(resp.status, 200);
+    },
+  );
+
+  const stored = await repo.upstreams.getById(created.id);
+  const storedState = stored?.state as { accounts: Array<{ refreshToken: string }> };
+  assertEquals(storedState.accounts[0].refreshToken, 'rt_rotated');
+});
+
+test('POST /api/upstreams/:id/claude-code-refresh-now flips the row to refresh_failed when OAuth rejects the refresh_token', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  const created = await withMockedFetch(
+    () => jsonResponse(claudeCodeProfileBody),
+    async () => {
+      const r = await requestApp(
+        '/api/upstreams/claude-code-import',
+        authed(adminSession, { credentials_json: claudeCodeCredentialsJson() }),
+      );
+      return (await r.json()) as { id: string };
+    },
+  );
+
+  await withMockedFetch(
+    () => new Response(
+      JSON.stringify({ error: { code: 'invalid_grant', message: 'Refresh token revoked' } }),
+      { status: 400, headers: { 'content-type': 'application/json' } },
+    ),
+    async () => {
+      const resp = await requestApp(`/api/upstreams/${created.id}/claude-code-refresh-now`, authed(adminSession, {}));
+      // 400, not 502: same reasoning as codex — the upstream answered,
+      // it's the stored credential that's dead. Not 401 either, to avoid
+      // logging the operator out of the dashboard.
+      assertEquals(resp.status, 400);
+      const body = await resp.json() as { error: string };
+      assertEquals(body.error.includes('Re-import'), true);
+    },
+  );
+
+  const stored = await repo.upstreams.getById(created.id);
+  const storedState = stored?.state as { accounts: Array<{ state: string; stateMessage?: string }> };
+  assertEquals(storedState.accounts[0].state, 'refresh_failed');
+  assertEquals(typeof storedState.accounts[0].stateMessage, 'string');
+});
+
+// Refresh-race recovery (audit axis #10): when our refresh-now mint loses
+// the rotation race to a sibling — typically a data-plane request that
+// hit `/v1/oauth/token` a moment earlier and already wrote the rotated
+// state — the operator should NOT see a misleading "credential dead"
+// toast. The data-plane analog is `recoverFromRefreshRace` in
+// access-token-cache.ts (commit f1efc9dd); these tests pin the
+// control-plane mirror.
+
+test('POST /api/upstreams/:id/claude-code-refresh-now recovers as success when a sibling already rotated mid-flight', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  const created = await withMockedFetch(
+    () => jsonResponse(claudeCodeProfileBody),
+    async () => {
+      const r = await requestApp(
+        '/api/upstreams/claude-code-import',
+        authed(adminSession, { credentials_json: claudeCodeCredentialsJson() }),
+      );
+      return (await r.json()) as { id: string };
+    },
+  );
+
+  // Race simulation: when our route POSTs /v1/oauth/token, a sibling has
+  // already rotated the RT and written a fresh access token. The upstream
+  // sees our (now stale) RT and answers `invalid_grant`. The route should
+  // re-read state, observe the sibling's rotation, and surface success.
+  const siblingExpiresAt = Date.now() + 3_600_000;
+  await withMockedFetch(
+    async (request: Request) => {
+      if (request.url === 'https://platform.claude.com/v1/oauth/token') {
+        // Plant the sibling's rotation result before answering with invalid_grant.
+        const row = await repo.upstreams.getById(created.id);
+        const rowState = row!.state as { accounts: Array<Record<string, unknown>> };
+        await repo.upstreams.save({
+          ...row!,
+          state: {
+            accounts: rowState.accounts.map(a => ({
+              ...a,
+              refreshToken: 'rt_sibling_rotated',
+              accessToken: {
+                token: 'at_sibling_rotated',
+                expiresAt: siblingExpiresAt,
+                refreshedAt: new Date().toISOString(),
+              },
+            })),
+          },
+        });
+        return new Response(
+          JSON.stringify({ error: { code: 'invalid_grant', message: 'Refresh token already used' } }),
+          { status: 400, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const resp = await requestApp(`/api/upstreams/${created.id}/claude-code-refresh-now`, authed(adminSession, {}));
+      assertEquals(resp.status, 200);
+      const body = (await resp.json()) as { state: { accounts: Array<{ state: string; accessToken: { expiresAt: number } | null }> } };
+      // The surfaced state mirrors the sibling's rotation — still active,
+      // access token timestamps match what the sibling wrote.
+      assertEquals(body.state.accounts[0].state, 'active');
+      assertEquals(body.state.accounts[0].accessToken?.expiresAt, siblingExpiresAt);
+    },
+  );
+
+  // Underlying row is the sibling's rotation — we did not clobber it with
+  // a refresh_failed flip or an attempt to re-write the same state.
+  const stored = await repo.upstreams.getById(created.id);
+  const storedState = stored?.state as { accounts: Array<{ state: string; refreshToken: string; accessToken: { token: string } | null }> };
+  assertEquals(storedState.accounts[0].state, 'active');
+  assertEquals(storedState.accounts[0].refreshToken, 'rt_sibling_rotated');
+  assertEquals(storedState.accounts[0].accessToken?.token, 'at_sibling_rotated');
+});
+
+test('POST /api/upstreams/:id/claude-code-refresh-now still flips terminal when invalid_grant is genuine (RT unchanged)', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  const created = await withMockedFetch(
+    () => jsonResponse(claudeCodeProfileBody),
+    async () => {
+      const r = await requestApp(
+        '/api/upstreams/claude-code-import',
+        authed(adminSession, { credentials_json: claudeCodeCredentialsJson() }),
+      );
+      return (await r.json()) as { id: string };
+    },
+  );
+
+  // No sibling rotation: the upstream rejects our RT and the row still
+  // carries the same RT on re-read. Recovery must conclude "genuine
+  // failure" and fall through to the terminal-flip path.
+  await withMockedFetch(
+    () => new Response(
+      JSON.stringify({ error: { code: 'invalid_grant', message: 'Refresh token revoked' } }),
+      { status: 400, headers: { 'content-type': 'application/json' } },
+    ),
+    async () => {
+      const resp = await requestApp(`/api/upstreams/${created.id}/claude-code-refresh-now`, authed(adminSession, {}));
+      assertEquals(resp.status, 400);
+      const body = (await resp.json()) as { error: string };
+      assertEquals(body.error.includes('Re-import'), true);
+    },
+  );
+
+  const stored = await repo.upstreams.getById(created.id);
+  const storedState = stored?.state as { accounts: Array<{ state: string; stateMessage?: string }> };
+  assertEquals(storedState.accounts[0].state, 'refresh_failed');
+  assertEquals(typeof storedState.accounts[0].stateMessage, 'string');
 });
 
 // --- proxy_fallback_list ---
@@ -927,7 +1289,7 @@ test('POST /api/upstreams accepts proxy_fallback_list and surfaces it in the res
     authed(adminSession, createBody({ proxy_fallback_list: [{ id: 'p_fallback' }, { id: 'direct' }] })),
   );
   assertEquals(resp.status, 201);
-  const created = (await resp.json()) as Record<string, any>;
+  const created = (await resp.json()) as JsonObject;
   assertEquals(created.proxy_fallback_list, [{ id: 'p_fallback' }, { id: 'direct' }]);
 
   const stored = await repo.upstreams.getById(created.id);
@@ -944,14 +1306,14 @@ test('POST /api/upstreams normalises proxy_fallback_list duplicates so the respo
     authed(adminSession, createBody({ proxy_fallback_list: [{ id: 'p_fallback' }, { id: 'direct' }, { id: 'p_fallback' }, { id: 'direct' }] })),
   );
   assertEquals(resp.status, 201);
-  const created = (await resp.json()) as Record<string, any>;
+  const created = (await resp.json()) as JsonObject;
   // Without the API-layer normalize, the response would echo the duplicates
   // while the saved row only kept one of each — operators would see a
   // different list on POST vs the next GET.
   assertEquals(created.proxy_fallback_list, [{ id: 'p_fallback' }, { id: 'direct' }]);
 
   const get = await requestApp('/api/upstreams', authed(adminSession));
-  const list = (await get.json()) as Array<Record<string, any>>;
+  const list = (await get.json()) as JsonObject[];
   const fresh = list.find(u => u.id === created.id);
   assertEquals(fresh!.proxy_fallback_list, [{ id: 'p_fallback' }, { id: 'direct' }]);
 });
@@ -971,7 +1333,7 @@ test('PATCH /api/upstreams sets proxy_fallback_list', async () => {
     body: JSON.stringify({ proxy_fallback_list: [{ id: 'p_fallback' }, { id: 'direct' }] }),
   });
   assertEquals(patch.status, 200);
-  const updated = (await patch.json()) as Record<string, any>;
+  const updated = (await patch.json()) as JsonObject;
   assertEquals(updated.proxy_fallback_list, [{ id: 'p_fallback' }, { id: 'direct' }]);
 });
 
@@ -1017,6 +1379,39 @@ test('DELETE /api/upstreams sweeps orphaned proxy backoff rows', async () => {
 
 // --- pre-save proxy_fallback_list override ---
 
+test('POST /api/upstreams/:id/claude-code-refresh-now honors the proxy_fallback_list override over the persisted list', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  // Stash a real proxy id so the persisted list has a non-direct entry; the
+  // override below points at a different (unknown) id, so a 400 from the
+  // route proves the override won — not the persisted row.
+  await repo.proxies.insert({ id: 'p_real', name: 'Real', url: 'socks5://198.51.100.10:1080', dialTimeoutSeconds: null });
+
+  const created = await withMockedFetch(
+    () => jsonResponse(claudeCodeProfileBody),
+    async () => {
+      const r = await requestApp(
+        '/api/upstreams/claude-code-import',
+        authed(adminSession, { credentials_json: claudeCodeCredentialsJson() }),
+      );
+      return (await r.json()) as { id: string };
+    },
+  );
+
+  // Persist a non-direct fallback list so a successful default-path refresh
+  // would route through `p_real`. The override below should win.
+  await repo.upstreams.save({ ...(await repo.upstreams.getById(created.id))!, proxyFallbackList: [{ id: 'p_real' }] });
+
+  const resp = await requestApp(
+    `/api/upstreams/${created.id}/claude-code-refresh-now`,
+    authed(adminSession, { proxy_fallback_list: [{ id: 'p_unknown' }] }),
+  );
+  assertEquals(resp.status, 400);
+  const body = (await resp.json()) as { error: string };
+  assertEquals(body.error.toLowerCase().includes('unknown proxy id'), true);
+});
+
 test('POST /api/upstreams/:id/codex-refresh-now honors the proxy_fallback_list override over the persisted list', async () => {
   const { repo, adminSession } = await setupAppTest();
   await repo.upstreams.deleteAll();
@@ -1032,6 +1427,34 @@ test('POST /api/upstreams/:id/codex-refresh-now honors the proxy_fallback_list o
   assertEquals(body.error.toLowerCase().includes('unknown proxy id'), true);
 });
 
+test('POST /api/upstreams/:id/claude-code-refresh-now without an override falls back to the persisted list (no override → no validation failure)', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  const created = await withMockedFetch(
+    () => jsonResponse(claudeCodeProfileBody),
+    async () => {
+      const r = await requestApp(
+        '/api/upstreams/claude-code-import',
+        authed(adminSession, { credentials_json: claudeCodeCredentialsJson() }),
+      );
+      return (await r.json()) as { id: string };
+    },
+  );
+
+  // Empty body → no override → persisted ([]) → direct egress → mocked fetch
+  // serves the refresh response. A successful 200 proves the "no override"
+  // path did not validate against the proxies table (it skipped validation
+  // because no override was sent).
+  await withMockedFetch(
+    () => jsonResponse(claudeCodeTokenBody({ access_token: 'at_rotated', refresh_token: 'rt_rotated' })),
+    async () => {
+      const resp = await requestApp(`/api/upstreams/${created.id}/claude-code-refresh-now`, authed(adminSession, {}));
+      assertEquals(resp.status, 200);
+    },
+  );
+});
+
 test('POST /api/upstreams/copilot/auth/poll honors the proxy_fallback_list override', async () => {
   const { adminSession } = await setupAppTest();
   const resp = await requestApp(
@@ -1044,6 +1467,392 @@ test('POST /api/upstreams/copilot/auth/poll honors the proxy_fallback_list overr
   assertEquals(resp.status, 502);
   const body = (await resp.json()) as { error: string };
   assertEquals(body.error.toLowerCase().includes('unknown proxy id'), true);
+});
+
+// --- import / reimport proxy_fallback_list override ---
+//
+// Import and re-import fire before (or alongside) a save, so the operator's
+// in-flight proxy edit must accompany the request. Two behaviors:
+//   1. The bootstrap call (OAuth token exchange + identity fetch) routes
+//      through the override.
+//   2. The override is persisted on the new (import) / existing (re-import)
+//      row so subsequent data-plane calls use the same chain without a
+//      follow-up edit.
+
+test('POST /api/upstreams/claude-code-import rejects an override referencing an unknown proxy id', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  const resp = await requestApp(
+    '/api/upstreams/claude-code-import',
+    authed(adminSession, {
+      credentials_json: claudeCodeCredentialsJson(),
+      proxy_fallback_list: [{ id: 'p_unknown' }],
+    }),
+  );
+  assertEquals(resp.status, 400);
+  const body = (await resp.json()) as { error: string };
+  assertEquals(body.error.toLowerCase().includes('unknown proxy id'), true);
+});
+
+test('POST /api/upstreams/claude-code-import persists the override on the new row', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+  // Real proxy id so the override validates; 'direct' alone short-circuits
+  // override resolution to directFetcher, so we use a real proxy + 'direct'
+  // to exercise persistence without the bootstrap actually dialing through
+  // a non-existent socks5 endpoint. The credentials_json path only fetches
+  // /api/oauth/profile, which we let the mock serve directly.
+  await repo.proxies.insert({ id: 'p_real', name: 'Real', url: 'socks5://198.51.100.10:1080', dialTimeoutSeconds: null });
+
+  const created = await withMockedFetch(
+    () => jsonResponse(claudeCodeProfileBody),
+    async () => {
+      const r = await requestApp(
+        '/api/upstreams/claude-code-import',
+        authed(adminSession, {
+          credentials_json: claudeCodeCredentialsJson(),
+          // 'direct' first → the override fetcher short-circuits to direct
+          // and the mocked fetch above handles the identity call. 'p_real'
+          // tails so persistence shows a non-trivial list.
+          proxy_fallback_list: [{ id: 'direct' }, { id: 'p_real' }],
+        }),
+      );
+      assertEquals(r.status, 201);
+      return (await r.json()) as { id: string; proxy_fallback_list: { id: string }[] };
+    },
+  );
+
+  assertEquals(created.proxy_fallback_list, [{ id: 'direct' }, { id: 'p_real' }]);
+  const stored = await repo.upstreams.getById(created.id);
+  assertEquals(stored?.proxyFallbackList, [{ id: 'direct' }, { id: 'p_real' }]);
+});
+
+test('POST /api/upstreams/claude-code-import without an override persists an empty list', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  const created = await withMockedFetch(
+    () => jsonResponse(claudeCodeProfileBody),
+    async () => {
+      const r = await requestApp(
+        '/api/upstreams/claude-code-import',
+        authed(adminSession, { credentials_json: claudeCodeCredentialsJson() }),
+      );
+      return (await r.json()) as { id: string; proxy_fallback_list: { id: string }[] };
+    },
+  );
+
+  assertEquals(created.proxy_fallback_list, []);
+});
+
+test('POST /api/upstreams/:id/claude-code-reimport overwrites the persisted proxy_fallback_list when an override is supplied', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+  await repo.proxies.insert({ id: 'p_initial', name: 'Initial', url: 'socks5://198.51.100.10:1080', dialTimeoutSeconds: null });
+  await repo.proxies.insert({ id: 'p_new', name: 'New', url: 'socks5://198.51.100.11:1080', dialTimeoutSeconds: null });
+
+  const created = await withMockedFetch(
+    () => jsonResponse(claudeCodeProfileBody),
+    async () => {
+      const r = await requestApp(
+        '/api/upstreams/claude-code-import',
+        authed(adminSession, {
+          credentials_json: claudeCodeCredentialsJson(),
+          proxy_fallback_list: [{ id: 'direct' }, { id: 'p_initial' }],
+        }),
+      );
+      return (await r.json()) as { id: string };
+    },
+  );
+
+  const reimported = await withMockedFetch(
+    () => jsonResponse(claudeCodeProfileBody),
+    async () => {
+      const r = await requestApp(
+        `/api/upstreams/${created.id}/claude-code-reimport`,
+        authed(adminSession, {
+          credentials_json: claudeCodeCredentialsJson(),
+          proxy_fallback_list: [{ id: 'direct' }, { id: 'p_new' }],
+        }),
+      );
+      assertEquals(r.status, 200);
+      return (await r.json()) as { proxy_fallback_list: { id: string }[] };
+    },
+  );
+
+  assertEquals(reimported.proxy_fallback_list, [{ id: 'direct' }, { id: 'p_new' }]);
+  const stored = await repo.upstreams.getById(created.id);
+  assertEquals(stored?.proxyFallbackList, [{ id: 'direct' }, { id: 'p_new' }]);
+});
+
+test('POST /api/upstreams/:id/claude-code-reimport without an override leaves the persisted proxy_fallback_list untouched', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+  await repo.proxies.insert({ id: 'p_initial', name: 'Initial', url: 'socks5://198.51.100.10:1080', dialTimeoutSeconds: null });
+
+  const created = await withMockedFetch(
+    () => jsonResponse(claudeCodeProfileBody),
+    async () => {
+      const r = await requestApp(
+        '/api/upstreams/claude-code-import',
+        authed(adminSession, {
+          credentials_json: claudeCodeCredentialsJson(),
+          proxy_fallback_list: [{ id: 'direct' }, { id: 'p_initial' }],
+        }),
+      );
+      return (await r.json()) as { id: string };
+    },
+  );
+
+  await withMockedFetch(
+    () => jsonResponse(claudeCodeProfileBody),
+    async () => {
+      const r = await requestApp(
+        `/api/upstreams/${created.id}/claude-code-reimport`,
+        authed(adminSession, { credentials_json: claudeCodeCredentialsJson() }),
+      );
+      assertEquals(r.status, 200);
+    },
+  );
+
+  const stored = await repo.upstreams.getById(created.id);
+  assertEquals(stored?.proxyFallbackList, [{ id: 'direct' }, { id: 'p_initial' }]);
+});
+
+test('POST /api/upstreams/codex-import rejects an override referencing an unknown proxy id', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  const resp = await requestApp(
+    '/api/upstreams/codex-import',
+    authed(adminSession, { ...codexAuthJsonImport(), proxy_fallback_list: [{ id: 'p_unknown' }] }),
+  );
+  assertEquals(resp.status, 400);
+  const body = (await resp.json()) as { error: string };
+  assertEquals(body.error.toLowerCase().includes('unknown proxy id'), true);
+});
+
+test('POST /api/upstreams/codex-import persists the override on the new row', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+  await repo.proxies.insert({ id: 'p_real', name: 'Real', url: 'socks5://198.51.100.10:1080', dialTimeoutSeconds: null });
+
+  const resp = await requestApp(
+    '/api/upstreams/codex-import',
+    authed(adminSession, { ...codexAuthJsonImport(), proxy_fallback_list: [{ id: 'direct' }, { id: 'p_real' }] }),
+  );
+  assertEquals(resp.status, 201);
+  const created = (await resp.json()) as { id: string; proxy_fallback_list: { id: string }[] };
+  assertEquals(created.proxy_fallback_list, [{ id: 'direct' }, { id: 'p_real' }]);
+
+  const stored = await repo.upstreams.getById(created.id);
+  assertEquals(stored?.proxyFallbackList, [{ id: 'direct' }, { id: 'p_real' }]);
+});
+
+test('POST /api/upstreams/codex-import without an override persists an empty list', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  const resp = await requestApp('/api/upstreams/codex-import', authed(adminSession, codexAuthJsonImport()));
+  assertEquals(resp.status, 201);
+  const created = (await resp.json()) as { id: string; proxy_fallback_list: { id: string }[] };
+  assertEquals(created.proxy_fallback_list, []);
+});
+
+test('POST /api/upstreams/:id/codex-reimport overwrites the persisted proxy_fallback_list when an override is supplied', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+  await repo.proxies.insert({ id: 'p_initial', name: 'Initial', url: 'socks5://198.51.100.10:1080', dialTimeoutSeconds: null });
+  await repo.proxies.insert({ id: 'p_new', name: 'New', url: 'socks5://198.51.100.11:1080', dialTimeoutSeconds: null });
+
+  const create = await requestApp(
+    '/api/upstreams/codex-import',
+    authed(adminSession, { ...codexAuthJsonImport(), proxy_fallback_list: [{ id: 'direct' }, { id: 'p_initial' }] }),
+  );
+  const created = (await create.json()) as { id: string };
+
+  const reimport = await requestApp(
+    `/api/upstreams/${created.id}/codex-reimport`,
+    authed(adminSession, { ...codexAuthJsonImport(), proxy_fallback_list: [{ id: 'direct' }, { id: 'p_new' }] }),
+  );
+  assertEquals(reimport.status, 200);
+  const reimported = (await reimport.json()) as { proxy_fallback_list: { id: string }[] };
+  assertEquals(reimported.proxy_fallback_list, [{ id: 'direct' }, { id: 'p_new' }]);
+
+  const stored = await repo.upstreams.getById(created.id);
+  assertEquals(stored?.proxyFallbackList, [{ id: 'direct' }, { id: 'p_new' }]);
+});
+
+test('POST /api/upstreams/:id/codex-reimport without an override leaves the persisted proxy_fallback_list untouched', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+  await repo.proxies.insert({ id: 'p_initial', name: 'Initial', url: 'socks5://198.51.100.10:1080', dialTimeoutSeconds: null });
+
+  const create = await requestApp(
+    '/api/upstreams/codex-import',
+    authed(adminSession, { ...codexAuthJsonImport(), proxy_fallback_list: [{ id: 'direct' }, { id: 'p_initial' }] }),
+  );
+  const created = (await create.json()) as { id: string };
+
+  const reimport = await requestApp(
+    `/api/upstreams/${created.id}/codex-reimport`,
+    authed(adminSession, codexAuthJsonImport()),
+  );
+  assertEquals(reimport.status, 200);
+
+  const stored = await repo.upstreams.getById(created.id);
+  assertEquals(stored?.proxyFallbackList, [{ id: 'direct' }, { id: 'p_initial' }]);
+});
+
+// --- claude-code Setup-Token routes ---
+
+const claudeCodeSetupTokenBody = (overrides: Record<string, unknown> = {}) => ({
+  access_token: 'st_long_lived',
+  token_type: 'Bearer',
+  expires_in: 31536000,
+  scope: 'user:inference',
+  ...overrides,
+});
+
+const claudeCodePermissionError403 = () => jsonResponse(
+  { error: { type: 'permission_error', message: 'token lacks user:profile scope' } },
+  403,
+);
+
+test('POST /api/upstreams/claude-code-authorize-url with kind=setup-token narrows the scope to user:inference', async () => {
+  const { adminSession } = await setupAppTest();
+
+  const resp = await requestApp(
+    '/api/upstreams/claude-code-authorize-url',
+    authed(adminSession, { challenge: 'TEST_CHALLENGE', state: 'TEST_STATE', kind: 'setup-token' }),
+  );
+  assertEquals(resp.status, 200);
+  const body = (await resp.json()) as { authorize_url: string };
+  const url = new URL(body.authorize_url);
+  assertEquals(url.origin + url.pathname, 'https://claude.ai/oauth/authorize');
+  assertEquals(url.searchParams.get('scope'), 'user:inference');
+});
+
+test('POST /api/upstreams/claude-code-setup-token-import (callback) creates a setup-token credential and persists tokenKind', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  await withMockedFetch(
+    async (request: Request) => {
+      if (request.url === 'https://platform.claude.com/v1/oauth/token') {
+        // Verify the exchange body asks for the long-lived bearer.
+        const body = JSON.parse(await request.text()) as Record<string, unknown>;
+        assertEquals(body.expires_in, 31536000);
+        return jsonResponse(claudeCodeSetupTokenBody());
+      }
+      if (request.url === 'https://api.anthropic.com/api/oauth/profile') {
+        // Setup-token bearer lacks user:profile; the import path falls back
+        // to a degraded identity rather than refusing the import.
+        return claudeCodePermissionError403();
+      }
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const resp = await requestApp(
+        '/api/upstreams/claude-code-setup-token-import',
+        authed(adminSession, { callback: { code: 'AUTH_CODE', verifier: 'TEST_VERIFIER', state: 'TEST_STATE' } }),
+      );
+      assertEquals(resp.status, 201);
+      const created = (await resp.json()) as {
+        id: string; provider: string;
+        config: { accounts: Array<{ email: string | null; accountUuid: string }> };
+        state: { accounts: Array<{ tokenKind: string; refreshTokenSet: boolean; accessToken: { expiresAt: number } | null }> };
+      };
+      assertEquals(created.provider, 'claude-code');
+      assertEquals(created.state.accounts[0].tokenKind, 'setup-token');
+      // No refresh token on the wire view — the serializer surfaces presence
+      // as `refreshTokenSet`. For setup-token it's always false.
+      assertEquals(created.state.accounts[0].refreshTokenSet, false);
+      // Degraded identity: deterministic UUID + null email.
+      assertEquals(created.config.accounts[0].email, null);
+      // Long-lived expiry — at least 360 days out.
+      const expiresAt = created.state.accounts[0].accessToken?.expiresAt ?? 0;
+      assertEquals(expiresAt > Date.now() + 360 * 24 * 60 * 60 * 1000, true);
+    },
+  );
+});
+
+test('POST /api/upstreams/:id/claude-code-refresh-now rejects setup-token credentials', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  let upstreamId = '';
+  await withMockedFetch(
+    async (request: Request) => {
+      if (request.url === 'https://platform.claude.com/v1/oauth/token') return jsonResponse(claudeCodeSetupTokenBody());
+      if (request.url === 'https://api.anthropic.com/api/oauth/profile') return claudeCodePermissionError403();
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const resp = await requestApp(
+        '/api/upstreams/claude-code-setup-token-import',
+        authed(adminSession, { callback: { code: 'AUTH_CODE', verifier: 'TEST_VERIFIER', state: 'TEST_STATE' } }),
+      );
+      if (resp.status !== 201) {
+        const body = await resp.text();
+        throw new Error(`Setup-token import failed: ${resp.status} ${body}`);
+      }
+      const created = (await resp.json()) as { id: string };
+      upstreamId = created.id;
+    },
+  );
+
+  const refresh = await requestApp(
+    `/api/upstreams/${upstreamId}/claude-code-refresh-now`,
+    authed(adminSession, {}),
+  );
+  assertEquals(refresh.status, 400);
+  const body = (await refresh.json()) as { error: string };
+  assertEquals(body.error.includes('Setup-token'), true);
+});
+
+test('POST /api/upstreams/:id/claude-code-setup-token-reimport replaces credentials in place', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  let upstreamId = '';
+  await withMockedFetch(
+    async (request: Request) => {
+      if (request.url === 'https://platform.claude.com/v1/oauth/token') return jsonResponse(claudeCodeSetupTokenBody({ access_token: 'st_v1' }));
+      if (request.url === 'https://api.anthropic.com/api/oauth/profile') return claudeCodePermissionError403();
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const resp = await requestApp(
+        '/api/upstreams/claude-code-setup-token-import',
+        authed(adminSession, { callback: { code: 'AUTH_CODE_1', verifier: 'VERIFIER_1', state: 'TEST_STATE' } }),
+      );
+      assertEquals(resp.status, 201);
+      const created = (await resp.json()) as { id: string };
+      upstreamId = created.id;
+    },
+  );
+
+  await withMockedFetch(
+    async (request: Request) => {
+      if (request.url === 'https://platform.claude.com/v1/oauth/token') return jsonResponse(claudeCodeSetupTokenBody({ access_token: 'st_v2' }));
+      if (request.url === 'https://api.anthropic.com/api/oauth/profile') return claudeCodePermissionError403();
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const resp = await requestApp(
+        `/api/upstreams/${upstreamId}/claude-code-setup-token-reimport`,
+        authed(adminSession, { callback: { code: 'AUTH_CODE_2', verifier: 'VERIFIER_2', state: 'TEST_STATE' } }),
+      );
+      assertEquals(resp.status, 200);
+    },
+  );
+
+  const stored = await repo.upstreams.getById(upstreamId);
+  const storedState = stored?.state as { accounts: Array<{ tokenKind: string; accessToken: { token: string } | null }> };
+  assertEquals(storedState.accounts[0].tokenKind, 'setup-token');
+  assertEquals(storedState.accounts[0].accessToken?.token, 'st_v2');
 });
 
 test('POST /api/upstreams/copilot/auth/poll persists the override on the freshly-created row', async () => {
@@ -1118,16 +1927,147 @@ test('POST /api/upstreams/:id/codex-refresh-now without an override falls back t
   );
 });
 
+// --- POST /api/upstreams/:id/claude-code-probe-quota ---
+//
+// Operator-driven active quota probe — Claude Code only. Mirrors real CC's
+// `fetchUtilization: GET /api/oauth/usage` call so operators get the same
+// snapshot the CLI sees without burning a model request. Returns the body
+// verbatim and persists into usageProbeSnapshot state for the dashboard.
+
+const usageProbeBody = {
+  five_hour: { utilization: 0.42, resets_at: '2026-06-19T20:00:00Z' },
+  seven_day: { utilization: 0.10, resets_at: '2026-06-25T18:00:00Z' },
+  seven_day_sonnet: { utilization: 0.05, resets_at: '2026-06-25T18:00:00Z' },
+};
+
+test('POST /api/upstreams/:id/claude-code-probe-quota returns Anthropic body verbatim and persists into state', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  const created = await withMockedFetch(
+    () => jsonResponse(claudeCodeProfileBody),
+    async () => {
+      const r = await requestApp(
+        '/api/upstreams/claude-code-import',
+        authed(adminSession, { credentials_json: claudeCodeCredentialsJson() }),
+      );
+      return (await r.json()) as { id: string };
+    },
+  );
+
+  await withMockedFetch(
+    async (request: Request) => {
+      if (request.url === 'https://api.anthropic.com/api/oauth/usage') {
+        assertEquals(request.headers.get('authorization'), 'Bearer cli_at');
+        assertEquals(request.headers.get('anthropic-beta'), 'oauth-2025-04-20');
+        return jsonResponse(usageProbeBody);
+      }
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const resp = await requestApp(`/api/upstreams/${created.id}/claude-code-probe-quota`, authed(adminSession, {}));
+      assertEquals(resp.status, 200);
+      const body = (await resp.json()) as Record<string, unknown> & { fetched_at: string };
+      assertEquals(typeof body.fetched_at, 'string');
+      assertEquals(body.five_hour, usageProbeBody.five_hour);
+      assertEquals(body.seven_day, usageProbeBody.seven_day);
+      assertEquals(body.seven_day_sonnet, usageProbeBody.seven_day_sonnet);
+    },
+  );
+
+  // The persisted snapshot is observable via the next GET /api/upstreams.
+  const stored = await repo.upstreams.getById(created.id);
+  const storedState = stored?.state as { accounts: Array<{ usageProbeSnapshot: { fetchedAt: number; data: Record<string, unknown> } | null }> };
+  assertEquals(storedState.accounts[0].usageProbeSnapshot?.data, usageProbeBody);
+  assertEquals(typeof storedState.accounts[0].usageProbeSnapshot?.fetchedAt, 'number');
+});
+
+test('POST /api/upstreams/:id/claude-code-probe-quota mints a fresh access token when the cached one is stale', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  // Import then expire the cached access token so the route's ensureClaudeCodeAccessToken
+  // call falls through to the refresh path. The refresh round-trip + probe
+  // call both ride through the mocked fetch.
+  const created = await withMockedFetch(
+    () => jsonResponse(claudeCodeProfileBody),
+    async () => {
+      const r = await requestApp(
+        '/api/upstreams/claude-code-import',
+        authed(adminSession, { credentials_json: claudeCodeCredentialsJson({ expiresAt: Date.now() - 60_000 }) }),
+      );
+      return (await r.json()) as { id: string };
+    },
+  );
+
+  await withMockedFetch(
+    async (request: Request) => {
+      if (request.url === 'https://platform.claude.com/v1/oauth/token') {
+        return jsonResponse(claudeCodeTokenBody({ access_token: 'at_refreshed', refresh_token: 'rt_v2' }));
+      }
+      if (request.url === 'https://api.anthropic.com/api/oauth/usage') {
+        // Probe rides on the freshly-minted access token, not the stale one.
+        assertEquals(request.headers.get('authorization'), 'Bearer at_refreshed');
+        return jsonResponse(usageProbeBody);
+      }
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => {
+      const resp = await requestApp(`/api/upstreams/${created.id}/claude-code-probe-quota`, authed(adminSession, {}));
+      assertEquals(resp.status, 200);
+    },
+  );
+});
+
+test('POST /api/upstreams/:id/claude-code-probe-quota surfaces upstream 401 as 502', async () => {
+  const { repo, adminSession } = await setupAppTest();
+  await repo.upstreams.deleteAll();
+
+  const created = await withMockedFetch(
+    () => jsonResponse(claudeCodeProfileBody),
+    async () => {
+      const r = await requestApp(
+        '/api/upstreams/claude-code-import',
+        authed(adminSession, { credentials_json: claudeCodeCredentialsJson() }),
+      );
+      return (await r.json()) as { id: string };
+    },
+  );
+
+  await withMockedFetch(
+    () => new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401, headers: { 'content-type': 'application/json' } }),
+    async () => {
+      const resp = await requestApp(`/api/upstreams/${created.id}/claude-code-probe-quota`, authed(adminSession, {}));
+      assertEquals(resp.status, 502);
+      const body = (await resp.json()) as { error: string };
+      assertEquals(body.error.includes('401'), true);
+    },
+  );
+});
+
+test('POST /api/upstreams/:id/claude-code-probe-quota rejects non-claude-code upstreams with 400', async () => {
+  const { adminSession } = await setupAppTest();
+  const created = (await (await requestApp('/api/upstreams', authed(adminSession, createBody()))).json()) as { id: string };
+
+  const resp = await requestApp(`/api/upstreams/${created.id}/claude-code-probe-quota`, authed(adminSession, {}));
+  assertEquals(resp.status, 400);
+  const body = (await resp.json()) as { error: string };
+  assertEquals(body.error.includes('claude-code'), true);
+});
+
+test('POST /api/upstreams/:id/claude-code-probe-quota 404s for an unknown upstream id', async () => {
+  const { adminSession } = await setupAppTest();
+  const resp = await requestApp('/api/upstreams/nope/claude-code-probe-quota', authed(adminSession, {}));
+  assertEquals(resp.status, 404);
+});
+
 test('POST /api/upstreams/codex-import honors the proxy_fallback_list override over the persisted list', async () => {
   const { adminSession } = await setupAppTest();
-
-  const startResp = await requestApp('/api/upstreams/codex-pkce-start', authed(adminSession, {}));
-  const { state } = (await startResp.json()) as { state: string };
 
   const resp = await requestApp(
     '/api/upstreams/codex-import',
     authed(adminSession, {
-      callback: { code: 'AUTH_CODE', state },
+      callback: { code: 'AUTH_CODE', verifier: 'TEST_VERIFIER' },
       proxy_fallback_list: [{ id: 'p_unknown' }],
     }),
   );
@@ -1142,13 +2082,10 @@ test('POST /api/upstreams/:id/codex-reimport honors the proxy_fallback_list over
 
   const created = (await (await requestApp('/api/upstreams/codex-import', authed(adminSession, codexAuthJsonImport()))).json()) as { id: string };
 
-  const startResp = await requestApp('/api/upstreams/codex-pkce-start', authed(adminSession, {}));
-  const { state } = (await startResp.json()) as { state: string };
-
   const resp = await requestApp(
     `/api/upstreams/${created.id}/codex-reimport`,
     authed(adminSession, {
-      callback: { code: 'AUTH_CODE', state },
+      callback: { code: 'AUTH_CODE', verifier: 'TEST_VERIFIER' },
       proxy_fallback_list: [{ id: 'p_unknown' }],
     }),
   );

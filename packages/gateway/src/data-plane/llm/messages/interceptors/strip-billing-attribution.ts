@@ -1,22 +1,28 @@
 import type { MessagesInterceptor } from './types.ts';
 
-/**
- * Claude Code injects `x-anthropic-billing-header` lines containing a per-turn
- * `cch=` hash. Some upstreams treat this metadata as ordinary prompt text, so
- * prompt caching stops hitting even when the real prompt did not change. The
- * cleanup is wire-shape-agnostic — every provider benefits whether the wire
- * stays Messages or the gateway translates onward — so it lives on the
- * gateway-side Messages source chain.
- *
- * References:
- * - https://github.com/Menci/Floway/pull/9
- */
+// Claude Code clients seed every Messages request with an
+// `x-anthropic-billing-header: …` line carrying a per-turn `cch=<hash>` value.
+// Two upstreams want opposite things from that block:
+//
+//   - The Claude Code subscription endpoint (provider kind `claude-code`)
+//     reads the block to bill the request against the user's plan tier. If
+//     we strip it, the request silently falls off plan billing.
+//   - Every other upstream (copilot, azure, custom) treats the block as
+//     ordinary prompt text. The `cch=` hash flips per call, so the
+//     upstream's prompt-cache layer sees a "different" prompt every turn
+//     and never reuses its cache, even when the real conversation prefix
+//     hasn't changed.
+//
+// Gating is owned by the `strip-billing-attribution` flag in the provider
+// flag catalog; defaults are wired there per kind.
 const BILLING_HEADER_LINE_RE = /x-anthropic-billing-header[^\n]*/g;
 const CCH_HASH_RE = /cch=[0-9a-f]{5,};?/gi;
 
 const stripText = (text: string): string => text.replace(BILLING_HEADER_LINE_RE, '').replace(CCH_HASH_RE, '').trim();
 
-export const stripBillingAttribution: MessagesInterceptor = (ctx, _request, run) => {
+export const stripBillingAttribution: MessagesInterceptor = (ctx, _gatewayCtx, run) => {
+  if (!ctx.candidate.binding.enabledFlags.has('strip-billing-attribution')) return run();
+
   const { payload } = ctx;
 
   if (typeof payload.system === 'string') {

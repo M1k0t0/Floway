@@ -5,6 +5,7 @@
 import { computed } from 'vue';
 
 import type { CodexAccountCredentialState, CodexAccountIdentity, UpstreamRecord } from '../../api/types.ts';
+import { providerSwatchClass } from '../upstreams/provider-meta.ts';
 import { Badge, Card } from '@floway-dev/ui';
 
 const props = defineProps<{
@@ -21,13 +22,12 @@ const codexRecord = computed(() => {
   return props.record;
 });
 
-const account = computed<CodexAccountIdentity | null>(() => codexRecord.value.config.accounts[0] ?? null);
+const account = computed<CodexAccountIdentity>(() => codexRecord.value.config.accounts[0]);
 
 const credential = computed<CodexAccountCredentialState | null>(() => {
   const raw = codexRecord.value.state;
   if (!raw || !Array.isArray(raw.accounts)) return null;
-  if (!account.value) return raw.accounts[0] ?? null;
-  return raw.accounts.find(a => a.chatgptAccountId === account.value!.chatgptAccountId) ?? raw.accounts[0] ?? null;
+  return raw.accounts.find(a => a.chatgptAccountId === account.value.chatgptAccountId) ?? null;
 });
 
 const quota = computed(() => codexRecord.value.codex_quota ?? null);
@@ -65,7 +65,7 @@ const badge = computed<{ tone: 'rose' | 'amber' | 'emerald'; label: string; deta
 });
 
 const accountIdShort = computed(() => {
-  const id = account.value?.chatgptAccountId ?? '';
+  const id = account.value.chatgptAccountId;
   if (id.length <= 18) return id;
   return `${id.slice(0, 8)}…${id.slice(-6)}`;
 });
@@ -83,14 +83,14 @@ const windows = computed(() => {
 <template>
   <Card :padded="false" class="space-y-4 p-4">
     <div class="flex items-start gap-3">
-      <div class="flex size-10 shrink-0 items-center justify-center rounded-full bg-surface-700 text-gray-400">
-        <i class="i-lucide-circle-user-round size-6" />
+      <div class="flex size-10 shrink-0 items-center justify-center rounded-full" :class="providerSwatchClass('codex')">
+        <i class="i-simple-icons-openai size-5" />
       </div>
       <div class="min-w-0 flex-1 space-y-1">
-        <p class="truncate text-sm font-medium text-white">{{ account?.email ?? 'Codex account' }}</p>
+        <p class="truncate text-sm font-medium text-white">{{ account.email }}</p>
         <div class="flex flex-wrap items-center gap-2 text-xs text-gray-400">
-          <Badge v-if="account" tone="violet" size="sm" class="!uppercase tracking-wide">{{ account.planType }}</Badge>
-          <span v-if="account" class="font-mono text-[11px] text-gray-500" :title="account.chatgptAccountId">{{ accountIdShort }}</span>
+          <Badge tone="violet" size="sm" class="!uppercase tracking-wide">{{ account.planType }}</Badge>
+          <span class="font-mono text-[11px] text-gray-500" :title="account.chatgptAccountId">{{ accountIdShort }}</span>
         </div>
       </div>
       <Badge :tone="badge.tone" size="sm">{{ badge.label }}</Badge>

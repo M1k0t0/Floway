@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
-import type { UpstreamProviderKind, UpstreamRecord } from '../../api/types.ts';
+import type { UpstreamRecord } from '../../api/types.ts';
+import { formatClaudeCodeSubscriptionType } from '../../lib/claude-code-format.ts';
 import { assertNever } from '../../utils/assert-never.ts';
 import { copilotAccountTypeDisplay } from '../../utils/copilot.ts';
+import { providerBadgeClass, providerMeta } from '../upstreams/provider-meta.ts';
 
 const props = defineProps<{
   upstream: UpstreamRecord;
@@ -19,18 +21,6 @@ defineEmits<{
   edit: [];
   delete: [];
 }>();
-
-const providerLabel = (kind: UpstreamProviderKind) => ({ custom: 'Custom', azure: 'Azure', copilot: 'Copilot', codex: 'Codex', ollama: 'Ollama' }[kind]);
-const providerBadgeClass = (kind: UpstreamProviderKind) => {
-  switch (kind) {
-  case 'azure': return 'border-accent-emerald/30 bg-accent-emerald/10 text-accent-emerald';
-  case 'copilot': return 'border-accent-cyan/30 bg-accent-cyan/10 text-accent-cyan';
-  case 'codex': return 'border-accent-violet/30 bg-accent-violet/10 text-accent-violet';
-  case 'ollama': return 'border-accent-rose/30 bg-accent-rose/10 text-accent-rose';
-  case 'custom': return 'border-accent-amber/30 bg-accent-amber/10 text-accent-amber';
-  }
-  return assertNever(kind);
-};
 
 const modelSummary = computed(() => `${props.modelCount} model${props.modelCount === 1 ? '' : 's'}`);
 
@@ -49,6 +39,14 @@ const subtitle = computed(() => {
     const account = u.config.accounts[0];
     return `${account.email} · ${account.planType}`;
   }
+  case 'claude-code': {
+    const account = u.config.accounts[0];
+    // email is null for tokens that lack `user:profile`; fall back to the
+    // short accountUuid prefix so the row still has a stable identifier.
+    const label = account.email ?? `${account.accountUuid.slice(0, 8)}…`;
+    const subscription = formatClaudeCodeSubscriptionType(account.subscriptionType, account.rateLimitTier);
+    return subscription ? `${label} · ${subscription}` : label;
+  }
   case 'ollama': return u.config.baseUrl ?? 'Ollama endpoint';
   }
   return assertNever(u);
@@ -63,7 +61,7 @@ const subtitle = computed(() => {
           <span
             class="rounded border px-2 py-0.5 text-xs font-semibold uppercase tracking-wide"
             :class="providerBadgeClass(upstream.provider)"
-          >{{ providerLabel(upstream.provider) }}</span>
+          >{{ providerMeta(upstream.provider).label }}</span>
           <span class="rounded bg-surface-900/70 px-2 py-0.5 text-[11px] font-medium text-gray-400">{{ modelSummary }}</span>
         </div>
         <p class="truncate text-sm font-semibold text-white">{{ upstream.name }}</p>

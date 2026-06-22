@@ -30,5 +30,12 @@ export const zValidator = <T extends ZodType, Target extends keyof ValidationTar
 // `c.req.valid('json' | 'query')` precisely without restating the env / path
 // generics every time. The Variables generic mirrors app.ts so handlers can
 // still call apiKeyFromContext / userFromContext on the same Context.
-export type CtxWithJson<S extends ZodType> = Context<{ Variables: AuthVars }, string, { in: { json: z.infer<S> }; out: { json: z.infer<S> } }>;
-export type CtxWithQuery<S extends ZodType> = Context<{ Variables: AuthVars }, string, { in: { query: z.infer<S> }; out: { query: z.infer<S> } }>;
+//
+// The optional `Path` generic threads the route's literal path through to
+// Hono's Context so `c.req.param('id')` narrows to `string` (not `string |
+// undefined`) on routes that declare `:id`. Without it, Hono falls back to
+// the `string | undefined` overload because `ParamKeys<string>` is `never`,
+// forcing handlers to either non-null-assert or guard against an impossible
+// case (the router never matches a `:id` route without the param).
+export type CtxWithJson<S extends ZodType, Path extends string = string> = Context<{ Variables: AuthVars }, Path, { in: { json: z.infer<S> }; out: { json: z.infer<S> } }>;
+export type CtxWithQuery<S extends ZodType, Path extends string = string> = Context<{ Variables: AuthVars }, Path, { in: { query: z.infer<S> }; out: { query: z.infer<S> } }>;

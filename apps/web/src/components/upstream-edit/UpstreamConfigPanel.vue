@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue';
 
 import AzureConfigPanel from './AzureConfigPanel.vue';
+import ClaudeCodeConfigPanel from './ClaudeCodeConfigPanel.vue';
 import CodexConfigPanel from './CodexConfigPanel.vue';
 import CopilotConfigPanel from './CopilotConfigPanel.vue';
 import type { AzureDraft, CustomDraft, OllamaDraft } from './customConfig.ts';
@@ -9,13 +10,11 @@ import CustomConfigPanel from './CustomConfigPanel.vue';
 import FlagOverridesEditor from './FlagOverridesEditor.vue';
 import ModelsCacheStatus from './ModelsCacheStatus.vue';
 import OllamaConfigPanel from './OllamaConfigPanel.vue';
-import ProviderPicker from './ProviderPicker.vue';
 import ProxyFallbackListPanel from './ProxyFallbackListPanel.vue';
 import type { CopilotQuotaSnapshot, FlagDef, ProxyFallbackEntry, UpstreamProviderKind, UpstreamRecord } from '../../api/types.ts';
-import { assertNever } from '../../utils/assert-never.ts';
+import { providerBadgeClass, providerMeta } from '../upstreams/provider-meta.ts';
 import { Input, Switch, TagCombobox } from '@floway-dev/ui';
 
-const activeProvider = defineModel<UpstreamProviderKind>('provider', { required: true });
 const name = defineModel<string>('name', { required: true });
 const enabled = defineModel<boolean>('enabled', { required: true });
 const flagOverrides = defineModel<Record<string, boolean>>('flagOverrides', { required: true });
@@ -25,9 +24,8 @@ const azureDraft = defineModel<AzureDraft>('azure', { required: true });
 const ollamaDraft = defineModel<OllamaDraft>('ollama', { required: true });
 const proxyFallbackList = defineModel<ProxyFallbackEntry[]>('proxyFallbackList', { required: true });
 
-const props = defineProps<{
-  mode: 'create' | 'edit';
-  record: UpstreamRecord | null;
+type CommonConfigPanelProps = {
+  provider: UpstreamProviderKind;
   flags: FlagDef[];
   customBearerTokenSet: boolean;
   azureApiKeySet: boolean;
@@ -45,31 +43,43 @@ const props = defineProps<{
   refreshing: boolean;
   coloAware: boolean;
   currentColo: string | null;
-}>();
+};
+
+const props = defineProps<
+  | (CommonConfigPanelProps & { mode: 'create'; record: null })
+  | (CommonConfigPanelProps & { mode: 'edit'; record: UpstreamRecord })
+>();
 
 defineEmits<{
   'fetch-models': [];
   'refresh-cache': [];
-  'copilot-completed': [upstream: UpstreamRecord | undefined];
-  'codex-imported': [upstream: UpstreamRecord];
-  'codex-error': [message: string];
+  imported: [record: UpstreamRecord];
+  error: [message: string];
+  'claude-code-quota-refreshed': [upstream: UpstreamRecord];
 }>();
 
-// Per-provider narrowed views of the record so each child panel receives the
-// matching discriminated variant without inline casts.
-const codexRecord = computed(() => props.record?.provider === 'codex' ? props.record : null);
-const copilotRecord = computed(() => props.record?.provider === 'copilot' ? props.record : null);
+// Per-provider narrowed views of (mode, record) so each child panel receives
+// the matching discriminated variant without inline casts. Edit mode and a
+// record-of-the-wrong-provider both yield null — the per-provider section is
+// already gated on `provider === '<kind>'` in the template, so this only
+// happens during the brief window when a sibling section is mounting.
+type CodexRecord = Extract<UpstreamRecord, { provider: 'codex' }>;
+type ClaudeCodeRecord = Extract<UpstreamRecord, { provider: 'claude-code' }>;
+type CopilotRecord = Extract<UpstreamRecord, { provider: 'copilot' }>;
+type PanelMode<R> = { mode: 'create'; record: null } | { mode: 'edit'; record: R };
 
-const providerBadgeClass = (kind: UpstreamProviderKind) => {
-  switch (kind) {
-  case 'azure': return 'border-accent-emerald/30 bg-accent-emerald/10 text-accent-emerald';
-  case 'copilot': return 'border-accent-cyan/30 bg-accent-cyan/10 text-accent-cyan';
-  case 'codex': return 'border-accent-violet/30 bg-accent-violet/10 text-accent-violet';
-  case 'ollama': return 'border-accent-rose/30 bg-accent-rose/10 text-accent-rose';
-  case 'custom': return 'border-accent-amber/30 bg-accent-amber/10 text-accent-amber';
-  }
-  return assertNever(kind);
-};
+const codexPanel = computed<PanelMode<CodexRecord> | null>(() => {
+  if (props.mode === 'create') return { mode: 'create', record: null };
+  return props.record.provider === 'codex' ? { mode: 'edit', record: props.record } : null;
+});
+const claudeCodePanel = computed<PanelMode<ClaudeCodeRecord> | null>(() => {
+  if (props.mode === 'create') return { mode: 'create', record: null };
+  return props.record.provider === 'claude-code' ? { mode: 'edit', record: props.record } : null;
+});
+const copilotPanel = computed<PanelMode<CopilotRecord> | null>(() => {
+  if (props.mode === 'create') return { mode: 'create', record: null };
+  return props.record.provider === 'copilot' ? { mode: 'edit', record: props.record } : null;
+});
 
 // Intrinsic floor for the aside: smallest height at which every
 // non-flag-editor section is fully laid out AND the flag editor still has
@@ -88,9 +98,9 @@ const measureFloor = () => {
   const header = headerRef.value;
   if (!content) return;
   const cs = getComputedStyle(content);
-  const padTop = parseFloat(cs.paddingTop) || 0;
-  const padBottom = parseFloat(cs.paddingBottom) || 0;
-  const gap = parseFloat(cs.rowGap) || 0;
+  const padTop = parseFloat(cs.paddingTop);
+  const padBottom = parseFloat(cs.paddingBottom);
+  const gap = parseFloat(cs.rowGap);
   const children = Array.from(content.children) as HTMLElement[];
   let h = padTop + padBottom;
   if (children.length > 1) h += gap * (children.length - 1);
@@ -100,7 +110,7 @@ const measureFloor = () => {
   if (header) h += header.getBoundingClientRect().height;
   intrinsicFloorPx.value = h;
 };
-watch([contentRef, flagSectionRef, headerRef, activeProvider], () => {
+watch([contentRef, flagSectionRef, headerRef, () => props.provider], () => {
   floorObserver?.disconnect();
   const content = contentRef.value;
   if (!content) return;
@@ -122,8 +132,8 @@ onBeforeUnmount(() => floorObserver?.disconnect());
     <header ref="headerRef" class="flex shrink-0 items-center gap-3 border-b border-white/[0.06] px-5 py-4">
       <span
         class="rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
-        :class="providerBadgeClass(activeProvider)"
-      >{{ activeProvider }}</span>
+        :class="providerBadgeClass(provider)"
+      >{{ providerMeta(provider).label }}</span>
       <h2 class="min-w-0 truncate text-sm font-semibold text-white">
         {{ name || (mode === 'create' ? 'New upstream' : 'Upstream') }}
       </h2>
@@ -132,17 +142,26 @@ onBeforeUnmount(() => floorObserver?.disconnect());
 
     <div ref="contentRef" class="flex min-h-0 flex-1 flex-col gap-6 px-5 py-5">
 
-      <section v-if="mode === 'create'" class="shrink-0">
-        <p class="mb-2 text-[10px] font-semibold uppercase tracking-wider text-gray-500">Provider</p>
-        <ProviderPicker v-model="activeProvider" />
-      </section>
-
-      <section v-if="!(mode === 'create' && (activeProvider === 'copilot' || activeProvider === 'codex'))" class="shrink-0">
+      <section v-if="!(mode === 'create' && (provider === 'copilot' || provider === 'codex' || provider === 'claude-code'))" class="shrink-0">
         <label class="mb-1.5 block text-xs font-medium text-gray-500">Name</label>
         <Input v-model="name" placeholder="e.g. OpenAI Production" />
       </section>
 
-      <section v-if="activeProvider === 'custom'" class="shrink-0">
+      <!-- Proxy chain sits at the top so the operator decides on egress
+           BEFORE the per-provider section runs anything that depends on
+           it — the copilot device flow, codex/claude-code OAuth token
+           exchange, and the custom/azure/ollama model probes all dial
+           through this list. Above the fold the panel doubles as a
+           confirmation that a proxy is already configured. -->
+      <ProxyFallbackListPanel
+        v-model="proxyFallbackList"
+        :upstream-id="record?.id ?? null"
+        :colo-aware="coloAware"
+        :current-colo="currentColo"
+        class="shrink-0"
+      />
+
+      <section v-if="provider === 'custom'" class="shrink-0">
         <CustomConfigPanel
           v-model="customDraft"
           :bearer-token-set="customBearerTokenSet"
@@ -154,7 +173,7 @@ onBeforeUnmount(() => floorObserver?.disconnect());
         />
       </section>
 
-      <section v-else-if="activeProvider === 'azure'" class="shrink-0">
+      <section v-else-if="provider === 'azure'" class="shrink-0">
         <AzureConfigPanel
           v-model="azureDraft"
           :api-key-set="azureApiKeySet"
@@ -162,7 +181,7 @@ onBeforeUnmount(() => floorObserver?.disconnect());
         />
       </section>
 
-      <section v-else-if="activeProvider === 'ollama'" class="shrink-0">
+      <section v-else-if="provider === 'ollama'" class="shrink-0">
         <OllamaConfigPanel
           v-model="ollamaDraft"
           :api-key-set="ollamaApiKeySet"
@@ -174,23 +193,32 @@ onBeforeUnmount(() => floorObserver?.disconnect());
         />
       </section>
 
-      <section v-else-if="activeProvider === 'copilot'" class="shrink-0">
+      <section v-else-if="provider === 'copilot' && copilotPanel" class="shrink-0">
         <CopilotConfigPanel
-          :record="copilotRecord"
+          v-bind="copilotPanel"
           :initial-quota="initialCopilotQuota"
           :initial-quota-error="initialCopilotQuotaError"
           :proxy-fallback-list="proxyFallbackList"
-          @completed="u => $emit('copilot-completed', u)"
+          @completed="u => u && $emit('imported', u)"
         />
       </section>
 
-      <section v-else-if="activeProvider === 'codex'" class="shrink-0">
+      <section v-else-if="provider === 'codex' && codexPanel" class="shrink-0">
         <CodexConfigPanel
-          :mode="mode"
-          :record="codexRecord"
+          v-bind="codexPanel"
           :proxy-fallback-list="proxyFallbackList"
-          @imported="u => $emit('codex-imported', u)"
-          @error="m => $emit('codex-error', m)"
+          @imported="u => $emit('imported', u)"
+          @error="m => $emit('error', m)"
+        />
+      </section>
+
+      <section v-else-if="provider === 'claude-code' && claudeCodePanel" class="shrink-0">
+        <ClaudeCodeConfigPanel
+          v-bind="claudeCodePanel"
+          :proxy-fallback-list="proxyFallbackList"
+          @imported="u => $emit('imported', u)"
+          @quota-refreshed="u => $emit('claude-code-quota-refreshed', u)"
+          @error="m => $emit('error', m)"
         />
       </section>
 
@@ -229,19 +257,11 @@ onBeforeUnmount(() => floorObserver?.disconnect());
         <FlagOverridesEditor
           v-model="flagOverrides"
           :flags="flags"
-          :provider-kind="activeProvider"
+          :provider-kind="provider"
           name-prefix="upstream-flag"
           class="min-h-0 flex-1"
         />
       </section>
-
-      <ProxyFallbackListPanel
-        v-model="proxyFallbackList"
-        :upstream-id="record?.id ?? null"
-        :colo-aware="coloAware"
-        :current-colo="currentColo"
-        class="shrink-0"
-      />
 
     </div>
   </aside>

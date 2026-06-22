@@ -16,15 +16,15 @@ export const createCodexProvider = async (record: UpstreamRecord): Promise<Model
   assertCodexUpstreamRecord(record);
   assertCodexUpstreamState(record.state);
   const config: CodexUpstreamConfig = record.config;
-  // v1 of the codex provider always operates on the first account in the
-  // pool. The schema carries an array so a future fan-out can pick a
-  // different active account per call without a wire migration.
+  // Always operates on the first account in the pool. The schema carries an
+  // array so a future fan-out can pick a different active account per call
+  // without a wire migration.
   const accountIdentity = config.accounts[0];
 
   // Computed once per provider instance: only the upstream layer applies
   // (no per-model override layer). Threaded into every UpstreamModel emitted
   // by getProvidedModels so interceptors can read the effective flag set
-  // without re-resolving — same pattern as the claude-code provider.
+  // without re-resolving.
   const enabledFlags = resolveEffectiveFlags(defaultsForProvider('codex'), [record.flagOverrides]);
 
   // Re-read upstream state on every request rather than capturing the record's

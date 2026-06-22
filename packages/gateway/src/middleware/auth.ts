@@ -19,7 +19,10 @@ export interface AuthVars {
   sessionId: string | undefined;
 }
 
-export type AuthedContext = Context<{ Variables: AuthVars }>;
+// The optional `Path` generic threads a route's literal path through so
+// `c.req.param('id')` narrows to `string` on routes that declare `:id`.
+// Default to `string` for handlers that don't read a path param.
+export type AuthedContext<Path extends string = string> = Context<{ Variables: AuthVars }, Path>;
 
 export const authMiddleware = async (c: AuthedContext, next: Next) => {
   const path = c.req.path;

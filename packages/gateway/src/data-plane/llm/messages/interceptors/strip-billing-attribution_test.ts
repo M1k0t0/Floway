@@ -21,11 +21,18 @@ const stubCtx: GatewayCtx = {
 const okEvents = (): Promise<ExecuteResult<ProtocolFrame<MessagesStreamEvent>>> =>
   Promise.resolve(eventResult((async function* (): AsyncGenerator<ProtocolFrame<MessagesStreamEvent>> {})(), testTelemetryModelIdentity));
 
-const invocation = (payload: MessagesPayload): MessagesInvocation => ({
+interface InvocationOptions {
+  flagOn?: boolean;
+}
+
+const invocation = (payload: MessagesPayload, { flagOn = true }: InvocationOptions = {}): MessagesInvocation => ({
   payload,
   candidate: stubProviderCandidate({
     targetApi: 'messages',
-    binding: { upstreamModel: stubUpstreamModel({ endpoints: { messages: {} } }) },
+    binding: {
+      upstreamModel: stubUpstreamModel({ endpoints: { messages: {} } }),
+      enabledFlags: flagOn ? new Set(['strip-billing-attribution']) : new Set(),
+    },
   }),
   headers: new Headers(),
 });
@@ -116,4 +123,42 @@ test('leaves a system prompt without billing markers untouched', async () => {
   await stripBillingAttribution(input, stubCtx, okEvents);
 
   assertEquals(input.payload.system, original);
+});
+
+test('leaves the billing block intact when the strip flag is off (claude-code default)', async () => {
+  const system = 'You are a helpful assistant.\nx-anthropic-billing-header: per-turn-token\ncch=deadbeef1234;\nKeep going.';
+  const input = invocation(
+    {
+      model: 'm',
+      max_tokens: 1,
+      messages: [],
+      system,
+    },
+    { flagOn: false },
+  );
+
+  await stripBillingAttribution(input, stubCtx, okEvents);
+
+  assertEquals(input.payload.system, system);
+});
+
+test('leaves an array-form billing block intact when the strip flag is off', async () => {
+  const system = [
+    { type: 'text' as const, text: 'You are a helpful assistant.' },
+    { type: 'text' as const, text: 'x-anthropic-billing-header: token\ncch=abcdef12345' },
+    { type: 'text' as const, text: 'Keep going. cch=99fffaa1;' },
+  ];
+  const input = invocation(
+    {
+      model: 'm',
+      max_tokens: 1,
+      messages: [],
+      system,
+    },
+    { flagOn: false },
+  );
+
+  await stripBillingAttribution(input, stubCtx, okEvents);
+
+  assertEquals(input.payload.system, system);
 });

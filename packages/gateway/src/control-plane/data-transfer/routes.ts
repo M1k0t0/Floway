@@ -1,4 +1,5 @@
 // Data transfer routes — export/import operator-managed database data as JSON.
+//
 // Ephemeral stored Responses state is omitted from exports and cleared on
 // replace imports; clients can regenerate it through normal Responses use.
 //
@@ -30,6 +31,7 @@ import { BILLING_DIMENSIONS, type ModelPricing } from '@floway-dev/protocols/com
 import { ALL_PROVIDER_KINDS, parseFlagOverridesWire } from '@floway-dev/provider';
 import type { ProxyFallbackEntry, UpstreamProviderKind, UpstreamRecord } from '@floway-dev/provider';
 import { assertAzureUpstreamRecord } from '@floway-dev/provider-azure';
+import { assertClaudeCodeUpstreamRecord, assertClaudeCodeUpstreamState } from '@floway-dev/provider-claude-code';
 import { assertCodexUpstreamRecord, assertCodexUpstreamState } from '@floway-dev/provider-codex';
 import { assertCustomUpstreamRecord } from '@floway-dev/provider-custom';
 import { parseProxyUri } from '@floway-dev/proxy';
@@ -85,20 +87,27 @@ const normalizeUpstreamConfig = (record: UpstreamRecord): unknown => {
     assertCodexUpstreamRecord(record);
     return record.config;
   }
+  if (record.provider === 'claude-code') {
+    assertClaudeCodeUpstreamRecord(record);
+    return record.config;
+  }
   return copilotConfigField(record.config, importErrorBuilder);
 };
 
-// State is persisted only for providers that own autonomous runtime state. Codex
-// rotates a refresh_token and tracks credential health; Custom/Azure/Copilot
-// have no such state and serialize to null. Round-trip codex state through
-// the same shape assertion the runtime uses so a corrupt or hand-edited
-// import can't smuggle unknown fields onto the column.
+// State is persisted only for providers that own autonomous runtime state.
+// Codex rotates a refresh_token and tracks credential health; Claude Code
+// holds per-account refresh tokens, OAuth-minted access tokens, and quota
+// snapshots; Custom/Azure/Copilot have no such state and serialize to null.
+// Round-trip the stateful providers through the same shape assertion the
+// runtime uses so a corrupt or hand-edited import can't smuggle unknown
+// fields onto the column.
 const normalizeUpstreamState = (provider: UpstreamProviderKind, value: unknown): unknown => {
-  if (provider !== 'codex') return null;
+  if (provider !== 'codex' && provider !== 'claude-code') return null;
   if (value === null || value === undefined) {
-    throw new Error('codex upstream import is missing state — re-export with current code');
+    throw new Error(`${provider} upstream is missing state — re-export with current code`);
   }
-  assertCodexUpstreamState(value);
+  if (provider === 'codex') assertCodexUpstreamState(value);
+  else assertClaudeCodeUpstreamState(value);
   return value;
 };
 
@@ -139,7 +148,7 @@ const parseUpstreamRecords = (value: unknown): { type: 'ok'; records: UpstreamRe
         throw new Error("legacy 'enabled_fixes' field is no longer supported; re-export with current code");
       }
       if (typeof item.provider !== 'string' || !UPSTREAM_PROVIDERS.has(item.provider as UpstreamProviderKind)) {
-        throw new Error('provider must be one of custom, azure, copilot, codex');
+        throw new Error('provider must be one of custom, azure, copilot, codex, claude-code');
       }
       if (typeof item.enabled !== 'boolean') throw new Error('enabled must be a boolean');
       if (typeof item.sort_order !== 'number' || !Number.isFinite(item.sort_order)) throw new Error('sort_order must be a finite number');
@@ -419,7 +428,7 @@ const parseUsageRecords = (value: unknown): { type: 'ok'; records: UsageRecord[]
     records.push({
       keyId: record.keyId,
       model: record.model,
-      upstream: record.upstream as string | null,
+      upstream: record.upstream,
       modelKey: record.modelKey,
       hour: record.hour,
       tier,
@@ -479,13 +488,13 @@ const parsePerformanceIncluded = (data: Record<string, unknown>): { type: 'ok'; 
   return { type: 'ok', included: data.performanceIncluded };
 };
 
-const parsePerformanceRecords = (value: unknown): { type: 'ok'; records: PerformanceTelemetryRecord[] } | { type: 'invalid'; index: number } => {
-  if (!Array.isArray(value)) return { type: 'invalid', index: -1 };
+const parsePerformanceRecords = (value: unknown): { type: 'ok'; records: PerformanceTelemetryRecord[] } | { type: 'invalid'; index: number; error: string } => {
+  if (!Array.isArray(value)) return { type: 'invalid', index: -1, error: 'performance must be an array when included' };
 
   const records: PerformanceTelemetryRecord[] = [];
   for (let i = 0; i < value.length; i++) {
     const record = value[i];
-    if (!record || typeof record !== 'object') return { type: 'invalid', index: i };
+    if (!record || typeof record !== 'object') return { type: 'invalid', index: i, error: 'record is not an object' };
 
     const item = record as Record<string, unknown>;
     if (
@@ -508,15 +517,15 @@ const parsePerformanceRecords = (value: unknown): { type: 'ok'; records: Perform
       !isNonNegativeSafeInteger(item.totalMsSum) ||
       !Array.isArray(item.buckets)
     ) {
-      return { type: 'invalid', index: i };
+      return { type: 'invalid', index: i, error: 'record fields are missing or malformed' };
     }
 
     const buckets = [];
     for (const bucket of item.buckets) {
-      if (!bucket || typeof bucket !== 'object') return { type: 'invalid', index: i };
+      if (!bucket || typeof bucket !== 'object') return { type: 'invalid', index: i, error: 'bucket is not an object' };
       const bucketItem = bucket as Record<string, unknown>;
       if (!isNonNegativeSafeInteger(bucketItem.lowerMs) || !isNonNegativeSafeInteger(bucketItem.upperMs) || !isNonNegativeSafeInteger(bucketItem.count) || bucketItem.upperMs <= bucketItem.lowerMs) {
-        return { type: 'invalid', index: i };
+        return { type: 'invalid', index: i, error: 'bucket lowerMs/upperMs/count fields are missing or malformed' };
       }
       buckets.push({ lowerMs: bucketItem.lowerMs, upperMs: bucketItem.upperMs, count: bucketItem.count });
     }
@@ -526,7 +535,7 @@ const parsePerformanceRecords = (value: unknown): { type: 'ok'; records: Perform
       metricScope: item.metricScope,
       keyId: item.keyId,
       model: item.model,
-      upstream: item.upstream as string | null,
+      upstream: item.upstream,
       modelKey: item.modelKey,
       stream: item.stream,
       runtimeLocation: item.runtimeLocation,
@@ -546,20 +555,18 @@ const parsePerformanceRecords = (value: unknown): { type: 'ok'; records: Perform
 // models_cache row through any FK cascade, so without this call a re-import
 // that changes an upstream's config would keep serving the prior cached
 // model list until SWR's soft window expired. Replace mode wiped the table
-// before the loop; warming there is a no-op population. A failed upstream
-// fetch (network blip, bad credentials) does not block the import — the
-// cache layer persists lastError on that path for the dashboard to surface,
-// and we log the swallowed error so non-transient failures (gateway bugs in
-// the cache layer or scheduler) still surface in observability.
+// before the loop; warming there is a no-op population. Per-upstream warm
+// failures (network blip, dead credential among many) must not abort the
+// import — the cache layer persists `lastError` on the row for the dashboard
+// to surface. Provider-instance and fetcher construction errors signal
+// genuine misconfiguration and are not swallowed.
 const warmModelsCache = async (record: UpstreamRecord, c: Context): Promise<void> => {
   const scheduler = backgroundSchedulerFromContext(c);
   const instance = await createProviderInstance(record);
   const fetcher = (await createPerRequestFetcherForAdmin())(record.id);
   try {
     await fetchUpstreamModelsCached(instance, { scheduler, fetcher, force: true });
-  } catch (err) {
-    console.error(`Failed to warm models cache for upstream ${record.id}:`, err);
-  }
+  } catch {}
 };
 
 export const exportData = async (c: CtxWithQuery<typeof exportQuery>) => {
@@ -669,7 +676,7 @@ export const importData = async (c: CtxWithJson<typeof importBody>) => {
   const performanceIncluded = performanceIncludedResult.included;
   const performanceResult = performanceIncluded ? parsePerformanceRecords(data.performance) : { type: 'ok' as const, records: [] };
   if (performanceResult.type === 'invalid') {
-    return c.json({ error: performanceResult.index >= 0 ? `invalid performance record at index ${performanceResult.index}` : 'invalid performance: performance must be an array when included' }, 400);
+    return c.json({ error: performanceResult.index >= 0 ? `invalid performance record at index ${performanceResult.index}: ${performanceResult.error}` : `invalid performance: ${performanceResult.error}` }, 400);
   }
   const performance = performanceResult.records;
 
@@ -677,9 +684,9 @@ export const importData = async (c: CtxWithJson<typeof importBody>) => {
   const apiKeyIdentityError = validateApiKeyIdentities(apiKeys, mode === 'merge' ? await repo.apiKeys.listIncludingDeleted() : [], mode);
   if (apiKeyIdentityError) return c.json({ error: `invalid apiKeys: ${apiKeyIdentityError}` }, 400);
 
-  // Merge mode keeps the existing proxies table alongside the imported rows,
-  // so an upstream may reference either set. Replace mode wipes the table
-  // before saving and only the imported ids will exist post-import.
+  // In merge mode an imported upstream's proxy_fallback_list may reference an
+  // existing local proxy alongside an imported one; replace mode wipes the
+  // table first, so only the imported ids count.
   const existingProxyIdsForRefs = mode === 'merge' ? (await repo.proxies.list()).map(p => p.id) : [];
   const fallbackRefError = validateProxyFallbackReferences(upstreams, proxies, existingProxyIdsForRefs);
   if (fallbackRefError) return c.json({ error: `invalid upstreams: ${fallbackRefError}` }, 400);

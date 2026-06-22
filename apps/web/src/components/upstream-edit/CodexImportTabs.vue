@@ -2,11 +2,11 @@
 // PKCE state arrives via props and the three text/tab pieces are v-model so
 // this component stays a presentation-only paste area.
 
-import type { CodexImportTab, CodexPkceStartResult } from './codex-import-types.ts';
+import type { CodexAuthorizeUrlResult, CodexImportTab } from './codex-import-types.ts';
 import { Button, Spinner, Tabs, Textarea } from '@floway-dev/ui';
 
 const props = defineProps<{
-  pkce: CodexPkceStartResult | null;
+  pkce: CodexAuthorizeUrlResult | null;
   pkceLoading: boolean;
 }>();
 
@@ -48,6 +48,7 @@ const copyAuthorizeUrl = async () => {
           Open the authorize URL in a browser signed in to ChatGPT, complete the consent screen,
           then paste the URL the browser was redirected to (it starts with
           <code class="rounded bg-surface-700 px-1 py-0.5 text-[11px] text-gray-300">http://localhost:1455/auth/callback</code>).
+          Pasting just the <code class="rounded bg-surface-700 px-1 py-0.5 text-[11px] text-gray-300">?code=&hellip;&amp;state=&hellip;</code> fragment is also accepted.
         </p>
 
         <div v-if="pkceLoading" class="flex items-center gap-2 text-sm text-gray-400">
@@ -56,15 +57,12 @@ const copyAuthorizeUrl = async () => {
 
         <div v-else-if="pkce" class="space-y-2">
           <p class="text-xs font-medium text-gray-500">Authorize URL</p>
-          <a :href="pkce.authorize_url" target="_blank" rel="noopener" class="block break-all text-xs text-accent-cyan hover:underline">
+          <a :href="pkce.authorize_url" :title="pkce.authorize_url" target="_blank" rel="noopener" class="block truncate text-xs text-accent-cyan hover:underline">
             {{ pkce.authorize_url }}
           </a>
-          <div class="flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
-            <Button size="sm" variant="secondary" @click="copyAuthorizeUrl">
-              <i class="i-lucide-clipboard size-3.5" /> Copy URL
-            </Button>
-            <span>Expires in {{ Math.round(pkce.expires_in_seconds / 60) }} min</span>
-          </div>
+          <Button size="sm" variant="secondary" @click="copyAuthorizeUrl">
+            <i class="i-lucide-clipboard size-3.5" /> Copy URL
+          </Button>
         </div>
 
         <Textarea

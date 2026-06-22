@@ -46,20 +46,18 @@ test('provider flags: every catalog entry has id, label, description string fiel
 
 test('provider flags: defaultsForProvider returns the catalog-declared defaults', () => {
   const copilotDefaults = [...defaultsForProvider('copilot')].sort();
-  assertEquals(copilotDefaults, ['messages-web-search-shim', 'responses-image-generation-shim', 'responses-web-search-shim', 'retry-cyber-policy']);
+  assertEquals(copilotDefaults, ['messages-web-search-shim', 'responses-image-generation-shim', 'responses-web-search-shim', 'retry-cyber-policy', 'strip-billing-attribution']);
   const azureDefaults = [...defaultsForProvider('azure')].sort();
-  assertEquals(azureDefaults, ['messages-web-search-shim', 'responses-image-generation-shim', 'responses-web-search-shim']);
-  const customDefaults = [...defaultsForProvider('custom')].sort();
-  assertEquals(customDefaults, ['messages-web-search-shim', 'responses-image-generation-shim', 'responses-web-search-shim']);
-  const ollamaDefaults = [...defaultsForProvider('ollama')].sort();
-  assertEquals(ollamaDefaults, ['messages-web-search-shim', 'responses-image-generation-shim', 'responses-web-search-shim']);
+  assertEquals(azureDefaults, ['messages-web-search-shim', 'responses-image-generation-shim', 'responses-web-search-shim', 'strip-billing-attribution']);
+  assertEquals([...defaultsForProvider('custom')].sort(), ['messages-web-search-shim', 'responses-image-generation-shim', 'responses-web-search-shim', 'strip-billing-attribution']);
+  assertEquals([...defaultsForProvider('ollama')].sort(), ['messages-web-search-shim', 'responses-image-generation-shim', 'responses-web-search-shim']);
   assertEquals(defaultsForProvider('codex').size, 0);
+  assertEquals(defaultsForProvider('claude-code').size, 0);
 });
 
 test('provider flags: defaultsForProvider memoizes the set per provider kind', () => {
   assertEquals(defaultsForProvider('copilot') === defaultsForProvider('copilot'), true);
   assertEquals(defaultsForProvider('azure') === defaultsForProvider('azure'), true);
   assertEquals(defaultsForProvider('custom') === defaultsForProvider('custom'), true);
-  assertEquals(defaultsForProvider('codex') === defaultsForProvider('codex'), true);
-  assertEquals(defaultsForProvider('ollama') === defaultsForProvider('ollama'), true);
+  assertEquals(defaultsForProvider('claude-code') === defaultsForProvider('claude-code'), true);
 });

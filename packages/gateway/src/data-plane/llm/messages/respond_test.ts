@@ -15,6 +15,10 @@ const stop = () => eventFrame({ type: 'message_stop' } satisfies MessagesStreamE
 test('Messages stream usage keeps start input and delta output', () => {
   const state = createMessagesStreamUsageState();
 
+  // Every revising frame returns the running snapshot so the observer can
+  // checkpoint partial usage into SourceStreamState before the terminal
+  // message_stop — required for billing fidelity when the client disconnects
+  // mid-stream.
   assertEquals(
     tokenUsageFromMessagesFrame(
       eventFrame({

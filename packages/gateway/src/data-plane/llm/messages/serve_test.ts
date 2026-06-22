@@ -8,7 +8,7 @@ import type { GatewayCtx } from '../shared/gateway-ctx.ts';
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { MessagesPayload, MessagesStreamEvent } from '@floway-dev/protocols/messages';
 import type { ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
-import { directFetcher, type ProviderCallResult, type ProviderStreamResult, type UpstreamCallOptions } from '@floway-dev/provider';
+import { defaultsForProvider, directFetcher, type ProviderCallResult, type ProviderStreamResult, type UpstreamCallOptions } from '@floway-dev/provider';
 import { assert, assertEquals, stubProvider, stubUpstreamModel } from '@floway-dev/test-utils';
 
 const candidatesQueue: { readonly candidates: readonly ProviderCandidate[]; readonly sawModel: boolean }[] = [];
@@ -116,12 +116,15 @@ const makeProtocolFrames = async function* <TEvent>(events: readonly TEvent[]): 
 const makeCandidate = (overrides: {
   upstream?: string;
   targetApi?: ProviderCandidate['targetApi'];
+  providerKind?: ProviderCandidate['provider']['providerKind'];
+  enabledFlags?: ReadonlySet<string>;
   callMessages?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderStreamResult<MessagesStreamEvent>>;
   callResponses?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderStreamResult<ResponsesStreamEvent>>;
   callMessagesCountTokens?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderCallResult>;
 } = {}): ProviderCandidate => {
   const upstream = overrides.upstream ?? 'up_test';
   const targetApi = overrides.targetApi ?? 'messages';
+  const providerKind = overrides.providerKind ?? 'custom';
   const upstreamModel = stubUpstreamModel();
   const provider = stubProvider({
     callMessages: overrides.callMessages,
@@ -131,7 +134,7 @@ const makeCandidate = (overrides: {
   return {
     provider: {
       upstream,
-      providerKind: 'custom',
+      providerKind,
       name: upstream,
       disabledPublicModelIds: [],
       provider,
@@ -140,10 +143,10 @@ const makeCandidate = (overrides: {
     binding: {
       upstream,
       upstreamName: upstream,
-      providerKind: 'custom',
+      providerKind,
       provider,
       upstreamModel,
-      enabledFlags: upstreamModel.enabledFlags,
+      enabledFlags: overrides.enabledFlags ?? upstreamModel.enabledFlags,
       supportsResponsesItemReference: true,
     },
     targetApi,
@@ -158,6 +161,22 @@ const collectEvents = async <TEvent>(events: AsyncIterable<ProtocolFrame<TEvent>
   }
   return out;
 };
+
+// `assertEquals(result.type, X)` does not narrow the union in the TS type
+// checker; the manual `if (result.type !== X) throw` follow-up was pure
+// type-narrowing scaffold. This helper asserts the variant and returns the
+// narrowed value so call sites stay on a single line.
+const assertResultType = <U extends { type: string }, T extends U['type']>(
+  result: U,
+  type: T,
+): Extract<U, { type: T }> => {
+  assertEquals(result.type, type);
+  return result as Extract<U, { type: T }>;
+};
+
+function assertIsArray<T>(value: unknown): asserts value is readonly T[] {
+  assert(Array.isArray(value));
+}
 
 test('generate routes a native Messages candidate end to end', async () => {
   installRepo();
@@ -176,9 +195,7 @@ test('generate routes a native Messages candidate end to end', async () => {
     headers: new Headers(),
   });
 
-  assertEquals(result.type, 'events');
-  if (result.type !== 'events') throw new Error('unreachable');
-  const events = await collectEvents(result.events);
+  const events = await collectEvents(assertResultType(result, 'events').events);
   assert(events.length >= 1);
   assertEquals(callMessages.mock.calls.length, 1);
 });
@@ -200,9 +217,7 @@ test('generate translates through the Responses target when only that endpoint i
     headers: new Headers(),
   });
 
-  assertEquals(result.type, 'events');
-  if (result.type !== 'events') throw new Error('unreachable');
-  await collectEvents(result.events);
+  await collectEvents(assertResultType(result, 'events').events);
   assertEquals(callResponses.mock.calls.length, 1);
 });
 
@@ -237,7 +252,7 @@ test('generate stops at the first candidate even when it yields an upstream erro
   assertEquals(secondCall.mock.calls.length, 0);
 });
 
-test('generate is a routing no-op when the payload carries no reasoning carriers (degenerate path)', async () => {
+test('generate stops at the first candidate when the payload has no reasoning carriers to route on', async () => {
   installRepo();
   const callMessages = vi.fn(async (): Promise<ProviderStreamResult<MessagesStreamEvent>> => ({
     ok: true,
@@ -257,9 +272,7 @@ test('generate is a routing no-op when the payload carries no reasoning carriers
     headers: new Headers(),
   });
 
-  assertEquals(result.type, 'events');
-  if (result.type !== 'events') throw new Error('unreachable');
-  await collectEvents(result.events);
+  await collectEvents(assertResultType(result, 'events').events);
   assertEquals(callMessages.mock.calls.length, 1);
 });
 
@@ -274,10 +287,9 @@ test('generate renders model-missing when no candidates are available', async ()
     headers: new Headers(),
   });
 
-  assertEquals(result.type, 'upstream-error');
-  if (result.type !== 'upstream-error') throw new Error('unreachable');
-  assertEquals(result.status, 404);
-  const body = JSON.parse(new TextDecoder().decode(result.body));
+  const failure = assertResultType(result, 'upstream-error');
+  assertEquals(failure.status, 404);
+  const body = JSON.parse(new TextDecoder().decode(failure.body));
   assertEquals(body.error.type, 'not_found_error');
   assertEquals(body.error.message, 'Model unknown-model is not available on any configured upstream.');
 });
@@ -300,10 +312,123 @@ test('countTokens proxies the upstream measurement response as a plain result', 
     headers: new Headers(),
   });
 
-  assertEquals(result.type, 'plain');
-  if (result.type !== 'plain') throw new Error('unreachable');
-  assertEquals(result.status, 200);
-  const body = JSON.parse(new TextDecoder().decode(result.body));
+  const plain = assertResultType(result, 'plain');
+  assertEquals(plain.status, 200);
+  const body = JSON.parse(new TextDecoder().decode(plain.body));
   assertEquals(body.input_tokens, 42);
   assertEquals(callMessagesCountTokens.mock.calls.length, 1);
+});
+
+// strip-billing-attribution defaults OFF for claude-code, so a request whose
+// system prompt carries the `x-anthropic-billing-header:` block must reach
+// the claude-code provider's callMessages with the block intact — otherwise
+// Anthropic loses the plan-tier attribution it bills against.
+test('claude-code binding preserves x-anthropic-billing-header system block through the interceptor chain', async () => {
+  installRepo();
+
+  // Pre-confirm the flag catalog is wired the expected way; an edit that
+  // adds 'claude-code' to defaultFor by mistake should fail at setup, not
+  // silently pass on a stripped body.
+  const claudeCodeDefaults = defaultsForProvider('claude-code');
+  assertEquals(claudeCodeDefaults.has('strip-billing-attribution'), false);
+
+  const billingBlock = 'x-anthropic-billing-header: per-turn-token\ncch=deadbeef1234;\ncc_entrypoint=cli';
+
+  const capturedBodies: Omit<MessagesPayload, 'model'>[] = [];
+  const callMessages = vi.fn(async (
+    _model: unknown,
+    body: unknown,
+  ): Promise<ProviderStreamResult<MessagesStreamEvent>> => {
+    capturedBodies.push(body as Omit<MessagesPayload, 'model'>);
+    return {
+      ok: true,
+      events: makeProtocolFrames(makeMessagesResultEvents()),
+      modelKey: 'claude-sonnet-4-5-20250929',
+    };
+  });
+
+  queueCandidates([
+    makeCandidate({
+      upstream: 'up_cc',
+      providerKind: 'claude-code',
+      enabledFlags: claudeCodeDefaults,
+      callMessages,
+    }),
+  ]);
+
+  const result = await messagesServe.generate({
+    payload: makePayload({
+      system: [
+        { type: 'text', text: billingBlock },
+        { type: 'text', text: "You are Claude Code, Anthropic's official CLI for Claude." },
+      ],
+    }),
+    ctx: makeGatewayCtx(),
+    store: createNonResponsesSourceStore(API_KEY_ID),
+    headers: new Headers(),
+  });
+
+  await collectEvents(assertResultType(result, 'events').events);
+
+  assertEquals(callMessages.mock.calls.length, 1);
+  const observed = capturedBodies[0]!;
+  assertIsArray<{ text: string }>(observed.system);
+  assertEquals(observed.system.length, 2);
+  assertEquals(observed.system[0].text, billingBlock);
+  assertEquals(observed.system[1].text, "You are Claude Code, Anthropic's official CLI for Claude.");
+});
+
+// The same request routed to a copilot binding (which carries the
+// strip-billing-attribution default-on flag) must have the billing block
+// stripped before the upstream call — the mirror image of the claude-code
+// assertion above.
+test('copilot binding strips x-anthropic-billing-header system block via the default-on flag', async () => {
+  installRepo();
+
+  const copilotDefaults = defaultsForProvider('copilot');
+  assertEquals(copilotDefaults.has('strip-billing-attribution'), true);
+
+  const billingBlock = 'x-anthropic-billing-header: per-turn-token\ncch=deadbeef1234;';
+
+  const capturedBodies: Omit<MessagesPayload, 'model'>[] = [];
+  const callMessages = vi.fn(async (
+    _model: unknown,
+    body: unknown,
+  ): Promise<ProviderStreamResult<MessagesStreamEvent>> => {
+    capturedBodies.push(body as Omit<MessagesPayload, 'model'>);
+    return {
+      ok: true,
+      events: makeProtocolFrames(makeMessagesResultEvents()),
+      modelKey: 'claude-sonnet-4-5',
+    };
+  });
+
+  queueCandidates([
+    makeCandidate({
+      upstream: 'up_co',
+      providerKind: 'copilot',
+      enabledFlags: copilotDefaults,
+      callMessages,
+    }),
+  ]);
+
+  const result = await messagesServe.generate({
+    payload: makePayload({
+      system: [
+        { type: 'text', text: billingBlock },
+        { type: 'text', text: 'You are a helpful assistant.' },
+      ],
+    }),
+    ctx: makeGatewayCtx(),
+    store: createNonResponsesSourceStore(API_KEY_ID),
+    headers: new Headers(),
+  });
+
+  await collectEvents(assertResultType(result, 'events').events);
+
+  assertEquals(callMessages.mock.calls.length, 1);
+  const observed = capturedBodies[0]!;
+  assertIsArray<{ text: string }>(observed.system);
+  assertEquals(observed.system.length, 1);
+  assertEquals(observed.system[0].text, 'You are a helpful assistant.');
 });

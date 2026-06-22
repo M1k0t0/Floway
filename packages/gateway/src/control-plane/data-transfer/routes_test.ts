@@ -291,7 +291,6 @@ const latestImportData = (overrides: Record<string, unknown> = {}) => ({
 
 test('export emits the v6 envelope with users and upstreams', async () => {
   const { app, repo } = setup();
-  // Seed the admin user 1 — exports always carry the users table.
   await repo.users.save(SEED_ADMIN);
 
   const result = await doExport(app);
@@ -510,7 +509,7 @@ test('codex import rejects when state is missing', async () => {
     searchConfig: DEFAULT_SEARCH_CONFIG,
   });
   assertEquals(result.status, 400);
-  assertEquals(result.body.error.includes('codex upstream import is missing state'), true);
+  assertEquals(result.body.error.includes('codex upstream is missing state'), true);
 });
 
 test('codex import rejects unknown keys in state', async () => {
@@ -642,7 +641,7 @@ test('import rejects legacy provider-prefixed upstream identities before mutatin
   assertEquals(legacyUsageUpstream.status, 400);
   assertEquals(legacyUsageUpstream.body.error, 'invalid usage at index 0: upstream must use a raw upstream id, not a legacy provider-prefixed identity');
   assertEquals(legacyPerformanceUpstream.status, 400);
-  assertEquals(legacyPerformanceUpstream.body.error, 'invalid performance record at index 0');
+  assertEquals(legacyPerformanceUpstream.body.error, 'invalid performance record at index 0: record fields are missing or malformed');
   assertEquals(await repo.apiKeys.list(), [KEY_A]);
   assertEquals(await repo.upstreams.list(), [CUSTOM_UPSTREAM]);
 });
@@ -853,7 +852,6 @@ test('v6 export/import round-trips users and per-key user_id', async () => {
   assertEquals(exportResult.version, 6);
   assertEquals(exportResult.data.users.map((u: any) => u.id).sort(), [SEED_ADMIN.id, USER_BOB.id]);
 
-  // Wipe and round-trip.
   const result = await doImport(app, 'replace', exportResult.data, 6);
   assertEquals(result.status, 200);
   assertEquals(result.body.imported.users, 2);
@@ -1005,7 +1003,6 @@ test('v6 replace import refuses payload missing user 1', async () => {
 
 test('a full v6 export re-imports verbatim — the export→import round trip is closed', async () => {
   const { app, repo } = setup();
-  // Seed one of every collection the export emits.
   await repo.users.save(SEED_ADMIN);
   await repo.users.save(USER_BOB);
   await repo.apiKeys.save(KEY_A);

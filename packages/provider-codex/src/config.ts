@@ -10,12 +10,13 @@ export interface CodexAccountIdentity {
   planType: string;
 }
 
-// Codex config is an account pool. v1 always carries exactly one entry, but
-// the wire shape is array-of-accounts so a future fan-out / round-robin
-// pool feature can land without a schema migration. The 1-account invariant
-// is enforced by the asserter; ordering is operator-controlled and stable.
+// Codex config is an account pool. v1 always carries exactly one entry —
+// typed as a 1-tuple so callers can index accounts[0] without a nullable
+// cushion. The wire shape stays array-of-accounts so a future fan-out /
+// round-robin pool feature can widen the tuple without a schema migration;
+// ordering is operator-controlled and stable.
 export interface CodexUpstreamConfig {
-  accounts: CodexAccountIdentity[];
+  accounts: [CodexAccountIdentity];
 }
 
 export type CodexUpstreamRecord = UpstreamRecord & {

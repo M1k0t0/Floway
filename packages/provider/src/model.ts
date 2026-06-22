@@ -1,6 +1,6 @@
 import type { ModelKind, ModelEndpoints, ModelPricing } from '@floway-dev/protocols/common';
 
-export const ALL_PROVIDER_KINDS = ['copilot', 'custom', 'azure', 'codex', 'ollama'] as const;
+export const ALL_PROVIDER_KINDS = ['copilot', 'custom', 'azure', 'codex', 'claude-code', 'ollama'] as const;
 export type UpstreamProviderKind = typeof ALL_PROVIDER_KINDS[number];
 
 // One entry in `UpstreamRecord.proxyFallbackList`. `id` is the proxy id from

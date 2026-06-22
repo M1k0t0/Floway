@@ -7,7 +7,6 @@ import type {
   ApiKeyRepo,
   BackoffRow,
   CachedModelsRow,
-  CodexPkcePendingRepo,
   ModelsCacheRepo,
   PerformanceDimensions,
   PerformanceErrorSample,
@@ -886,34 +885,6 @@ class SqlModelsCacheRepo implements ModelsCacheRepo {
   }
 }
 
-class SqlCodexPkcePendingRepo implements CodexPkcePendingRepo {
-  constructor(private db: SqlDatabase) {}
-
-  async put(state: string, verifier: string, expiresAt: number): Promise<void> {
-    await this.db
-      .prepare(
-        'INSERT INTO codex_pkce_pending (state, verifier, expires_at) VALUES (?, ?, ?) '
-        + 'ON CONFLICT (state) DO UPDATE SET verifier = excluded.verifier, expires_at = excluded.expires_at',
-      )
-      .bind(state, verifier, expiresAt)
-      .run();
-  }
-
-  async consume(state: string): Promise<{ verifier: string } | null> {
-    // Single-use: DELETE ... RETURNING in one statement so a replayed callback
-    // cannot succeed twice.
-    const row = await this.db
-      .prepare('DELETE FROM codex_pkce_pending WHERE state = ? AND expires_at > ? RETURNING verifier')
-      .bind(state, Date.now())
-      .first<{ verifier: string }>();
-    return row ? { verifier: row.verifier } : null;
-  }
-
-  async sweepExpired(now: number): Promise<void> {
-    await this.db.prepare('DELETE FROM codex_pkce_pending WHERE expires_at <= ?').bind(now).run();
-  }
-}
-
 const RESPONSES_ITEM_COLUMNS = 'id, api_key_id, upstream_id, upstream_item_id, item_type, origin, payload_json, content_hash, encrypted_content_hash, created_at, refreshed_at';
 const RESPONSES_ITEM_ID_SCOPE_SQL = "COALESCE(api_key_id, '') = COALESCE(?, '')";
 
@@ -1271,7 +1242,7 @@ const toUpstreamRecord = (row: UpstreamRow): UpstreamRecord => {
 };
 
 const assertUpstreamProviderKind = (provider: string): UpstreamProviderKind => {
-  if (provider === 'copilot' || provider === 'custom' || provider === 'azure' || provider === 'codex' || provider === 'ollama') return provider;
+  if (provider === 'copilot' || provider === 'custom' || provider === 'azure' || provider === 'codex' || provider === 'claude-code' || provider === 'ollama') return provider;
   throw new TypeError(`Invalid upstream provider kind: ${provider}`);
 };
 
@@ -1595,7 +1566,6 @@ export class SqlRepo implements Repo {
   searchUsage: SearchUsageRepo;
   performance: PerformanceRepo;
   modelsCache: ModelsCacheRepo;
-  codexPkcePending: CodexPkcePendingRepo;
   searchConfig: SearchConfigRepo;
   upstreams: UpstreamRepo;
   proxies: ProxyRepo;
@@ -1611,7 +1581,6 @@ export class SqlRepo implements Repo {
     this.searchUsage = new SqlSearchUsageRepo(db);
     this.performance = new SqlPerformanceRepo(db);
     this.modelsCache = new SqlModelsCacheRepo(db);
-    this.codexPkcePending = new SqlCodexPkcePendingRepo(db);
     this.searchConfig = new SqlSearchConfigRepo(db);
     this.upstreams = new SqlUpstreamRepo(db);
     this.proxies = new SqlProxyRepo(db);

@@ -45,13 +45,19 @@ const buildCodexImportResult = (params: {
 // under `.tokens`. We re-derive identity from id_token rather than trusting the
 // file's account_id / email / plan, so this path produces the same shape as
 // importCodexFromCallback (which only has the OAuth response to work from).
-export const importCodexFromAuthJson = async (authJson: unknown): Promise<CodexImportResult> => {
+export const importCodexFromAuthJson = async (rawJson: string): Promise<CodexImportResult> => {
   const pickNonEmptyString = (record: Record<string, unknown>, key: string, prefix: string): string => {
     const value = record[key];
     if (typeof value !== 'string' || value === '') throw new TypeError(`${prefix}.${key} must be a non-empty string`);
     return value;
   };
 
+  let authJson: unknown;
+  try {
+    authJson = JSON.parse(rawJson);
+  } catch (cause) {
+    throw new Error('auth.json is not valid JSON', { cause: cause as Error });
+  }
   if (typeof authJson !== 'object' || authJson === null) throw new TypeError('auth.json must be a JSON object');
   const obj = authJson as Record<string, unknown>;
   const tokens = obj.tokens;
@@ -62,8 +68,12 @@ export const importCodexFromAuthJson = async (authJson: unknown): Promise<CodexI
   const idToken = pickNonEmptyString(t, 'id_token', 'auth.json.tokens');
 
   const identity = parseCodexIdTokenClaims(idToken);
-  // auth.json has no expires_in; conservative 7-day window so the next request
-  // refreshes via /oauth/token within the 5-min freshness gate.
+  // auth.json carries the access_token + refresh_token but no `expires_in`
+  // for the access_token. Stamp a conservative 7-day fallback so the
+  // freshness gate in access-token-cache forces a /oauth/token refresh on
+  // the first data-plane call rather than handing out a token of unknown
+  // remaining lifetime. The refresh_token's own lifetime is set by
+  // auth.openai.com and is unaffected by this fallback.
   const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
   return buildCodexImportResult({
     identity,
@@ -74,34 +84,13 @@ export const importCodexFromAuthJson = async (authJson: unknown): Promise<CodexI
   });
 };
 
-// Accepts a full URL (`http://localhost:1455/auth/callback?...`) or a bare
-// query string (with or without leading `?`). Returns the `code` + `state`
-// query params or throws.
-export const extractCodexCallbackParams = (input: string): { code: string; state: string } => {
-  const trimmed = input.trim();
-  let query: string;
-  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-    try {
-      query = new URL(trimmed).search;
-    } catch (cause) {
-      throw new Error('Callback URL is malformed', { cause: cause as Error });
-    }
-  } else {
-    query = trimmed.startsWith('?') ? trimmed : `?${trimmed}`;
-  }
-  const params = new URLSearchParams(query);
-  const code = params.get('code');
-  const state = params.get('state');
-  if (!code) throw new Error('Callback URL is missing `code`');
-  if (!state) throw new Error('Callback URL is missing `state`');
-  return { code, state };
-};
-
 // Exchange the authorization code for tokens, then derive identity from the
-// returned id_token. The PKCE verifier was stored at PKCE-start time and is
-// supplied here. The token exchange is the only network hop on this path
-// (identity parses locally from the id_token), so `fetcher` is where the
-// caller picks egress for the whole import.
+// returned id_token. The PKCE verifier was generated and held by the
+// dashboard alongside the round-tripped state, but only the verifier is
+// passed to auth.openai.com (the endpoint rejects state with 400). The
+// token exchange is the only network hop on this path (identity parses
+// locally from the id_token), so `fetcher` is where the caller picks
+// egress for the whole import.
 export const importCodexFromCallback = async (opts: { code: string; codeVerifier: string; fetcher: Fetcher }): Promise<CodexImportResult> => {
   const tokens = await exchangeCodexAuthorizationCode({ code: opts.code, codeVerifier: opts.codeVerifier, fetcher: opts.fetcher });
   const identity = parseCodexIdTokenClaims(tokens.id_token);

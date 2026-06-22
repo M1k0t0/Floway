@@ -187,6 +187,9 @@ importers:
       '@iconify-json/lucide':
         specifier: ^1.2.73
         version: 1.2.109
+      '@iconify-json/simple-icons':
+        specifier: ^1.2.87
+        version: 1.2.87
       '@types/nprogress':
         specifier: ^0.2.3
         version: 0.2.3
@@ -244,6 +247,9 @@ importers:
       '@floway-dev/provider-azure':
         specifier: workspace:*
         version: link:../provider-azure
+      '@floway-dev/provider-claude-code':
+        specifier: workspace:*
+        version: link:../provider-claude-code
       '@floway-dev/provider-codex':
         specifier: workspace:*
         version: link:../provider-codex
@@ -350,6 +356,25 @@ importers:
       '@floway-dev/provider':
         specifier: workspace:*
         version: link:../provider
+    devDependencies:
+      '@floway-dev/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
+
+  packages/provider-claude-code:
+    dependencies:
+      '@floway-dev/interceptor':
+        specifier: workspace:*
+        version: link:../interceptor
+      '@floway-dev/protocols':
+        specifier: workspace:*
+        version: link:../protocols
+      '@floway-dev/provider':
+        specifier: workspace:*
+        version: link:../provider
+      '@noble/hashes':
+        specifier: ^2.2.0
+        version: 2.2.0
     devDependencies:
       '@floway-dev/test-utils':
         specifier: workspace:*
@@ -974,6 +999,9 @@ packages:
 
   '@iconify-json/lucide@1.2.109':
     resolution: {integrity: sha512-O5arvTVcu95soP3dGWJp/Nl5L5FYmFu2z75sSrQmGzrgrnsCU49t8+ZB7HPq//GRNXpWUoNfDRcs5yR7XMa+zw==}
+
+  '@iconify-json/simple-icons@1.2.87':
+    resolution: {integrity: sha512-8YciStObhSji3OZFmWAWK6kBujyqO5bLCxeDwLxf3CR3F4PVelq7keC2LBvgTqviWzSTysj5/g4PCFLiAMVGsw==}
 
   '@iconify/types@2.0.0':
     resolution: {integrity: sha512-+wluvCrRhXrhyOmRDJ3q8mux9JkKy5SJ/v8ol2tu4FVjyYvtEzkc/3pK15ET6RKg4b4w4BmTk1+gsCUhf21Ykg==}
@@ -4018,6 +4046,10 @@ snapshots:
   '@humanwhocodes/retry@0.4.3': {}
 
   '@iconify-json/lucide@1.2.109':
+    dependencies:
+      '@iconify/types': 2.0.0
+
+  '@iconify-json/simple-icons@1.2.87':
     dependencies:
       '@iconify/types': 2.0.0
 

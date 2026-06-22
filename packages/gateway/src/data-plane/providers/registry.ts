@@ -4,6 +4,7 @@ import type { BackgroundScheduler } from '@floway-dev/platform';
 import { type ModelEndpointKey, type ModelEndpoints, kindForEndpoints } from '@floway-dev/protocols/common';
 import type { InternalModel, ModelProviderInstance, ProviderModelRecord, ResolvedModel, Fetcher, UpstreamModel, UpstreamProviderKind, UpstreamRecord } from '@floway-dev/provider';
 import { createAzureProvider } from '@floway-dev/provider-azure';
+import { createClaudeCodeProvider } from '@floway-dev/provider-claude-code';
 import { createCodexProvider } from '@floway-dev/provider-codex';
 import { createCopilotProvider } from '@floway-dev/provider-copilot';
 import { createCustomProvider } from '@floway-dev/provider-custom';
@@ -28,6 +29,7 @@ const providerFactories: Record<UpstreamProviderKind, ProviderFactory> = {
   custom: createCustomProvider,
   azure: createAzureProvider,
   codex: createCodexProvider,
+  'claude-code': createClaudeCodeProvider,
   ollama: createOllamaProvider,
 };
 
@@ -83,7 +85,7 @@ export const listModelProviders = async (
 const unionEndpoints = (a: ModelEndpoints, b: ModelEndpoints): ModelEndpoints => {
   const result: ModelEndpoints = { ...a };
   for (const key of Object.keys(b) as ModelEndpointKey[]) {
-    const merged = { ...(result[key] ?? {}), ...b[key] };
+    const merged = { ...result[key], ...b[key] };
     (result as Record<ModelEndpointKey, object>)[key] = merged;
   }
   return result;
@@ -229,7 +231,7 @@ export const getModels = async (
 
   const { models, sawSuccess, lastError } = await collectProviderModels(providers, fetcherForUpstream, scheduler);
 
-  if (sawSuccess) return [...models].sort((a, b) => compareModelIds(a.id, b.id));
+  if (sawSuccess) return models.sort((a, b) => compareModelIds(a.id, b.id));
   if (lastError) throw lastError;
   return [];
 };

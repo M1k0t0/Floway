@@ -12,9 +12,12 @@ import { withMessagesWebSearchShim } from './web-search-shim.ts';
 //     intercept loop wrap the rest of the chain. Unconditional for translated
 //     targets (Responses / Chat Completions cannot carry Anthropic server
 //     tools); gated by `messages-web-search-shim` for native Messages targets.
-//   - stripBillingAttribution: scrubs Claude Code's `x-anthropic-billing-header`
-//     / `cch=` markers out of the source-shape system prompt so prompt-cache
-//     hits survive across requests regardless of which upstream serves them.
+//   - stripBillingAttribution: gated by `strip-billing-attribution` (default
+//     on for copilot/azure/custom, off for claude-code). On binding kinds
+//     where it runs, it scrubs Claude Code's `x-anthropic-billing-header` /
+//     `cch=` markers out of the source-shape system prompt so prompt-cache
+//     hits survive across requests; on claude-code, the block is left intact
+//     because Anthropic uses it for plan-tier billing.
 //   - withReasoningDisabledOnForcedToolChoice: gated by
 //     `disable-reasoning-on-forced-tool-choice`.
 export const messagesInterceptors: readonly MessagesInterceptor[] = [
@@ -23,11 +26,8 @@ export const messagesInterceptors: readonly MessagesInterceptor[] = [
   withReasoningDisabledOnForcedToolChoice,
 ];
 
-// count_tokens shares the Messages payload-shape interceptors but runs against
-// the count_tokens upstream call, which returns a raw `Response` rather than
-// an event stream. The shipped Messages interceptors all inspect post-`run()`
-// event streams, so neither composes with count_tokens; the list stays empty
-// today. Kept as a separate readonly array so `messagesAttempt.countTokens`
-// has a clear extension point and so provider-supplied count-tokens
-// interceptors can be spread in later.
+// The shipped Messages interceptors all inspect post-`run()` event streams,
+// which the non-streaming count_tokens path cannot supply — so the list
+// stays empty today. Kept as a separate readonly array so the count-tokens
+// attempt has a clear extension point.
 export const messagesCountTokensInterceptors: readonly MessagesCountTokensInterceptor[] = [];

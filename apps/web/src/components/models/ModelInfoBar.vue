@@ -1,23 +1,12 @@
 <script setup lang="ts">
-import type { ControlPlaneModel, UpstreamProviderKind } from '../../api/types.ts';
+import type { ControlPlaneModel } from '../../api/types.ts';
+import { providerBadgeClass, providerMeta } from '../upstreams/provider-meta.ts';
 
 defineProps<{
   model: ControlPlaneModel;
 }>();
 
 defineEmits<{ clear: [] }>();
-
-const providerBadgeClass = (kind: UpstreamProviderKind) => {
-  switch (kind) {
-  case 'azure': return 'border-accent-emerald/30 bg-accent-emerald/10 text-accent-emerald';
-  case 'copilot': return 'border-accent-cyan/30 bg-accent-cyan/10 text-accent-cyan';
-  case 'codex': return 'border-accent-cyan/30 bg-accent-cyan/10 text-accent-cyan';
-  case 'ollama': return 'border-accent-rose/30 bg-accent-rose/10 text-accent-rose';
-  case 'custom':
-  default: return 'border-accent-amber/30 bg-accent-amber/10 text-accent-amber';
-  }
-};
-const providerLabel = (kind: UpstreamProviderKind) => ({ custom: 'Custom', azure: 'Azure', copilot: 'Copilot', codex: 'Codex', ollama: 'Ollama' }[kind]);
 
 const formatTokenLimit = (n: number) => {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`;
@@ -39,11 +28,11 @@ const formatTokenLimit = (n: number) => {
         </div>
         <div class="flex flex-wrap gap-1.5 mt-2">
           <span
-            v-for="binding in model.upstreams ?? []"
+            v-for="binding in model.upstreams"
             :key="binding.id"
             class="text-[10px] font-semibold px-2 py-0.5 rounded-full border"
             :class="providerBadgeClass(binding.kind)"
-            :title="providerLabel(binding.kind) + ' · ' + binding.name"
+            :title="providerMeta(binding.kind).label + ' · ' + binding.name"
           >{{ binding.name }}</span>
           <span v-if="model.limits?.max_context_window_tokens" class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-surface-600 text-gray-400">
             context: {{ formatTokenLimit(model.limits.max_context_window_tokens) }}

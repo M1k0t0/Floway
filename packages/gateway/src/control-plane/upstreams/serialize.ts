@@ -45,6 +45,14 @@ const assertAccountsArray = (upstream: UpstreamRecord, accounts: unknown): Recor
   });
 };
 
+const serializeOpaqueRecord = (upstream: UpstreamRecord, field: string, value: unknown): Record<string, unknown> | null => {
+  if (value === null) return null;
+  if (!isRecord(value)) {
+    throw new Error(`Upstream ${upstream.id} (${upstream.provider}) has malformed ${field}: expected object or null`);
+  }
+  return clone(value);
+};
+
 const redactedConfig = (upstream: UpstreamRecord): unknown => {
   if (!isRecord(upstream.config)) {
     throw new Error(`Upstream ${upstream.id} (${upstream.provider}) has malformed config: expected object`);
@@ -83,6 +91,17 @@ const redactedConfig = (upstream: UpstreamRecord): unknown => {
         ...(a.planType !== undefined ? { planType: clone(a.planType) } : {}),
       })),
     };
+  case 'claude-code':
+    // refreshToken lives in state and is redacted by redactedState.
+    return {
+      accounts: assertAccountsArray(upstream, config.accounts).map(a => ({
+        ...(a.email !== undefined ? { email: clone(a.email) } : {}),
+        ...(a.accountUuid !== undefined ? { accountUuid: clone(a.accountUuid) } : {}),
+        ...(a.organizationUuid !== undefined ? { organizationUuid: clone(a.organizationUuid) } : {}),
+        ...(a.subscriptionType !== undefined ? { subscriptionType: clone(a.subscriptionType) } : {}),
+        ...(a.rateLimitTier !== undefined ? { rateLimitTier: clone(a.rateLimitTier) } : {}),
+      })),
+    };
   case 'ollama':
     return {
       ...(config.baseUrl !== undefined ? { baseUrl: clone(config.baseUrl) } : {}),
@@ -113,6 +132,31 @@ const redactedState = (upstream: UpstreamRecord): unknown => {
         state_updated_at: clone(a.state_updated_at),
         refresh_token_set: hasSecret(a.refresh_token),
       })),
+    };
+  case 'claude-code':
+    return {
+      accounts: assertAccountsArray(upstream, state.accounts).map(a => {
+        // accessToken.token is dropped; expiresAt + refreshedAt are surfaced to the dashboard.
+        const accessToken = a.accessToken === null
+          ? null
+          : isRecord(a.accessToken)
+            ? { expiresAt: clone(a.accessToken.expiresAt), refreshedAt: clone(a.accessToken.refreshedAt) }
+            : (() => { throw new Error(`Upstream ${upstream.id} (${upstream.provider}) has malformed accessToken: expected object or null`); })();
+        return {
+          ...(a.accountUuid !== undefined ? { accountUuid: clone(a.accountUuid) } : {}),
+          ...(a.tokenKind !== undefined ? { tokenKind: clone(a.tokenKind) } : {}),
+          ...(a.state !== undefined ? { state: clone(a.state) } : {}),
+          ...(a.stateMessage !== undefined ? { stateMessage: clone(a.stateMessage) } : {}),
+          stateUpdatedAt: clone(a.stateUpdatedAt),
+          refreshTokenSet: hasSecret(a.refreshToken),
+          accessToken,
+          quotaSnapshot: serializeOpaqueRecord(upstream, 'quotaSnapshot', a.quotaSnapshot),
+          // usageProbeSnapshot's wire shape is owned by Anthropic's
+          // /api/oauth/usage endpoint and evolves on their schedule, so we
+          // round-trip the entry without re-shaping any inner fields.
+          usageProbeSnapshot: serializeOpaqueRecord(upstream, 'usageProbeSnapshot', a.usageProbeSnapshot),
+        };
+      }),
     };
   case 'copilot': {
     // Expose only the per-tier baseUrl the dashboard renders an account-type

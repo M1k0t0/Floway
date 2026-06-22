@@ -4,7 +4,7 @@ import { ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { callApi, useApi } from '../../api/client.ts';
-import type { ProxyRecord, SearchConfig, UpstreamRecord } from '../../api/types.ts';
+import type { ProxyRecord, SearchConfig, UpstreamProviderKind, UpstreamRecord } from '../../api/types.ts';
 import ProxyEditDialog from '../../components/proxy-edit/ProxyEditDialog.vue';
 import ApiEndpointsSection from '../../components/settings/ApiEndpointsSection.vue';
 import ExportSection from '../../components/settings/ExportSection.vue';
@@ -44,7 +44,7 @@ export const useSettingsPageData = defineBasicLoader(async () => {
 definePage({ meta: { requiresAdmin: true } });
 
 const router = useRouter();
-const { upstreams, loading: storeLoading, error: storeError, load } = useUpstreamsStore();
+const { upstreams, loading: storeLoading, load } = useUpstreamsStore();
 const modelsStore = useModelsStore();
 const proxiesStore = useProxiesStore();
 const { load: loadProxies } = proxiesStore;
@@ -73,17 +73,13 @@ const openProxyDialog = (record: ProxyRecord | null): void => {
 
 <template>
   <div>
-    <div v-if="storeError" class="mb-4 rounded-md border border-accent-rose/40 bg-accent-rose/10 px-3 py-2 text-sm text-accent-rose">
-      {{ storeError }}
-    </div>
-
     <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
       <div class="flex flex-col gap-5">
         <UpstreamsSettingsCard
           v-model:ordered="ordered"
           :loading="storeLoading"
           :models="modelsStore.models.value"
-          @add="() => router.push('/dashboard/upstreams/new')"
+          @add="(kind: UpstreamProviderKind) => router.push(`/dashboard/upstreams/new/${kind}`)"
           @edit="(record: UpstreamRecord) => router.push(`/dashboard/upstreams/${record.id}`)"
           @changed="reloadAll"
         />

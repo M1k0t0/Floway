@@ -108,8 +108,7 @@ export const messagesAttempt = {
     // count_tokens is excluded from the `upstream_success` metric — that
     // metric only covers generation-shaped traffic — but the recorder
     // contract still has to fire so a provider that forgets to wrap fails
-    // loud on the happy path. Discarding the duration is intentional;
-    // upstream throws are already loud via the await above.
+    // loud on the happy path.
     void recorder.durationMs();
     return await plainResultFromResponse(response);
   },

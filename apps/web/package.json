@@ -33,6 +33,7 @@
   "devDependencies": {
     "@floway-dev/gateway": "workspace:*",
     "@iconify-json/lucide": "^1.2.73",
+    "@iconify-json/simple-icons": "^1.2.87",
     "@types/nprogress": "^0.2.3",
     "@types/prismjs": "^1.26.6",
     "@types/sortablejs": "^1.15.9",

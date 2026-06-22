@@ -28,8 +28,9 @@
 Responses, OpenAI Chat Completions, Embeddings, OpenAI Images, and Google
 Gemini-compatible APIs over a unified upstream model. Provider kinds are
 `copilot`, `custom`, `azure`, `codex` (ChatGPT subscription via the
-Codex CLI's OAuth client), and `ollama` (any Ollama-compatible HTTP
-server — ollama.com by default, or a self-hosted daemon).
+Codex CLI's OAuth client), `claude-code` (Claude.ai Pro/Max subscription
+via the Claude Code CLI's OAuth client), and `ollama` (any Ollama-
+compatible HTTP server — ollama.com by default, or a self-hosted daemon).
 
 As a gateway, preserve upstream status, headers, and body as directly as
 possible; surface internal failures with stack traces rather than masking
@@ -54,25 +55,26 @@ reaching into any `apps/platform-*`.
 ```text
 floway/
 ├── packages/
-│   ├── gateway/             # @floway-dev/gateway — Hono app, control/data planes, repo, migrations
-│   ├── http/                # @floway-dev/http — HTTP/1.1 + userspace TLS + WebSocket upgrade over a duplex byte stream
-│   ├── interceptor/         # @floway-dev/interceptor — generic interceptor framework
-│   ├── platform/            # @floway-dev/platform — runtime contracts + portable helpers
-│   ├── protocols/           # @floway-dev/protocols — protocol type defs
-│   ├── provider/            # @floway-dev/provider — upstream provider contracts
-│   ├── provider-azure/      # @floway-dev/provider-azure — Azure OpenAI provider
-│   ├── provider-codex/      # @floway-dev/provider-codex — ChatGPT Codex (subscription) provider
-│   ├── provider-copilot/    # @floway-dev/provider-copilot — GitHub Copilot provider
-│   ├── provider-custom/     # @floway-dev/provider-custom — generic OpenAI-compatible
-│   ├── provider-ollama/     # @floway-dev/provider-ollama — Ollama (ollama.com or self-hosted)
-│   ├── proxy/               # @floway-dev/proxy — proxy URI parsing + per-protocol byte-stream dialers
-│   ├── test-utils/          # @floway-dev/test-utils — shared Vitest fixtures and stubs (test-only)
-│   ├── translate/           # @floway-dev/translate — cross-protocol translation pairs
-│   └── ui/                  # @floway-dev/ui — internal Vue component library
+│   ├── gateway/              # @floway-dev/gateway — Hono app, control/data planes, repo, migrations
+│   ├── http/                 # @floway-dev/http — HTTP/1.1 + userspace TLS + WebSocket upgrade over a duplex byte stream
+│   ├── interceptor/          # @floway-dev/interceptor — generic interceptor framework
+│   ├── platform/             # @floway-dev/platform — runtime contracts + portable helpers
+│   ├── protocols/            # @floway-dev/protocols — protocol type defs
+│   ├── provider/             # @floway-dev/provider — upstream provider contracts
+│   ├── provider-azure/       # @floway-dev/provider-azure — Azure OpenAI provider
+│   ├── provider-claude-code/ # @floway-dev/provider-claude-code — Claude Code (Claude.ai subscription) provider
+│   ├── provider-codex/       # @floway-dev/provider-codex — ChatGPT Codex (subscription) provider
+│   ├── provider-copilot/     # @floway-dev/provider-copilot — GitHub Copilot provider
+│   ├── provider-custom/      # @floway-dev/provider-custom — generic OpenAI-compatible
+│   ├── provider-ollama/      # @floway-dev/provider-ollama — Ollama (ollama.com or self-hosted)
+│   ├── proxy/                # @floway-dev/proxy — proxy URI parsing + per-protocol byte-stream dialers
+│   ├── test-utils/           # @floway-dev/test-utils — shared Vitest fixtures and stubs (test-only)
+│   ├── translate/            # @floway-dev/translate — cross-protocol translation pairs
+│   └── ui/                   # @floway-dev/ui — internal Vue component library
 └── apps/
-    ├── platform-cloudflare/ # @floway-dev/platform-cloudflare — CF impls + Worker entry
-    ├── platform-node/       # @floway-dev/platform-node — Node impls + node-server entry
-    └── web/                 # @floway-dev/web — Vue + Vite SPA dashboard
+    ├── platform-cloudflare/  # @floway-dev/platform-cloudflare — CF impls + Worker entry
+    ├── platform-node/        # @floway-dev/platform-node — Node impls + node-server entry
+    └── web/                  # @floway-dev/web — Vue + Vite SPA dashboard
 ```
 
 Dependency direction is strict. The leaf-most packages are `protocols`,

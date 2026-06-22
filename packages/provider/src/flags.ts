@@ -48,29 +48,45 @@ export const OPTIONAL_FLAGS = [
     description: 'Retry cyber_policy 4xx errors from the upstream (up to 10 attempts).',
     defaultFor: ['copilot'],
   },
+  // The three shim flags default on for every upstream kind that runs
+  // operator-shaped traffic through translation. They are off by default on
+  // `codex` (no hosted tools at all) and on `claude-code` (the shaped-
+  // passthrough path forwards caller bytes verbatim, so a gateway-side shim
+  // would silently rewrite a request the operator deliberately let through
+  // unchanged).
   {
     id: 'messages-web-search-shim',
     label: 'Messages web search shim',
     description: "Execute Anthropic native Messages web search through the gateway's configured search provider instead of forwarding it to the upstream. (When a client Messages request is routed to a non-Messages backend, the shim always runs regardless of this flag, because those targets cannot carry Anthropic server tools.)",
-    defaultFor: ALL_PROVIDER_KINDS.filter(p => !['codex'].includes(p)),
+    defaultFor: ALL_PROVIDER_KINDS.filter(p => !['codex', 'claude-code'].includes(p)),
   },
   {
     id: 'responses-web-search-shim',
     label: 'Responses web search shim',
     description: "Execute the Responses `web_search` hosted tool through the gateway's configured search provider instead of forwarding it to a Responses upstream. (When a Responses request is routed to a non-Responses backend, the shim always runs regardless of this flag, because those targets cannot carry hosted web_search.)",
-    defaultFor: ALL_PROVIDER_KINDS.filter(p => !['codex'].includes(p)),
+    defaultFor: ALL_PROVIDER_KINDS.filter(p => !['codex', 'claude-code'].includes(p)),
   },
   {
     id: 'responses-image-generation-shim',
     label: 'Responses image generation shim',
     description: "Execute the Responses `image_generation` hosted tool through the gateway's image-capable upstream (gpt-image-*) instead of forwarding it to a Responses upstream. The orchestrator model calls a generated function tool; the shim drives the standalone /images/{generations,edits} backend and synthesizes the native image_generation_call lifecycle. (When a Responses request is routed to a non-Responses backend, the shim always runs regardless of this flag, because those targets cannot carry the hosted image_generation tool.)",
-    defaultFor: ALL_PROVIDER_KINDS.filter(p => !['codex'].includes(p)),
+    defaultFor: ALL_PROVIDER_KINDS.filter(p => !['codex', 'claude-code'].includes(p)),
   },
   {
     id: 'disable-reasoning-on-forced-tool-choice',
     label: 'Disable reasoning when caller forces a tool',
     description: "Disable reasoning in the outbound request when the caller forces a specific tool. Emits the gateway's canonical 'no reasoning' sentinel; the active Vendor flag (if any) translates that into the vendor's wire form.",
     defaultFor: [],
+  },
+  // The `x-anthropic-billing-header:` line the Claude Code CLI injects is a
+  // literal `cch=00000;` placeholder, not a per-request hash — Anthropic's
+  // subscription endpoint reads the placeholder block itself to attribute
+  // billing.
+  {
+    id: 'strip-billing-attribution',
+    label: 'Strip Claude Code billing attribution from system prompt',
+    description: "Remove `x-anthropic-billing-header:` lines from the request's system prompt before forwarding upstream. Default on for copilot/azure/custom — the block is irrelevant to non-Anthropic upstreams and only pollutes their prompt-cache key. Default off for claude-code, where the same block is the input Anthropic uses to bill the request against the user's plan.",
+    defaultFor: ['copilot', 'azure', 'custom'],
   },
 ] as const satisfies readonly Flag[];
 

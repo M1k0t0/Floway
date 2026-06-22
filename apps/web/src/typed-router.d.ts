@@ -48,7 +48,7 @@ declare module 'vue-router/auto-routes' {
       | '/dashboard/performance'
       | '/dashboard/settings'
       | '/dashboard/upstreams/[id]'
-      | '/dashboard/upstreams/new'
+      | '/dashboard/upstreams/new/[provider]'
       | '/dashboard/usage'
       | '/dashboard/users'
     >,
@@ -94,11 +94,11 @@ declare module 'vue-router/auto-routes' {
       { id: ParamValue<false> },
       | never
     >,
-    '/dashboard/upstreams/new': RouteRecordInfo<
-      '/dashboard/upstreams/new',
-      '/dashboard/upstreams/new',
-      Record<never, never>,
-      Record<never, never>,
+    '/dashboard/upstreams/new/[provider]': RouteRecordInfo<
+      '/dashboard/upstreams/new/[provider]',
+      '/dashboard/upstreams/new/:provider',
+      { provider: ParamValue<true> },
+      { provider: ParamValue<false> },
       | never
     >,
     '/dashboard/usage': RouteRecordInfo<
@@ -156,7 +156,7 @@ declare module 'vue-router/auto-routes' {
         | '/dashboard/performance'
         | '/dashboard/settings'
         | '/dashboard/upstreams/[id]'
-        | '/dashboard/upstreams/new'
+        | '/dashboard/upstreams/new/[provider]'
         | '/dashboard/usage'
         | '/dashboard/users'
       views:
@@ -198,9 +198,9 @@ declare module 'vue-router/auto-routes' {
       views:
         | never
     }
-    'src/pages/dashboard/upstreams/new.vue': {
+    'src/pages/dashboard/upstreams/new/[provider].vue': {
       routes:
-        | '/dashboard/upstreams/new'
+        | '/dashboard/upstreams/new/[provider]'
       views:
         | never
     }

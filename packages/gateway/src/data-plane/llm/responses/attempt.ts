@@ -153,10 +153,9 @@ const rewriteOrRenderFailure = async (
     // / `model-unsupported` / `routing-unavailable` lives in the serve
     // layer and treats the `endpoint` distinction (`generate` vs
     // `compact`); from inside an attempt, only `item-not-found` is
-    // reachable from rewrite — anything else is a bug.
-    if (failure.kind !== 'item-not-found') {
-      throw new Error(`responsesAttempt cannot render failure kind '${failure.kind}' — rewrite only produces 'item-not-found'.`);
-    }
+    // reachable from rewrite — anything else is a bug. Re-throw the
+    // original error so the upstream stack/cause survives.
+    if (failure.kind !== 'item-not-found') throw error;
     return {
       failure: {
         type: 'upstream-error',
@@ -182,7 +181,8 @@ const dispatchResponses = async (
   candidate: ProviderCandidate,
   headers: Headers,
 ): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => {
-  if (candidate.targetApi === 'responses') {
+  switch (candidate.targetApi) {
+  case 'responses': {
     const { model: _model, ...body } = payload;
     const recorder = createUpstreamLatencyRecorder();
     const providerResult = await candidate.binding.provider.callResponses(
@@ -193,7 +193,7 @@ const dispatchResponses = async (
     );
     return await providerStreamResultToExecuteResult(providerResult, candidate, ctx, recorder.durationMs());
   }
-  if (candidate.targetApi === 'messages') {
+  case 'messages':
     return await traverseTranslation(
       payload,
       p => translateResponsesViaMessages(p, {
@@ -204,8 +204,7 @@ const dispatchResponses = async (
         payload: translated, ctx, store, candidate, headers,
       }),
     );
-  }
-  if (candidate.targetApi === 'chat-completions') {
+  case 'chat-completions':
     return await traverseTranslation(
       payload,
       p => translateResponsesViaChatCompletions(p, { model: candidate.binding.upstreamModel.id }),
@@ -213,8 +212,11 @@ const dispatchResponses = async (
         payload: translated, ctx, store, candidate, headers,
       }),
     );
+  default: {
+    const exhaustive: never = candidate.targetApi;
+    throw new Error(`unexpected targetApi '${exhaustive as string}'`);
   }
-  throw new Error(`responsesAttempt: unexpected targetApi '${(candidate as { targetApi: string }).targetApi}'`);
+  }
 };
 
 // `/responses/compact` is non-streaming: the provider returns the compaction

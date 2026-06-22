@@ -10,7 +10,7 @@ import type {
 
 export type { BillingDimension, ModelEndpointKey, ModelEndpoints, ModelKind, ModelPricing };
 
-export type UpstreamProviderKind = 'custom' | 'azure' | 'copilot' | 'codex' | 'ollama';
+export type UpstreamProviderKind = 'custom' | 'azure' | 'copilot' | 'codex' | 'claude-code' | 'ollama';
 
 export interface ProxyFallbackEntry {
   id: string;
@@ -97,7 +97,7 @@ export interface CodexAccountIdentity {
 }
 
 export interface CodexUpstreamConfig {
-  accounts: CodexAccountIdentity[];
+  accounts: [CodexAccountIdentity];
 }
 
 export interface OllamaUpstreamConfig {
@@ -134,6 +134,101 @@ export interface CodexQuotaSnapshot {
   credits_has_credits?: boolean;
   credits_balance?: number;
   ratelimited_until?: string;
+}
+
+// Claude Code identity + state shapes. Mirror the redacted projections in
+// packages/gateway/src/control-plane/upstreams/serialize.ts: refreshToken
+// lives in state and surfaces only as the boolean `refreshTokenSet`, and
+// accessToken.token is dropped while expiresAt / refreshedAt remain so the
+// dashboard can display a relative-time badge.
+export interface ClaudeCodeAccountIdentity {
+  // null when the access token lacks the `user:profile` scope (personal
+  // accounts whose CLI flow did not request it). Dashboard substitutes the
+  // accountUuid short prefix in that case.
+  email: string | null;
+  accountUuid: string;
+  organizationUuid: string | null;
+  // CLI-canonical plan name derived from `organization.organization_type`.
+  // null for personal accounts (no organization block) and for unrecognized
+  // organization_type values. Dashboard combines this with rateLimitTier
+  // below for display ("Max 5×", "Max 20×").
+  subscriptionType: 'pro' | 'max' | 'team' | 'enterprise' | null;
+  // Raw `organization.rate_limit_tier` from Anthropic — e.g.
+  // 'default_claude_max_5x'. Free-form so a new tier does not break ingest.
+  rateLimitTier: string | null;
+}
+
+export interface ClaudeCodeUpstreamConfig {
+  accounts: [ClaudeCodeAccountIdentity];
+}
+
+export interface ClaudeCodeAccessTokenSummary {
+  expiresAt: number;
+  refreshedAt: string;
+}
+
+// Anthropic's `anthropic-ratelimit-unified-*` snapshot. The wire shape is
+// frozen at the gateway boundary in @floway-dev/provider-claude-code's
+// quota.ts; mirror it so the dashboard renders the structured slices and
+// can show the raw header map under a debug disclosure.
+export interface ClaudeCodeQuotaWindow {
+  status: string | null;
+  reset: string | null;
+  utilization: number | null;
+}
+
+export interface ClaudeCodeQuotaSevenDay extends ClaudeCodeQuotaWindow {
+  surpassedThreshold: boolean | null;
+}
+
+export interface ClaudeCodeQuotaOverage extends ClaudeCodeQuotaWindow {
+  disabledReason: string | null;
+}
+
+export interface ClaudeCodeQuotaSnapshotData {
+  status: string | null;
+  reset: string | null;
+  fallbackAvailable: boolean | null;
+  fallbackPercentage: number | null;
+  representativeClaim: string | null;
+  overage: ClaudeCodeQuotaOverage | null;
+  fiveHour: ClaudeCodeQuotaWindow | null;
+  sevenDay: ClaudeCodeQuotaSevenDay | null;
+  raw: Record<string, string>;
+}
+
+export interface ClaudeCodeQuotaSnapshotEntry {
+  fetchedAt: number;
+  data: ClaudeCodeQuotaSnapshotData;
+}
+
+// Live `/api/oauth/usage` probe response cached on the credential. Distinct
+// slot from `quotaSnapshot` because the wire shape is owned by Anthropic and
+// evolves on their schedule — `data` is `unknown` so a new field never
+// blocks dashboard parse. The dashboard walks the known three windows
+// (`five_hour`, `seven_day`, `seven_day_sonnet`) and renders anything else
+// raw under a debug disclosure.
+export interface ClaudeCodeUsageProbeSnapshotEntry {
+  fetchedAt: number;
+  data: unknown;
+}
+
+export interface ClaudeCodeAccountCredentialSummary {
+  accountUuid: string;
+  // `oauth` is the full Claude Code sign-in (rotating refresh token).
+  // `setup-token` is the inference-only long-lived bearer (no refresh).
+  tokenKind: 'oauth' | 'setup-token';
+  state: 'active' | 'session_terminated' | 'refresh_failed';
+  stateMessage?: string;
+  stateUpdatedAt: string;
+  refreshTokenSet: boolean;
+  accessToken: ClaudeCodeAccessTokenSummary | null;
+  quotaSnapshot: ClaudeCodeQuotaSnapshotEntry | null;
+  usageProbeSnapshot: ClaudeCodeUsageProbeSnapshotEntry | null;
+}
+
+export interface ClaudeCodeUpstreamState {
+  accounts: ClaudeCodeAccountCredentialSummary[];
 }
 
 interface UpstreamRecordBase {
@@ -173,6 +268,7 @@ export type UpstreamRecord =
   | (UpstreamRecordBase & { provider: 'azure'; config: AzureUpstreamConfig; state: null })
   | (UpstreamRecordBase & { provider: 'copilot'; config: CopilotUpstreamConfig; state: CopilotUpstreamState | null })
   | (UpstreamRecordBase & { provider: 'codex'; config: CodexUpstreamConfig; state: CodexUpstreamState | null; codex_quota?: CodexQuotaSnapshot | null })
+  | (UpstreamRecordBase & { provider: 'claude-code'; config: ClaudeCodeUpstreamConfig; state: ClaudeCodeUpstreamState | null })
   | (UpstreamRecordBase & { provider: 'ollama'; config: OllamaUpstreamConfig; state: null });
 
 export interface FlagDef {
