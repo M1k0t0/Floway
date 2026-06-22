@@ -22,6 +22,7 @@ const explicitPrefixes = [
   ['tool_search_call', 'ts'],
   ['tool_search_output', 'tso'],
   ['compaction', 'cmp'],
+  ['compaction_trigger', 'cmpt'],
   ['image_generation_call', 'ig'],
   ['code_interpreter_call', 'ci'],
   ['local_shell_call', 'lsh'],
