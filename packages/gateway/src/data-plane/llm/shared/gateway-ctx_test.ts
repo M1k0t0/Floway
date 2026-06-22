@@ -1,21 +1,15 @@
 import { Hono } from 'hono';
 import { describe, test } from 'vitest';
 
-import { createGatewayCtxFromHono, createGatewayCtxForWs } from './gateway-ctx.ts';
+import { createGatewayCtxFromHono, createGatewayCtxForWs, type GatewayCtxAuthVars } from './gateway-ctx.ts';
 import { assertEquals, assertExists } from '@floway-dev/test-utils';
-
-interface AuthVars {
-  apiKeyId: string;
-  apiKeyUpstreamIds: readonly string[] | null;
-  userUpstreamIds: readonly string[] | null;
-}
 
 // Mirrors the production guarantee: by the time a data-plane handler runs,
 // auth middleware has stamped all three vars on the context. Tests that want
 // to model an unrestricted key on an uncapped user can rely on the defaults;
 // tests that want to model a capped key or user override at the handler.
-const makeApp = (): Hono<{ Variables: AuthVars }> => {
-  const app = new Hono<{ Variables: AuthVars }>();
+const makeApp = (): Hono<{ Variables: GatewayCtxAuthVars }> => {
+  const app = new Hono<{ Variables: GatewayCtxAuthVars }>();
   app.use('*', async (c, next) => {
     c.set('apiKeyId', 'test-key');
     c.set('apiKeyUpstreamIds', null);

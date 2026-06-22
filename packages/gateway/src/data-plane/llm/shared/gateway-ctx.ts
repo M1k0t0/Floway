@@ -23,8 +23,20 @@ export interface GatewayCtx {
   readonly currentColo: string | null;
 }
 
-export const createGatewayCtxFromHono = (c: Context, wantsStream: boolean): GatewayCtx => {
-  const apiKeyId = c.get('apiKeyId') as string;
+// Names the auth-middleware-stamped Hono variables this builder reads. Hono
+// gives no compile-time guarantee that a middleware ran; the alias is the
+// local declaration of what `auth.ts` is contracted to set so the lookup
+// sheds its inline cast.
+export interface GatewayCtxAuthVars {
+  apiKeyId: string;
+  apiKeyUpstreamIds: readonly string[] | null;
+  userUpstreamIds: readonly string[] | null;
+}
+
+type AuthedContext = Context<{ Variables: GatewayCtxAuthVars }>;
+
+export const createGatewayCtxFromHono = (c: AuthedContext, wantsStream: boolean): GatewayCtx => {
+  const apiKeyId = c.get('apiKeyId');
   const upstreamIds = effectiveUpstreamIdsFromContext(c);
   const downstreamAbortController = wantsStream ? new AbortController() : undefined;
   return {
@@ -40,10 +52,10 @@ export const createGatewayCtxFromHono = (c: Context, wantsStream: boolean): Gate
 };
 
 export const createGatewayCtxForWs = (
-  c: Context,
+  c: AuthedContext,
   downstreamAbortController: AbortController,
 ): GatewayCtx => {
-  const apiKeyId = c.get('apiKeyId') as string;
+  const apiKeyId = c.get('apiKeyId');
   const upstreamIds = effectiveUpstreamIdsFromContext(c);
   return {
     apiKeyId,
