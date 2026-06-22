@@ -296,7 +296,7 @@ describe('createFetcher', () => {
     expect(calls).toEqual(['b']);
   });
 
-  it('collapses to implicit ["direct"] when every entry is colo-filtered out', async () => {
+  it('fails closed when every configured entry is colo-filtered out', async () => {
     const repo = new InMemoryRepo();
     let directCalled = false;
     const fetcher = createFetcher({
@@ -308,6 +308,27 @@ describe('createFetcher', () => {
       ],
       currentColo: 'HKG',
       proxyById: new Map([['a', proxyA], ['b', proxyB]]),
+      runProxied: async () => new Response('proxy'),
+      runDirect: async () => { directCalled = true; return new Response('direct'); },
+      socketDial: () => stubSocketDial,
+    });
+    await expect(fetcher('https://api.openai.com', { method: 'GET' }))
+      .rejects.toThrow('no proxy fallback entries for upstream u are active in colo HKG');
+    expect(directCalled).toBe(false);
+  });
+
+  it('uses explicit unscoped direct fallback when proxy entries are colo-filtered out', async () => {
+    const repo = new InMemoryRepo();
+    let directCalled = false;
+    const fetcher = createFetcher({
+      repo,
+      upstreamId: 'u',
+      fallbackList: [
+        { id: 'a', colos: ['NRT'] },
+        { id: 'direct' },
+      ],
+      currentColo: 'HKG',
+      proxyById: new Map([['a', proxyA]]),
       runProxied: async () => new Response('proxy'),
       runDirect: async () => { directCalled = true; return new Response('direct'); },
       socketDial: () => stubSocketDial,

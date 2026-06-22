@@ -74,11 +74,9 @@ interface ProxiedRequest {
 // and the next attempt's wrap immediately overwrites the prior duration on
 // settle. The all-fail tail throws without anyone reading the duration.
 export const createFetcher = (input: CreateFetcherInput): Fetcher => {
-  // Colo filter precedes the implicit-['direct'] collapse so a fully-excluded
-  // list behaves like an empty list and gets the direct fallback, rather than
-  // throwing because pass 1 had no candidates.
   const matched = input.fallbackList.filter(entry => entryMatchesColo(entry, input.currentColo));
-  const list = matched.length > 0 ? matched.map(entry => entry.id) : [DIRECT_PROXY_ID];
+  const list = input.fallbackList.length === 0 ? [DIRECT_PROXY_ID] : matched.map(entry => entry.id);
+  const inactiveByColo = input.fallbackList.length > 0 && list.length === 0;
   // If `direct` precedes any non-direct entry, runtime fetch may take
   // ownership of `init.body` and consume its underlying stream/Blob.
   // Buffer the body up-front so a runtime that re-streams a Blob can't
@@ -88,6 +86,10 @@ export const createFetcher = (input: CreateFetcherInput): Fetcher => {
   const hasNonDirect = list.some(id => id !== DIRECT_PROXY_ID);
   const directBeforeProxy = hasNonDirect && list.includes(DIRECT_PROXY_ID) && list.indexOf(DIRECT_PROXY_ID) < list.length - 1;
   return async (url, init, recordUpstreamLatency) => {
+    if (inactiveByColo) {
+      const where = input.currentColo === null ? 'this runtime' : `colo ${input.currentColo}`;
+      throw new Error(`no proxy fallback entries for upstream ${input.upstreamId} are active in ${where}`);
+    }
     // Reject streaming bodies upfront whenever any non-direct entry is in
     // play. The two-pass dial can replay a request and a stream is
     // single-shot; for a list like ['a','direct'] where 'a' is in active
