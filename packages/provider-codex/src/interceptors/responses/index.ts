@@ -4,14 +4,15 @@
 
 import { injectDefaultInstructions } from './inject-default-instructions.ts';
 import { injectSessionId } from './inject-session-id.ts';
+import { sanitizeMessageIds } from './sanitize-message-ids.ts';
 import { stripUnsupportedFields } from './strip-unsupported-fields.ts';
 import type { ResponsesBoundaryCtx } from './types.ts';
 import type { Interceptor } from '@floway-dev/interceptor';
 
-// Order rationale: none of the three interceptors below read or write a field
-// the others touch, so order is positional only. inject-session-id last is
+// Order rationale: none of the interceptors below read or write a field the
+// others touch, so order is positional only. inject-session-id last is
 // conventional but not load-bearing — it hashes only `instructions + first
-// user-message text`, neither of which is mutated by the other two.
+// user-message text`, neither of which is mutated by the earlier mutators.
 //
 // Each interceptor is generic over the terminal result type: the streaming
 // `/responses` chain runs to ProviderStreamResult, the compaction chain runs
@@ -21,5 +22,6 @@ import type { Interceptor } from '@floway-dev/interceptor';
 export const codexResponsesChain = <TResult>(): readonly Interceptor<ResponsesBoundaryCtx, object, TResult>[] => [
   injectDefaultInstructions,
   stripUnsupportedFields,
+  sanitizeMessageIds,
   injectSessionId,
 ];
