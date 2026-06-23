@@ -253,9 +253,17 @@ restore target. Nothing leaves Cloudflare, and D1 retains bookmarks for
 Report the captured bookmark, then give the user two rollback commands,
 in this order:
 
-- Restore the database: `pnpm wrangler d1 time-travel restore <DB_NAME>
-  --bookmark <bookmark>`.
-- Roll back the Worker code: `pnpm wrangler rollback <PREVIOUS_VERSION_ID>`.
+- Restore the database: `CI=1 pnpm wrangler d1 time-travel restore
+  <DB_NAME> --bookmark <bookmark>`.
+- Roll back the Worker code:
+  `CI=1 pnpm wrangler rollback <PREVIOUS_VERSION_ID> -m "Emergency rollback"`.
+
+Both commands must be paste-and-run during an incident, so they are
+prefixed with `CI=1` to make wrangler treat them as non-interactive — it
+otherwise prompts to confirm the restore and to enter a rollback
+message. The `-m` flag on `wrangler rollback` supplies that message
+directly, because wrangler's documented `-y/--yes` flag is not actually
+honored by the rollback handler.
 
 If no migrations are pending, skip the bookmark capture and the
 database-rollback command; give only the code-rollback command and
