@@ -16,7 +16,7 @@ export const sanitizeMessageIds = async <TResult>(
 const sanitizeInputItems = (items: ResponsesInputItem[]): ResponsesInputItem[] => {
   let changed = false;
   const sanitized = items.map(item => {
-    if (item.type !== 'message') return item;
+    if (!isMessageInputItem(item)) return item;
     const id = (item as { id?: unknown }).id;
     if (id === undefined || (typeof id === 'string' && id.startsWith('msg'))) return item;
 
@@ -27,3 +27,11 @@ const sanitizeInputItems = (items: ResponsesInputItem[]): ResponsesInputItem[] =
   });
   return changed ? sanitized : items;
 };
+
+const isMessageInputItem = (item: ResponsesInputItem): boolean => {
+  const obj = item as { type?: unknown; role?: unknown };
+  return obj.type === undefined ? isMessageRole(obj.role) : obj.type === 'message';
+};
+
+const isMessageRole = (role: unknown): boolean =>
+  role === 'user' || role === 'assistant' || role === 'system' || role === 'developer';

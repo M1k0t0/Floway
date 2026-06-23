@@ -52,6 +52,28 @@ test('drops Codex review rollout message ids while preserving review content', a
   ]);
 });
 
+test('drops invalid ids from typeless easy input messages', async () => {
+  const ctx = invocation({
+    model: 'gpt-test',
+    input: [
+      {
+        id: 'review_rollout_user',
+        role: 'user',
+        content: 'User initiated a review task.',
+      },
+    ],
+  } as unknown as ResponsesPayload);
+
+  await sanitizeMessageIds(ctx, stubRequest, okEvents);
+
+  assertEquals(ctx.payload.input, [
+    {
+      role: 'user',
+      content: 'User initiated a review task.',
+    },
+  ]);
+});
+
 test('keeps Codex/OpenAI message ids intact', async () => {
   const ctx = invocation({
     model: 'gpt-test',
