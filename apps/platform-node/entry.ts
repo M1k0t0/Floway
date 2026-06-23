@@ -73,5 +73,5 @@ serve({
   port,
   websocket: { server: new WebSocketServer({ noServer: true }) },
 }, info => {
-  console.log(`floway listening on http://localhost:${info.port}`);
+  console.log(`Floway listening on http://localhost:${info.port}`);
 });

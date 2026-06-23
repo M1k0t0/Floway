@@ -172,7 +172,7 @@ interface CodexModelsResponse {
 
 describe('codex 1p namespace', () => {
   describe('auth', () => {
-    it('accepts a floway api key supplied as `Authorization: Bearer <key>`', async () => {
+    it('accepts a Floway api key supplied as `Authorization: Bearer <key>`', async () => {
       const { apiKey } = await setupAppTest();
       const app = buildCodexApp();
 

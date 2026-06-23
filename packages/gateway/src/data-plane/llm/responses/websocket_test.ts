@@ -194,7 +194,7 @@ test('Responses WebSocket forwards stream events, echoes event_id, and sends res
       assertExists(completed);
       const flowayResponseId = (completed.response as { id?: unknown } | undefined)?.id;
       assertEquals(typeof flowayResponseId, 'string');
-      assert(isStoredResponseId(flowayResponseId as string), 'expected floway-minted resp_ id, not the upstream blob');
+      assert(isStoredResponseId(flowayResponseId as string), 'expected Floway-minted resp_ id, not the upstream blob');
       assertEquals(messages.at(-1), {
         type: 'response.done',
         event_id: 'evt_1',

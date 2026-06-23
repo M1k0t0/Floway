@@ -1,6 +1,6 @@
 // Sync `context_window` and `max_context_window` on codex catalog entries
-// with floway's own registry. The codex bundled catalog speaks for the
-// OpenAI 1p backend it ships with; floway routes these slugs to a
+// with Floway's own registry. The codex bundled catalog speaks for the
+// OpenAI 1p backend it ships with; Floway routes these slugs to a
 // different upstream (Copilot, custom, azure) whose real window comes
 // from the registry, so the registry is the only source that knows what
 // the gateway can actually serve.

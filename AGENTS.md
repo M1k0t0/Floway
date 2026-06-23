@@ -24,13 +24,21 @@
 
 ## Project
 
-`floway` is an LLM API gateway. It exposes Anthropic Messages, OpenAI
+Floway is an LLM API gateway. It exposes Anthropic Messages, OpenAI
 Responses, OpenAI Chat Completions, Embeddings, OpenAI Images, and Google
 Gemini-compatible APIs over a unified upstream model. Provider kinds are
 `copilot`, `custom`, `azure`, `codex` (ChatGPT subscription via the
 Codex CLI's OAuth client), `claude-code` (Claude.ai Pro/Max subscription
 via the Claude Code CLI's OAuth client), and `ollama` (any Ollama-
 compatible HTTP server — ollama.com by default, or a self-hosted daemon).
+
+The product name is **Floway** — capitalized in all prose, comments,
+test names, assertion messages, and log output. Lowercase `floway` only
+appears inside technical identifiers that are part of an existing
+contract: the `@floway-dev/*` npm scope, `FLOWAY_*` env vars, the
+`x-floway-session` HTTP header, CSS class names, storage keys, fake test
+fixtures, and user-facing file/volume names. Never write `` `floway` ``
+as a name for the project itself.
 
 As a gateway, preserve upstream status, headers, and body as directly as
 possible; surface internal failures with stack traces rather than masking
@@ -53,7 +61,7 @@ reaching into any `apps/platform-*`.
 ## Workspace Layout
 
 ```text
-floway/
+Floway/
 ├── packages/
 │   ├── gateway/              # @floway-dev/gateway — Hono app, control/data planes, repo, migrations
 │   ├── http/                 # @floway-dev/http — HTTP/1.1 + userspace TLS + WebSocket upgrade over a duplex byte stream

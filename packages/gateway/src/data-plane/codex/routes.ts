@@ -7,7 +7,7 @@
 //                                wham, codex-namespaced catalog/compact)
 //   [model_providers.x].base_url — LLM endpoints (responses)
 //
-// Pointing both at the same prefix lets a single floway deployment serve every
+// Pointing both at the same prefix lets a single Floway deployment serve every
 // surface codex expects. The prefix must contain an Azure marker so codex's
 // `is_azure_responses_endpoint()` returns true; that unlocks `store: true` +
 // `attach_item_ids` in codex's client (model-provider-info substring scan
@@ -39,7 +39,7 @@
 //
 // Auth: this whole namespace is reached through the same `authMiddleware`
 // that protects every other API route. The operator forges
-// `~/.codex/auth.json` with `tokens.access_token` set to their floway API
+// `~/.codex/auth.json` with `tokens.access_token` set to their Floway API
 // key string; codex's `CodexAuth::get_token()` returns access_token verbatim
 // and sends it as `Authorization: Bearer <key>`; `extractKey()` in
 // middleware/auth.ts already accepts that header, so the namespace inherits

@@ -14,7 +14,7 @@ export interface CodexRawModel {
   // Per-request context window. Upstream also returns a sibling
   // `max_context_window` field as the upper bound for config overrides
   // (https://github.com/openai/codex/blob/d66708232299bdbf373ec55b0d6b938c246cfa60/codex-rs/protocol/src/openai_models.rs#L383-L386);
-  // floway has no override path, so only the operational value is kept.
+  // Floway has no override path, so only the operational value is kept.
   context_window: number;
 }
 

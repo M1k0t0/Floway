@@ -547,7 +547,7 @@ test('generate reuses an existing input row when a later turn echoes the same us
 
   // Both snapshots' first item id is the staged user message; a working
   // content-hash preload makes turn 2 reuse turn 1's row instead of minting
-  // a fresh one. Look up by the floway-minted response id wrap puts on
+  // a fresh one. Look up by the Floway-minted response id wrap puts on
   // each terminal event — the upstream's `resp_turn_N` id is discarded.
   const turn1ResponseId = (turn1Events.find(e => e.type === 'response.completed') as Extract<ResponsesStreamEvent, { type: 'response.completed' }>).response.id;
   const turn2ResponseId = (turn2Events.find(e => e.type === 'response.completed') as Extract<ResponsesStreamEvent, { type: 'response.completed' }>).response.id;

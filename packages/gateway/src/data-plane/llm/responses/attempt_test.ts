@@ -312,7 +312,7 @@ test('compact reshapes the trigger turn into a result and forwards snapshotMode=
   assertEquals(result.result.object, 'response.compaction');
   assertEquals(result.result.output.length, 1);
   assertEquals((result.result.output[0] as { id: string }).id, 'cmp_1');
-  // The compact result wears a floway-minted response id, not the upstream's
+  // The compact result wears a Floway-minted response id, not the upstream's
   // — same id wrap committed the snapshot under.
   assert(isStoredResponseId(result.result.id));
 

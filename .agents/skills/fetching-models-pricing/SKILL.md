@@ -1,6 +1,6 @@
 ---
 name: fetching-models-pricing
-description: Use when refreshing a per-model pricing table for a floway
+description: Use when refreshing a per-model pricing table for a Floway
   provider whose upstream doesn't publish per-token rates and needs
   notional billing (Copilot, Codex, Ollama). Manual procedure — no script.
 ---

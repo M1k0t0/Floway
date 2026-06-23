@@ -65,7 +65,7 @@ const OLLAMA_MODEL_PRICING: readonly PricingRule[] = [
   // https://api-docs.deepseek.com/quick_start/pricing taken while each
   // version was current; OpenRouter / DeepInfra mirror prices for V3.1/V3.2
   // sit BELOW these rates because those hosts run the open weights themselves
-  // — they're not DeepSeek's API. For notional billing the floway dashboard
+  // — they're not DeepSeek's API. For notional billing the Floway dashboard
   // should reflect the operator's "what would I pay on the model's own API"
   // anchor, which is DeepSeek first-party.
   // https://api-docs.deepseek.com/quick_start/pricing

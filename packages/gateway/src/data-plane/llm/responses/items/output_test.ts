@@ -396,7 +396,7 @@ test('snapshotMode=append: snapshot written after terminal event', async () => {
 
   await collectEvents(events);
   const snapshot = await repo.responsesSnapshots.lookup(apiKeyId, 'resp_snap_append');
-  assert(snapshot !== null, 'expected snapshot to be written under floway-minted id');
+  assert(snapshot !== null, 'expected snapshot to be written under Floway-minted id');
   assertEquals(snapshot.id, 'resp_snap_append');
 });
 
@@ -413,7 +413,7 @@ test('snapshotMode=replace: snapshot written after terminal event', async () => 
 
   await collectEvents(events);
   const snapshot = await repo.responsesSnapshots.lookup(apiKeyId, 'resp_snap_replace');
-  assert(snapshot !== null, 'expected snapshot to be written under floway-minted id');
+  assert(snapshot !== null, 'expected snapshot to be written under Floway-minted id');
   assertEquals(snapshot.id, 'resp_snap_replace');
 });
 

@@ -166,7 +166,7 @@ test('POST /v1/responses streams a successful SSE body', async () => {
   assert(body.includes('event: response.completed'));
   // Wrap layer mints its own response id; upstream's "resp_test" is discarded.
   const completedMatch = body.match(/"id":"(resp_[A-Za-z0-9_-]+)"/);
-  assert(completedMatch !== null, 'expected a floway-minted resp_ id in the SSE body');
+  assert(completedMatch !== null, 'expected a Floway-minted resp_ id in the SSE body');
   assert(isStoredResponseId(completedMatch[1]));
   assertEquals(callResponses.mock.calls.length, 1);
 });
@@ -190,7 +190,7 @@ test('POST /v1/responses returns a single JSON body when stream is omitted', asy
   assertEquals(response.status, 200);
   assertEquals(response.headers.get('content-type')?.split(';')[0], 'application/json');
   const body = await response.json() as ResponsesResult;
-  assert(isStoredResponseId(body.id), `expected floway-minted resp_ id, got ${body.id}`);
+  assert(isStoredResponseId(body.id), `expected Floway-minted resp_ id, got ${body.id}`);
   assertEquals(body.status, 'completed');
 });
 
@@ -222,7 +222,7 @@ test('POST /v1/responses/compact returns a non-streaming compaction envelope', a
   assertEquals(response.headers.get('content-type')?.split(';')[0], 'application/json');
   const body = await response.json() as { object: string; id: string };
   assertEquals(body.object, 'response.compaction');
-  assert(isStoredResponseId(body.id), `expected floway-minted resp_ id, got ${body.id}`);
+  assert(isStoredResponseId(body.id), `expected Floway-minted resp_ id, got ${body.id}`);
 });
 
 test('POST /v1/responses with an unresolvable previous_response_id renders the verbatim 400 envelope', async () => {

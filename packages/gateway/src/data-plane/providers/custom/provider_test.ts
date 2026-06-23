@@ -108,7 +108,7 @@ test('Custom provider uses configured endpoints regardless of per-model hints in
   );
 });
 
-test('Custom provider projects display_name / created / limits / cost from a floway-style /models response', async () => {
+test('Custom provider projects display_name / created / limits / cost from a Floway-style /models response', async () => {
   await setupAppTest();
 
   await withMockedFetch(
