@@ -249,7 +249,9 @@ describe('callCodexResponses — upstream classification', () => {
       installation_id: expect.stringMatching(UUID_RE),
       session_id: 'downstream-session',
       thread_id: 'downstream-session',
+      turn_id: expect.stringMatching(UUID_RE),
       window_id: headers.get('x-codex-window-id'),
+      request_kind: 'turn',
     });
     expect(headers.get('x-codex-turn-metadata')).not.toBe('turn-meta');
     expect(headers.get('cf-connecting-ip')).toBeNull();
@@ -259,7 +261,14 @@ describe('callCodexResponses — upstream classification', () => {
 
     const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string) as Record<string, unknown>;
     expect(body.prompt_cache_key).toBe('downstream-session');
-    expect(body.client_metadata).toEqual({ 'x-codex-installation-id': turnMetadata.installation_id });
+    expect(body.client_metadata).toEqual({
+      'x-codex-installation-id': turnMetadata.installation_id,
+      session_id: 'downstream-session',
+      thread_id: 'downstream-session',
+      turn_id: turnMetadata.turn_id,
+      'x-codex-window-id': headers.get('x-codex-window-id'),
+      'x-codex-turn-metadata': headers.get('x-codex-turn-metadata'),
+    });
   });
 
   test('synthesized Codex identity is deterministic for the same session and account', async () => {
@@ -312,6 +321,9 @@ describe('callCodexResponses — upstream classification', () => {
     expect(firstMetadata.installation_id).toBe(secondMetadata.installation_id);
     expect(firstMetadata.session_id).toBe('session-a');
     expect(secondMetadata.session_id).toBe('session-b');
+    expect(firstMetadata.turn_id).not.toBe(secondMetadata.turn_id);
+    expect(firstMetadata.request_kind).toBe('turn');
+    expect(secondMetadata.request_kind).toBe('turn');
   });
 
   test('injects prompt_cache_key only when caller leaves it absent', async () => {

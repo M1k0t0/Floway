@@ -90,6 +90,7 @@ interface CodexRequestIdentity {
   installationId: string;
   sessionId: string;
   threadId: string;
+  turnId: string;
   windowId: string;
 }
 
@@ -101,12 +102,26 @@ const trimHeader = (headers: Headers, name: string): string | null => {
 const buildCodexRequestIdentity = async (opts: CallCodexResponsesOptions): Promise<CodexRequestIdentity> => {
   const sessionId = trimHeader(opts.headers, 'session-id') ?? trimHeader(opts.headers, 'session_id') ?? crypto.randomUUID();
   const installationId = await sha256Uuid(`codex-installation:${opts.upstreamId}:${opts.account.chatgptAccountId}`);
+  const turnId = await sha256Uuid(`codex-turn:${opts.upstreamId}:${opts.account.chatgptAccountId}:${sessionId}`);
   const windowId = await sha256Uuid(`codex-window:${opts.upstreamId}:${opts.account.chatgptAccountId}:${sessionId}`);
-  return { installationId, sessionId, threadId: sessionId, windowId };
+  return { installationId, sessionId, threadId: sessionId, turnId, windowId };
 };
+
+const buildCodexTurnMetadata = (identity: CodexRequestIdentity): Record<string, string> => ({
+  installation_id: identity.installationId,
+  session_id: identity.sessionId,
+  thread_id: identity.threadId,
+  turn_id: identity.turnId,
+  window_id: identity.windowId,
+  request_kind: 'turn',
+});
+
+const buildCodexTurnMetadataJson = (identity: CodexRequestIdentity): string =>
+  JSON.stringify(buildCodexTurnMetadata(identity));
 
 const buildCodexResponsesHeaders = (opts: CallCodexResponsesOptions, accessToken: string, identity: CodexRequestIdentity): Headers => {
   const headers = new Headers();
+  const turnMetadataJson = buildCodexTurnMetadataJson(identity);
   headers.set('authorization', `Bearer ${accessToken}`);
   headers.set('chatgpt-account-id', opts.account.chatgptAccountId);
   headers.set('originator', CODEX_ORIGINATOR);
@@ -118,12 +133,7 @@ const buildCodexResponsesHeaders = (opts: CallCodexResponsesOptions, accessToken
   headers.set('version', CODEX_CLI_VERSION);
   headers.set('x-client-request-id', identity.threadId);
   headers.set('x-codex-window-id', identity.windowId);
-  headers.set('x-codex-turn-metadata', JSON.stringify({
-    installation_id: identity.installationId,
-    session_id: identity.sessionId,
-    thread_id: identity.threadId,
-    window_id: identity.windowId,
-  }));
+  headers.set('x-codex-turn-metadata', turnMetadataJson);
 
   return headers;
 };
@@ -132,6 +142,7 @@ const buildCodexResponsesBody = (
   opts: CallCodexResponsesOptions,
   identity: CodexRequestIdentity,
 ): Record<string, unknown> => {
+  const turnMetadataJson = buildCodexTurnMetadataJson(identity);
   const body: Record<string, unknown> = {
     ...(opts.body as unknown as Record<string, unknown>),
     model: opts.model.id,
@@ -139,6 +150,11 @@ const buildCodexResponsesBody = (
     stream: true,
     client_metadata: {
       'x-codex-installation-id': identity.installationId,
+      session_id: identity.sessionId,
+      thread_id: identity.threadId,
+      turn_id: identity.turnId,
+      'x-codex-window-id': identity.windowId,
+      'x-codex-turn-metadata': turnMetadataJson,
     },
   };
   if (body.prompt_cache_key === undefined) body.prompt_cache_key = identity.threadId;
