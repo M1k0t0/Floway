@@ -1,4 +1,4 @@
-import { advanceCodexSnapshotWindowGeneration, attachCodexSessionHeader } from './codex-session.ts';
+import { advanceCodexSnapshotWindowGeneration, attachCodexSessionHeader, markCodexSnapshotContinued } from './codex-session.ts';
 import { responsesInterceptors } from './interceptors/index.ts';
 import type { ResponsesAttemptResult, ResponsesInvocation } from './interceptors/types.ts';
 import { createStoredResponseId } from './items/format.ts';
@@ -148,10 +148,15 @@ const codexBeforeCommitSnapshot = (
   candidate: ProviderCandidate,
   snapshotMode: ResponsesSnapshotMode,
   store: StatefulResponsesStore,
-): (() => void) | undefined =>
+): ((responseId: string) => void) | undefined =>
   candidate.binding.providerKind === 'codex' && snapshotMode === 'replace'
-    ? () => advanceCodexSnapshotWindowGeneration(store)
-    : undefined;
+    ? responseId => {
+      advanceCodexSnapshotWindowGeneration(store);
+      markCodexSnapshotContinued(store, responseId);
+    }
+    : candidate.binding.providerKind === 'codex'
+      ? responseId => markCodexSnapshotContinued(store, responseId)
+      : undefined;
 
 type RewriteOutcome =
   | RewrittenResponsesPayload
