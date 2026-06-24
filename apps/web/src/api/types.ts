@@ -325,9 +325,10 @@ export interface ControlPlaneModel extends PublicModel {
 }
 
 export interface SearchConfig {
-  provider: 'disabled' | 'tavily' | 'microsoft-grounding';
+  provider: 'disabled' | 'tavily' | 'microsoft-grounding' | 'jina';
   tavily: { apiKey: string };
   microsoftGrounding: { apiKey: string };
+  jina: { apiKey: string };
 }
 
 export interface CopilotQuotaSnapshot {

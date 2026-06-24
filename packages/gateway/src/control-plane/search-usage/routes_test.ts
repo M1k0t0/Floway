@@ -48,6 +48,7 @@ test('/api/search-usage in self-by-key mode includes per-key metadata for the ac
     provider: 'microsoft-grounding',
     tavily: { apiKey: 'tvly-test' },
     microsoftGrounding: { apiKey: 'ms-test' },
+    jina: { apiKey: '' },
   });
 
   const response = await requestApp('/api/search-usage?start=2026-03-15T00&end=2026-03-16T00&include_key_metadata=1', {

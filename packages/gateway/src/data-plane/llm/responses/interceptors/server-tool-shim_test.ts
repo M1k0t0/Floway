@@ -282,6 +282,7 @@ beforeEach(() => {
     provider: 'tavily',
     tavily: { apiKey: 'test-key' },
     microsoftGrounding: { apiKey: '' },
+    jina: { apiKey: '' },
   } satisfies SearchConfig);
 });
 

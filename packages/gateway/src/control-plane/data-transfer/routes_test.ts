@@ -324,7 +324,7 @@ test('export includes full upstream configs and omits performance by default', a
   await repo.usage.set(USAGE_1);
   await repo.searchUsage.set(SEARCH_USAGE_1);
   await repo.performance.set(PERFORMANCE_1);
-  await repo.searchConfig.save({ provider: 'tavily', tavily: { apiKey: 'tvly-test' }, microsoftGrounding: { apiKey: 'ms-test' } });
+  await repo.searchConfig.save({ provider: 'tavily', tavily: { apiKey: 'tvly-test' }, microsoftGrounding: { apiKey: 'ms-test' }, jina: { apiKey: '' } });
 
   const result = await doExport(app);
 
@@ -386,7 +386,7 @@ test('import replace writes upstreams and clears replaced collections', async ()
   await repo.usage.set(USAGE_1);
   await repo.searchUsage.set(SEARCH_USAGE_1);
   await repo.responsesItems.insertMany([STORED_RESPONSES_ITEM]);
-  await repo.searchConfig.save({ provider: 'tavily', tavily: { apiKey: 'old' }, microsoftGrounding: { apiKey: '' } });
+  await repo.searchConfig.save({ provider: 'tavily', tavily: { apiKey: 'old' }, microsoftGrounding: { apiKey: '' }, jina: { apiKey: '' } });
 
   const result = await doImport(app, 'replace', {
     users: [SEED_ADMIN],
@@ -395,7 +395,7 @@ test('import replace writes upstreams and clears replaced collections', async ()
     usage: [USAGE_2],
     searchUsage: [SEARCH_USAGE_2],
     performanceIncluded: false,
-    searchConfig: { provider: 'microsoft-grounding', tavily: { apiKey: '' }, microsoftGrounding: { apiKey: 'ms-new' } },
+    searchConfig: { provider: 'microsoft-grounding', tavily: { apiKey: '' }, microsoftGrounding: { apiKey: 'ms-new' }, jina: { apiKey: '' } },
   });
 
   assertEquals(result.status, 200);
@@ -405,7 +405,7 @@ test('import replace writes upstreams and clears replaced collections', async ()
   assertEquals(await repo.usage.listAll(), [USAGE_2]);
   assertEquals(await repo.searchUsage.listAll(), [SEARCH_USAGE_2]);
   assertEquals(await repo.responsesItems.lookupMany('key-a', [STORED_RESPONSES_ITEM.id]), []);
-  assertEquals(await repo.searchConfig.get(), { provider: 'microsoft-grounding', tavily: { apiKey: '' }, microsoftGrounding: { apiKey: 'ms-new' } });
+  assertEquals(await repo.searchConfig.get(), { provider: 'microsoft-grounding', tavily: { apiKey: '' }, microsoftGrounding: { apiKey: 'ms-new' }, jina: { apiKey: '' } });
 });
 
 test('import merge upserts by repository key without clearing unrelated rows', async () => {
@@ -1056,7 +1056,7 @@ test('a full v6 export re-imports verbatim — the export→import round trip is
   await repo.searchUsage.set(SEARCH_USAGE_2);
   await repo.performance.set(PERFORMANCE_1);
   await repo.performance.set(PERFORMANCE_2);
-  const config = { provider: 'tavily' as const, tavily: { apiKey: 'tk' }, microsoftGrounding: { apiKey: '' } };
+  const config = { provider: 'tavily' as const, tavily: { apiKey: 'tk' }, microsoftGrounding: { apiKey: '' }, jina: { apiKey: '' } };
   await repo.searchConfig.save(config);
 
   const exported = await doExport(app, true);

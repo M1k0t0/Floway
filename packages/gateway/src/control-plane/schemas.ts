@@ -518,9 +518,10 @@ export const resetBackoffBody = z.object({
 // --- search config ---
 
 export const searchConfigSchema = z.object({
-  provider: z.enum(['disabled', 'tavily', 'microsoft-grounding']),
+  provider: z.enum(['disabled', 'tavily', 'microsoft-grounding', 'jina']),
   tavily: z.object({ apiKey: z.string() }),
   microsoftGrounding: z.object({ apiKey: z.string() }),
+  jina: z.object({ apiKey: z.string() }),
 });
 
 // --- data transfer ---

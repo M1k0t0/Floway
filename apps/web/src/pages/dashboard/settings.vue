@@ -21,6 +21,7 @@ const defaultSearchConfig: SearchConfig = {
   provider: 'disabled',
   tavily: { apiKey: '' },
   microsoftGrounding: { apiKey: '' },
+  jina: { apiKey: '' },
 };
 
 export const useSettingsPageData = defineBasicLoader(async () => {

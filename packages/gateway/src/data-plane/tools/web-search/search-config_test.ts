@@ -11,15 +11,17 @@ interface SearchConfigRow {
   provider: string;
   tavily_api_key: string;
   microsoft_grounding_api_key: string;
+  jina_api_key: string;
 }
 
-const SELECT_SQL = 'SELECT provider, tavily_api_key, microsoft_grounding_api_key FROM search_config WHERE id = 1';
-const UPSERT_SQL = `INSERT INTO search_config (id, provider, tavily_api_key, microsoft_grounding_api_key, updated_at)
-         VALUES (1, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+const SELECT_SQL = 'SELECT provider, tavily_api_key, microsoft_grounding_api_key, jina_api_key FROM search_config WHERE id = 1';
+const UPSERT_SQL = `INSERT INTO search_config (id, provider, tavily_api_key, microsoft_grounding_api_key, jina_api_key, updated_at)
+         VALUES (1, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
          ON CONFLICT (id) DO UPDATE SET
            provider = excluded.provider,
            tavily_api_key = excluded.tavily_api_key,
            microsoft_grounding_api_key = excluded.microsoft_grounding_api_key,
+           jina_api_key = excluded.jina_api_key,
            updated_at = excluded.updated_at`;
 
 class FakeSqlPreparedStatement {
@@ -50,6 +52,7 @@ class FakeSqlPreparedStatement {
         provider: String(this.binds[0]),
         tavily_api_key: String(this.binds[1]),
         microsoft_grounding_api_key: String(this.binds[2]),
+        jina_api_key: String(this.binds[3]),
       };
       return Promise.resolve({ results: [], success: true, meta: {} });
     }
@@ -78,12 +81,14 @@ test('search config repo defaults to disabled and round-trips provider keys', as
     provider: 'tavily',
     tavily: { apiKey: 'tvly-test' },
     microsoftGrounding: { apiKey: 'ms-test' },
+    jina: { apiKey: 'jina-test' },
   });
 
   assertEquals(await loadSearchConfig(), {
     provider: 'tavily',
     tavily: { apiKey: 'tvly-test' },
     microsoftGrounding: { apiKey: 'ms-test' },
+    jina: { apiKey: 'jina-test' },
   });
   assertEquals(FIXED_SEARCH_CONFIG_TEST_QUERY, 'React documentation');
 });
@@ -96,6 +101,7 @@ test('loadSearchConfig strict-parses a stored row and rejects unknown provider v
     provider: 'unknown-provider',
     tavily: { apiKey: '  tvly-test  ' },
     microsoftGrounding: { apiKey: '  ms-test  ' },
+    jina: { apiKey: '' },
   });
 
   await assertRejects(() => loadSearchConfig(), Error, 'provider');
@@ -106,15 +112,17 @@ test('loadSearchConfig strict-parses a stored row and trims valid api keys', asy
   initRepo(repo);
 
   await repo.searchConfig.save({
-    provider: 'tavily',
+    provider: 'jina',
     tavily: { apiKey: '  tvly-trim  ' },
     microsoftGrounding: { apiKey: '  ms-trim  ' },
+    jina: { apiKey: '  jina-trim  ' },
   });
 
   assertEquals(await loadSearchConfig(), {
-    provider: 'tavily',
+    provider: 'jina',
     tavily: { apiKey: 'tvly-trim' },
     microsoftGrounding: { apiKey: 'ms-trim' },
+    jina: { apiKey: 'jina-trim' },
   });
 });
 
@@ -135,9 +143,14 @@ test('parseSearchConfigStrict throws on missing required fields', () => {
     'microsoftGrounding',
   );
   assertThrows(
-    () => parseSearchConfigStrict({ provider: 'disabled', tavily: {}, microsoftGrounding: { apiKey: '' } }),
+    () => parseSearchConfigStrict({ provider: 'disabled', tavily: {}, microsoftGrounding: { apiKey: '' }, jina: { apiKey: '' } }),
     Error,
     'tavily.apiKey',
+  );
+  assertThrows(
+    () => parseSearchConfigStrict({ provider: 'disabled', tavily: { apiKey: '' }, microsoftGrounding: { apiKey: '' } }),
+    Error,
+    'jina',
   );
 });
 
@@ -149,21 +162,25 @@ test('saveSearchConfig writes the typed columns and round-trips through the same
     provider: 'disabled',
     tavily: { apiKey: '  tvly-test  ' },
     microsoftGrounding: { apiKey: '  ms-test  ' },
+    jina: { apiKey: '  jina-test  ' },
   });
 
   assertEquals(saved, {
     provider: 'disabled',
     tavily: { apiKey: 'tvly-test' },
     microsoftGrounding: { apiKey: 'ms-test' },
+    jina: { apiKey: 'jina-test' },
   });
   assertEquals(db.searchConfig, {
     provider: 'disabled',
     tavily_api_key: 'tvly-test',
     microsoft_grounding_api_key: 'ms-test',
+    jina_api_key: 'jina-test',
   });
   assertEquals(await loadSearchConfig(), {
     provider: 'disabled',
     tavily: { apiKey: 'tvly-test' },
     microsoftGrounding: { apiKey: 'ms-test' },
+    jina: { apiKey: 'jina-test' },
   });
 });
