@@ -240,29 +240,33 @@ export class LayeredStatefulResponsesStore implements StatefulResponsesStore {
   }
 
   async commitSnapshot(responseId: string, mode: 'append' | 'replace'): Promise<void> {
-    if (this.options.snapshotWrites.length === 0 || this.committedSnapshotIds.has(responseId)) return;
-    await this.commitItems([...this.stagedInputItems.values(), ...this.stagedOutputItems.values()]);
-    const itemIds = mode === 'replace'
-      ? [...this.stagedOutputItemIds]
-      : [...this.previousSnapshotItemIds, ...this.stagedInputItemIds, ...this.stagedOutputItemIds];
-    if (itemIds.length === 0) return;
+    try {
+      if (this.options.snapshotWrites.length === 0 || this.committedSnapshotIds.has(responseId)) return;
+      await this.commitItems([...this.stagedInputItems.values(), ...this.stagedOutputItems.values()]);
+      const itemIds = mode === 'replace'
+        ? [...this.stagedOutputItemIds]
+        : [...this.previousSnapshotItemIds, ...this.stagedInputItemIds, ...this.stagedOutputItemIds];
+      if (itemIds.length === 0) return;
 
-    const replayableRows = this.replayableRowsForSnapshot(itemIds);
-    await this.commitItems(replayableRows);
-    const now = Date.now();
-    const snapshot: StoredResponsesSnapshot = {
-      id: responseId,
-      apiKeyId: this.options.apiKeyId,
-      itemIds,
-      metadata: { ...this.previousSnapshotMetadata, ...this.pendingSnapshotMetadata },
-      createdAt: now,
-      refreshedAt: now,
-    };
-    await Promise.all(this.options.snapshotWrites
-      .filter(write => !write.durable || itemIds.every(id => this.durableItemIds.has(id)))
-      .map(write => write.backing.insertSnapshot(snapshot)));
-    this.rememberSnapshot(snapshot);
-    this.committedSnapshotIds.add(responseId);
+      const replayableRows = this.replayableRowsForSnapshot(itemIds);
+      await this.commitItems(replayableRows);
+      const now = Date.now();
+      const snapshot: StoredResponsesSnapshot = {
+        id: responseId,
+        apiKeyId: this.options.apiKeyId,
+        itemIds,
+        metadata: { ...this.previousSnapshotMetadata, ...this.pendingSnapshotMetadata },
+        createdAt: now,
+        refreshedAt: now,
+      };
+      await Promise.all(this.options.snapshotWrites
+        .filter(write => !write.durable || itemIds.every(id => this.durableItemIds.has(id)))
+        .map(write => write.backing.insertSnapshot(snapshot)));
+      this.rememberSnapshot(snapshot);
+      this.committedSnapshotIds.add(responseId);
+    } finally {
+      this.clearPendingSnapshotMetadata();
+    }
   }
 
   private async loadItems(query: { ids: readonly string[]; contentHashes: readonly string[]; encryptedContentHashes: readonly string[] }): Promise<void> {
@@ -387,6 +391,10 @@ export class LayeredStatefulResponsesStore implements StatefulResponsesStore {
 
   private rememberSnapshot(snapshot: StoredResponsesSnapshot): void {
     this.snapshotsById.set(snapshot.id, cloneStoredResponsesSnapshot(snapshot));
+  }
+
+  private clearPendingSnapshotMetadata(): void {
+    for (const key of Object.keys(this.pendingSnapshotMetadata)) delete this.pendingSnapshotMetadata[key];
   }
 
   private replayableRowsForSnapshot(itemIds: readonly string[]): StoredResponsesItem[] {

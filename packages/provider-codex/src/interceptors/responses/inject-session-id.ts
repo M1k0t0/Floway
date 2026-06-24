@@ -5,10 +5,9 @@ import { FLOWAY_CODEX_SESSION_ID_HEADER, uuidV7 } from '@floway-dev/provider';
 // gateway may provide a Floway-owned internal session id; direct provider calls
 // can still supply the official `session-id` header.
 //
-// Honor a client-supplied `session-id` verbatim. A downstream `session_id` is
-// accepted only as a compatibility alias when the canonical header is absent;
-// upstream still receives only `session-id`. When the caller does not provide
-// one, synthesize Codex's UUIDv7-shaped session/thread id.
+// Prefer Floway's snapshot-bound Codex session when present. Otherwise accept
+// the official `session-id` header verbatim, normalize the legacy `session_id`
+// alias, or synthesize Codex's UUIDv7-shaped session/thread id for a new turn.
 
 export const injectSessionId = async <TResult>(
   ctx: ResponsesBoundaryCtx,

@@ -110,6 +110,51 @@ test('snapshot metadata is loaded and propagated to committed snapshots', async 
   assertEquals((await repo.responsesSnapshots.lookup(API_KEY_ID, 'resp_next'))?.metadata, { codex_session_id: 'session-prev' });
 });
 
+test('pending snapshot metadata is scoped to one committed snapshot', async () => {
+  const repo = new InMemoryRepo();
+  initRepo(repo);
+
+  const store = createResponsesHttpStore(API_KEY_ID, true);
+  store.setSnapshotMetadata('codex_session_id', 'session-a');
+  store.beginAttempt([]);
+  store.stageOutputItem(storedRow({
+    id: createStoredResponsesItemId('message'),
+    itemType: 'message',
+    payload: { item: { type: 'message', role: 'assistant', content: 'a' } },
+  }));
+  await store.commitSnapshot('resp_a', 'append');
+
+  assertEquals((await repo.responsesSnapshots.lookup(API_KEY_ID, 'resp_a'))?.metadata, { codex_session_id: 'session-a' });
+  assertEquals(store.getSnapshotMetadata('codex_session_id'), undefined);
+
+  store.setSnapshotMetadata('codex_session_id', 'session-b');
+  store.beginAttempt([]);
+  store.stageOutputItem(storedRow({
+    id: createStoredResponsesItemId('message'),
+    itemType: 'message',
+    payload: { item: { type: 'message', role: 'assistant', content: 'b' } },
+  }));
+  await store.commitSnapshot('resp_b', 'append');
+
+  assertEquals((await repo.responsesSnapshots.lookup(API_KEY_ID, 'resp_b'))?.metadata, { codex_session_id: 'session-b' });
+});
+
+test('pending snapshot metadata is cleared when no snapshot is written', async () => {
+  const repo = new InMemoryRepo();
+  initRepo(repo);
+
+  const noWritesStore = createResponsesHttpStore(API_KEY_ID, false);
+  noWritesStore.setSnapshotMetadata('codex_session_id', 'session-no-writes');
+  await noWritesStore.commitSnapshot('resp_no_writes', 'append');
+  assertEquals(noWritesStore.getSnapshotMetadata('codex_session_id'), undefined);
+
+  const emptyStore = createResponsesHttpStore(API_KEY_ID, true);
+  emptyStore.setSnapshotMetadata('codex_session_id', 'session-empty');
+  await emptyStore.commitSnapshot('resp_empty', 'append');
+  assertEquals(emptyStore.getSnapshotMetadata('codex_session_id'), undefined);
+  assertEquals(await repo.responsesSnapshots.lookup(API_KEY_ID, 'resp_empty'), null);
+});
+
 test('createNonResponsesSourceStore reads items for affinity but does not write snapshots', async () => {
   const repo = new InMemoryRepo();
   initRepo(repo);
