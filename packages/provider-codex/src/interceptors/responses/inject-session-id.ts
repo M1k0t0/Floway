@@ -1,13 +1,16 @@
 import type { ResponsesBoundaryCtx } from './types.ts';
 import { FLOWAY_CODEX_SESSION_ID_HEADER, uuidV7 } from '@floway-dev/provider';
 
-// Codex uses the conversation id as the session/thread cache scope. The
-// gateway may provide a Floway-owned internal session id; direct provider calls
-// can still supply the official `session-id` header.
+// Choose the Codex session scope before fetch.ts builds the upstream request.
+// Gateway-dispatched Codex Responses calls pass Floway's snapshot-bound scope
+// through an internal header; direct provider callers may pass the official
+// `session-id` header themselves. `session_id` is accepted only as a
+// compatibility alias and is removed before the upstream request.
 //
-// Prefer Floway's snapshot-bound Codex session when present. Otherwise accept
-// the official `session-id` header verbatim, normalize the legacy `session_id`
-// alias, or synthesize Codex's UUIDv7-shaped session/thread id for a new turn.
+// fetch.ts uses this session id as the Codex thread id, x-client-request-id,
+// and default prompt_cache_key. If no caller supplies a scope, synthesize a
+// fresh UUIDv7-shaped id for this standalone request instead of deriving one
+// from prompt text.
 
 export const injectSessionId = async <TResult>(
   ctx: ResponsesBoundaryCtx,
