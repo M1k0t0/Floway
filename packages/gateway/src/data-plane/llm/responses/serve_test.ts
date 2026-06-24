@@ -11,7 +11,7 @@ import type { ChatCompletionsStreamEvent } from '@floway-dev/protocols/chat-comp
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { MessagesStreamEvent } from '@floway-dev/protocols/messages';
 import type { ResponsesPayload, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
-import { directFetcher, FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, type ProviderStreamResult, type UpstreamCallOptions, type UpstreamProviderKind } from '@floway-dev/provider';
+import { directFetcher, FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_THREAD_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, type ProviderStreamResult, type UpstreamCallOptions, type UpstreamProviderKind } from '@floway-dev/provider';
 import { assert, assertEquals, stubProvider, stubUpstreamModel } from '@floway-dev/test-utils';
 
 // `enumerateProviderCandidates` is the only seam between serve and the
@@ -234,14 +234,18 @@ test('generate carries Floway-owned Codex session and window ids across previous
   const repo = installRepo();
   let turn = 0;
   const sessionIds: string[] = [];
+  const threadIds: string[] = [];
   const windowIds: string[] = [];
   const callResponses = vi.fn(async (_model, _body, _signal, opts): Promise<ProviderStreamResult<ResponsesStreamEvent>> => {
     const sessionId = opts?.headers.get(FLOWAY_CODEX_SESSION_ID_HEADER);
     if (sessionId === null || !UUID_V7_RE.test(sessionId)) throw new Error(`expected internal Codex session id, got ${sessionId}`);
+    const threadId = opts?.headers.get(FLOWAY_CODEX_THREAD_ID_HEADER);
+    if (threadId !== sessionId) throw new Error(`expected generated Codex thread id ${sessionId}, got ${threadId}`);
     const windowId = opts?.headers.get(FLOWAY_CODEX_WINDOW_ID_HEADER);
-    if (windowId === null || !windowId.startsWith(`${sessionId}:`)) throw new Error(`expected internal Codex window id for ${sessionId}, got ${windowId}`);
+    if (windowId === null || !windowId.startsWith(`${threadId}:`)) throw new Error(`expected internal Codex window id for ${threadId}, got ${windowId}`);
     if (opts?.headers.get('x-codex-window-id') !== null) throw new Error('expected downstream x-codex-window-id marker to be scrubbed before provider dispatch');
     sessionIds.push(sessionId);
+    threadIds.push(threadId);
     windowIds.push(windowId);
     turn += 1;
     return {
@@ -263,6 +267,7 @@ test('generate carries Floway-owned Codex session and window ids across previous
     store: createResponsesHttpStore(API_KEY_ID, true),
     headers: new Headers({
       [FLOWAY_CODEX_SESSION_ID_HEADER]: 'forged-downstream-session',
+      [FLOWAY_CODEX_THREAD_ID_HEADER]: 'forged-downstream-thread',
       [FLOWAY_CODEX_WINDOW_ID_HEADER]: 'forged-downstream-window',
       'x-codex-window-id': 'downstream-window-a',
     }),
@@ -272,7 +277,8 @@ test('generate carries Floway-owned Codex session and window ids across previous
   const turn1ResponseId = (turn1Events.find(e => e.type === 'response.completed') as Extract<ResponsesStreamEvent, { type: 'response.completed' }>).response.id;
   const turn1Snapshot = await repo.responsesSnapshots.lookup(API_KEY_ID, turn1ResponseId);
   assertEquals(turn1Snapshot?.metadata.codex_session_id, sessionIds[0]);
-  assertEquals(windowIds[0], `${sessionIds[0]}:0`);
+  assertEquals(turn1Snapshot?.metadata.codex_thread_id, threadIds[0]);
+  assertEquals(windowIds[0], `${threadIds[0]}:0`);
   assertEquals(turn1Snapshot?.metadata.codex_window_id, windowIds[0]);
   assertEquals(turn1Snapshot?.metadata.codex_downstream_window_id, 'downstream-window-a');
 
@@ -293,6 +299,7 @@ test('generate carries Floway-owned Codex session and window ids across previous
 
   assertEquals(sessionIds.length, 2);
   assertEquals(sessionIds[1], sessionIds[0]);
+  assertEquals(threadIds[1], threadIds[0]);
   assertEquals(windowIds[1], windowIds[0]);
   assertEquals(turn2Snapshot?.metadata.codex_window_id, windowIds[0]);
   assertEquals(turn2Snapshot?.metadata.codex_downstream_window_id, 'downstream-window-a');
@@ -314,21 +321,25 @@ test('generate carries Floway-owned Codex session and window ids across previous
 
   assertEquals(sessionIds.length, 3);
   assertEquals(sessionIds[2], sessionIds[0]);
-  assertEquals(windowIds[2], `${sessionIds[0]}:1`);
+  assertEquals(threadIds[2], threadIds[0]);
+  assertEquals(windowIds[2], `${threadIds[0]}:1`);
   assertEquals(turn3Snapshot?.metadata.codex_window_id, windowIds[2]);
   assertEquals(turn3Snapshot?.metadata.codex_downstream_window_id, 'downstream-window-b');
 });
 
-test('generate preserves a real Codex downstream session id for upstream prompt cache scope', async () => {
+test('generate preserves real Codex downstream session and thread ids for upstream prompt cache scope', async () => {
   const repo = installRepo();
   const sessionIds: string[] = [];
+  const threadIds: string[] = [];
   const windowIds: string[] = [];
   const callResponses = vi.fn(async (_model, _body, _signal, opts): Promise<ProviderStreamResult<ResponsesStreamEvent>> => {
     const sessionId = opts?.headers.get(FLOWAY_CODEX_SESSION_ID_HEADER);
+    const threadId = opts?.headers.get(FLOWAY_CODEX_THREAD_ID_HEADER);
     const windowId = opts?.headers.get(FLOWAY_CODEX_WINDOW_ID_HEADER);
-    if (sessionId === null || windowId === null) throw new Error('expected internal Codex scope headers');
+    if (sessionId === null || threadId === null || windowId === null) throw new Error('expected internal Codex scope headers');
     if (opts?.headers.get('x-codex-window-id') !== null) throw new Error('expected downstream x-codex-window-id marker to be scrubbed before provider dispatch');
     sessionIds.push(sessionId);
+    threadIds.push(threadId);
     windowIds.push(windowId);
     return {
       ok: true,
@@ -359,9 +370,11 @@ test('generate preserves a real Codex downstream session id for upstream prompt 
   const turn1Snapshot = await repo.responsesSnapshots.lookup(API_KEY_ID, turn1ResponseId);
 
   assertEquals(sessionIds[0], 'codex-client-session');
-  assertEquals(windowIds[0], 'codex-client-session:0');
+  assertEquals(threadIds[0], 'codex-client-thread');
+  assertEquals(windowIds[0], 'codex-client-thread:0');
   assertEquals(turn1Snapshot?.metadata.codex_session_id, 'codex-client-session');
-  assertEquals(turn1Snapshot?.metadata.codex_window_id, 'codex-client-session:0');
+  assertEquals(turn1Snapshot?.metadata.codex_thread_id, 'codex-client-thread');
+  assertEquals(turn1Snapshot?.metadata.codex_window_id, 'codex-client-thread:0');
 
   queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
   const turn2 = await responsesServe.generate({
@@ -381,19 +394,24 @@ test('generate preserves a real Codex downstream session id for upstream prompt 
   await collectEvents(turn2.events);
 
   assertEquals(sessionIds, ['codex-client-session', 'codex-client-session']);
-  assertEquals(windowIds, ['codex-client-session:0', 'codex-client-session:0']);
+  assertEquals(threadIds, ['codex-client-thread', 'codex-client-thread']);
+  assertEquals(windowIds, ['codex-client-thread:0', 'codex-client-thread:0']);
 });
 
 test('generate synthesizes stable Codex scope for a generic Responses downstream without Codex headers', async () => {
   installRepo();
   const sessionIds: string[] = [];
+  const threadIds: string[] = [];
   const windowIds: string[] = [];
   const callResponses = vi.fn(async (_model, _body, _signal, opts): Promise<ProviderStreamResult<ResponsesStreamEvent>> => {
     const sessionId = opts?.headers.get(FLOWAY_CODEX_SESSION_ID_HEADER);
+    const threadId = opts?.headers.get(FLOWAY_CODEX_THREAD_ID_HEADER);
     const windowId = opts?.headers.get(FLOWAY_CODEX_WINDOW_ID_HEADER);
     if (sessionId === null || !UUID_V7_RE.test(sessionId)) throw new Error(`expected generated Codex session id, got ${sessionId}`);
-    if (windowId !== `${sessionId}:0`) throw new Error(`expected generated Codex window id ${sessionId}:0, got ${windowId}`);
+    if (threadId !== sessionId) throw new Error(`expected generated Codex thread id ${sessionId}, got ${threadId}`);
+    if (windowId !== `${threadId}:0`) throw new Error(`expected generated Codex window id ${threadId}:0, got ${windowId}`);
     sessionIds.push(sessionId);
+    threadIds.push(threadId);
     windowIds.push(windowId);
     return {
       ok: true,
@@ -433,7 +451,8 @@ test('generate synthesizes stable Codex scope for a generic Responses downstream
 
   assertEquals(sessionIds.length, 2);
   assertEquals(sessionIds[1], sessionIds[0]);
-  assertEquals(windowIds, [`${sessionIds[0]}:0`, `${sessionIds[0]}:0`]);
+  assertEquals(threadIds, [sessionIds[0], sessionIds[0]]);
+  assertEquals(windowIds, [`${threadIds[0]}:0`, `${threadIds[0]}:0`]);
 });
 
 test('generate renders model-missing when no candidates are available', async () => {

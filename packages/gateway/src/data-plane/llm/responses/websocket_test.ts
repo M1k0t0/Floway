@@ -213,24 +213,24 @@ const codexFetch = (requests: CapturedCodexRequest[]) => async (request: Request
   throw new Error(`Unhandled fetch ${request.url}`);
 };
 
-const assertCodexPromptCacheScope = (request: CapturedCodexRequest, sessionId: string, windowId: string): void => {
+const assertCodexPromptCacheScope = (request: CapturedCodexRequest, sessionId: string, threadId: string, windowId: string): void => {
   assertEquals(request.headers.get('session-id'), sessionId);
-  assertEquals(request.headers.get('thread-id'), sessionId);
-  assertEquals(request.headers.get('x-client-request-id'), sessionId);
+  assertEquals(request.headers.get('thread-id'), threadId);
+  assertEquals(request.headers.get('x-client-request-id'), threadId);
   assertEquals(request.headers.get('x-codex-window-id'), windowId);
-  assertEquals(request.body.prompt_cache_key, sessionId);
+  assertEquals(request.body.prompt_cache_key, threadId);
   const clientMetadata = request.body.client_metadata;
   if (typeof clientMetadata !== 'object' || clientMetadata === null || Array.isArray(clientMetadata)) {
     throw new Error(`expected client_metadata object, got ${String(clientMetadata)}`);
   }
   assertEquals((clientMetadata as Record<string, unknown>).session_id, sessionId);
-  assertEquals((clientMetadata as Record<string, unknown>).thread_id, sessionId);
+  assertEquals((clientMetadata as Record<string, unknown>).thread_id, threadId);
   assertEquals((clientMetadata as Record<string, unknown>)['x-codex-window-id'], windowId);
   const turnMetadataRaw = request.headers.get('x-codex-turn-metadata');
   assertExists(turnMetadataRaw);
   const turnMetadata = JSON.parse(turnMetadataRaw) as Record<string, unknown>;
   assertEquals(turnMetadata.session_id, sessionId);
-  assertEquals(turnMetadata.thread_id, sessionId);
+  assertEquals(turnMetadata.thread_id, threadId);
   assertEquals(turnMetadata.window_id, windowId);
 };
 
@@ -743,7 +743,7 @@ const runCodexWebSocketPromptCacheScopeTest = async (store: boolean): Promise<vo
 
   assertEquals(requests.length, 2);
   for (const request of requests) {
-    assertCodexPromptCacheScope(request, 'codex-ws-session', 'codex-ws-session:0');
+    assertCodexPromptCacheScope(request, 'codex-ws-session', 'codex-ws-thread', 'codex-ws-thread:0');
   }
   const secondBody = requests[1]?.body as { previous_response_id?: unknown; input?: unknown } | undefined;
   assertExists(secondBody);
@@ -751,11 +751,11 @@ const runCodexWebSocketPromptCacheScopeTest = async (store: boolean): Promise<vo
   assert(Array.isArray(secondBody.input), 'expected second Codex WS request to replay expanded input');
 };
 
-test('Responses WebSocket Codex downstream store:false preserves session-id for upstream prompt cache', async () => {
+test('Responses WebSocket Codex downstream store:false preserves thread id for upstream prompt cache', async () => {
   await runCodexWebSocketPromptCacheScopeTest(false);
 });
 
-test('Responses WebSocket Codex downstream store:true preserves session-id for upstream prompt cache', async () => {
+test('Responses WebSocket Codex downstream store:true preserves thread id for upstream prompt cache', async () => {
   await runCodexWebSocketPromptCacheScopeTest(true);
 });
 

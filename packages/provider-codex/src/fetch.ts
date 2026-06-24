@@ -17,7 +17,7 @@ import {
 import type { CodexAccountCredential } from './state.ts';
 import type { ResponsesPayload, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 import { parseResponsesStream } from '@floway-dev/protocols/responses';
-import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, streamingProviderCall, uuidV7, type ProviderStreamResult, type UpstreamCallOptions, type UpstreamModel } from '@floway-dev/provider';
+import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_THREAD_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, streamingProviderCall, uuidV7, type ProviderStreamResult, type UpstreamCallOptions, type UpstreamModel } from '@floway-dev/provider';
 
 // Hooks for repo-side state transitions, applied with optimistic concurrency.
 // Refresh-token rotations and terminal-state transitions go through the repo;
@@ -105,10 +105,14 @@ const buildCodexRequestIdentity = async (opts: CallCodexResponsesOptions): Promi
     ?? trimHeader(opts.headers, 'session-id')
     ?? trimHeader(opts.headers, 'session_id')
     ?? uuidV7();
+  const threadId = trimHeader(opts.headers, FLOWAY_CODEX_THREAD_ID_HEADER)
+    ?? trimHeader(opts.headers, 'thread-id')
+    ?? trimHeader(opts.headers, 'x-client-request-id')
+    ?? sessionId;
   const installationId = await sha256Uuid(`codex-installation:${opts.upstreamId}:${opts.account.chatgptAccountId}`);
   const turnId = uuidV7();
-  const windowId = trimHeader(opts.headers, FLOWAY_CODEX_WINDOW_ID_HEADER) ?? `${sessionId}:0`;
-  return { installationId, sessionId, threadId: sessionId, turnId, windowId };
+  const windowId = trimHeader(opts.headers, FLOWAY_CODEX_WINDOW_ID_HEADER) ?? `${threadId}:0`;
+  return { installationId, sessionId, threadId, turnId, windowId };
 };
 
 const buildCodexTurnMetadata = (identity: CodexRequestIdentity): Record<string, string> => ({

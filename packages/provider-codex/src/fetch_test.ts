@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { CODEX_CLI_VERSION, CODEX_ORIGINATOR, CODEX_USER_AGENT } from './constants.ts';
 import { callCodexResponses, type CodexCallEffects } from './fetch.ts';
 import type { CodexAccessTokenEntry, CodexAccountCredential, CodexQuotaSnapshotEntry, CodexUpstreamState } from './state.ts';
-import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, initProviderRepo, type Fetcher, type UpstreamModel, type UpstreamRecord } from '@floway-dev/provider';
+import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_THREAD_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, initProviderRepo, type Fetcher, type UpstreamModel, type UpstreamRecord } from '@floway-dev/provider';
 import { noopUpstreamCallOptions } from '@floway-dev/test-utils';
 
 const makeEffects = (): CodexCallEffects => ({
@@ -218,6 +218,7 @@ describe('callCodexResponses — upstream classification', () => {
         'openai-beta': 'responses=experimental',
         originator: 'downstream-originator',
         'session-id': 'downstream-session',
+        'thread-id': 'downstream-thread',
         'user-agent': 'curl/8.7.1',
         version: '1',
         'x-client-request-id': 'req-123',
@@ -240,16 +241,16 @@ describe('callCodexResponses — upstream classification', () => {
     expect(headers.get('session-id')).toBe('downstream-session');
     expect(headers.get('session_id')).toBeNull();
     expect(headers.get('version')).toBe(CODEX_CLI_VERSION);
-    expect(headers.get('x-client-request-id')).toBe('downstream-session');
-    expect(headers.get('thread-id')).toBe('downstream-session');
+    expect(headers.get('x-client-request-id')).toBe('downstream-thread');
+    expect(headers.get('thread-id')).toBe('downstream-thread');
     expect(headers.get('x-codex-beta-features')).toBeNull();
-    expect(headers.get('x-codex-window-id')).toBe('downstream-session:0');
+    expect(headers.get('x-codex-window-id')).toBe('downstream-thread:0');
     expect(headers.get('x-codex-window-id')).not.toBe('downstream-window');
     const turnMetadata = JSON.parse(headers.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
     expect(turnMetadata).toEqual({
       installation_id: expect.stringMatching(UUID_V4_RE),
       session_id: 'downstream-session',
-      thread_id: 'downstream-session',
+      thread_id: 'downstream-thread',
       turn_id: expect.stringMatching(UUID_V7_RE),
       window_id: headers.get('x-codex-window-id'),
       request_kind: 'turn',
@@ -261,11 +262,11 @@ describe('callCodexResponses — upstream classification', () => {
     expect(headers.get('x-real-ip')).toBeNull();
 
     const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string) as Record<string, unknown>;
-    expect(body.prompt_cache_key).toBe('downstream-session');
+    expect(body.prompt_cache_key).toBe('downstream-thread');
     expect(body.client_metadata).toEqual({
       'x-codex-installation-id': turnMetadata.installation_id,
       session_id: 'downstream-session',
-      thread_id: 'downstream-session',
+      thread_id: 'downstream-thread',
       turn_id: turnMetadata.turn_id,
       'x-codex-window-id': headers.get('x-codex-window-id'),
       'x-codex-turn-metadata': headers.get('x-codex-turn-metadata'),
@@ -310,14 +311,16 @@ describe('callCodexResponses — upstream classification', () => {
   test('prefers Floway internal session and window scope over downstream headers', async () => {
     seedFreshAccessToken();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
-    const internalWindowId = 'floway-internal-session:1';
+    const internalWindowId = 'floway-internal-thread:1';
     await callCodexResponses({
       upstreamId, account: activeAccount, model,
       body: { input: [], stream: true },
       headers: new Headers({
         [FLOWAY_CODEX_SESSION_ID_HEADER]: 'floway-internal-session',
+        [FLOWAY_CODEX_THREAD_ID_HEADER]: 'floway-internal-thread',
         [FLOWAY_CODEX_WINDOW_ID_HEADER]: internalWindowId,
         'session-id': 'downstream-session',
+        'thread-id': 'downstream-thread',
         session_id: 'alias-session',
         'x-codex-window-id': 'downstream-window',
       }),
@@ -327,16 +330,21 @@ describe('callCodexResponses — upstream classification', () => {
 
     const headers = new Headers((fetchSpy.mock.calls[0][1] as RequestInit).headers);
     expect(headers.get('session-id')).toBe('floway-internal-session');
-    expect(headers.get('thread-id')).toBe('floway-internal-session');
-    expect(headers.get('x-client-request-id')).toBe('floway-internal-session');
+    expect(headers.get('thread-id')).toBe('floway-internal-thread');
+    expect(headers.get('x-client-request-id')).toBe('floway-internal-thread');
     expect(headers.get('x-codex-window-id')).toBe(internalWindowId);
     expect(headers.get(FLOWAY_CODEX_SESSION_ID_HEADER)).toBeNull();
+    expect(headers.get(FLOWAY_CODEX_THREAD_ID_HEADER)).toBeNull();
     expect(headers.get(FLOWAY_CODEX_WINDOW_ID_HEADER)).toBeNull();
     const turnMetadata = JSON.parse(headers.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
+    expect(turnMetadata.session_id).toBe('floway-internal-session');
+    expect(turnMetadata.thread_id).toBe('floway-internal-thread');
     expect(turnMetadata.window_id).toBe(internalWindowId);
     const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string) as Record<string, unknown>;
-    expect(body.prompt_cache_key).toBe('floway-internal-session');
+    expect(body.prompt_cache_key).toBe('floway-internal-thread');
     expect(body.client_metadata).toMatchObject({
+      session_id: 'floway-internal-session',
+      thread_id: 'floway-internal-thread',
       'x-codex-window-id': internalWindowId,
       'x-codex-turn-metadata': headers.get('x-codex-turn-metadata'),
     });
