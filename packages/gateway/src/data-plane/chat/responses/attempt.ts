@@ -1,11 +1,11 @@
+import { advanceCodexSnapshotWindowGeneration, attachCodexSessionHeader } from './codex-session.ts';
 import { responsesInterceptors } from './interceptors/index.ts';
 import type { ResponsesAttemptResult, ResponsesInvocation } from './interceptors/types.ts';
-import { attachCodexSessionHeader } from './codex-session.ts';
 import { createStoredResponseId } from './items/format.ts';
 import { normalizeAssistantInputText } from './items/normalize-assistant-content.ts';
 import { drainAsync, syntheticEventsFromResult, wrapResponsesOutputForStorage } from './items/output.ts';
 import { rewriteResponsesItemsForCandidate, type RewrittenResponsesPayload } from './items/rewrite.ts';
-import type { StatefulResponsesStore } from './items/store.ts';
+import type { ResponsesSnapshotMode, StatefulResponsesStore } from './items/store.ts';
 import { tokenUsageFromResponsesResult } from './usage.ts';
 import { recordPerformanceLatency, requireRecordedDurationMs } from '../../shared/telemetry/performance.ts';
 import { chatCompletionsAttempt } from '../chat-completions/attempt.ts';
@@ -127,6 +127,7 @@ export const responsesAttempt = {
         upstream: candidate.provider.upstream,
         targetApi: 'responses',
         responseId,
+        beforeCommitSnapshot: codexBeforeCommitSnapshot(candidate, store),
       }));
       return {
         type: 'result',
@@ -150,6 +151,7 @@ export const responsesAttempt = {
         upstream: candidate.provider.upstream,
         targetApi,
         responseId,
+        beforeCommitSnapshot: codexBeforeCommitSnapshot(candidate, store),
       }),
       chainResult.modelIdentity,
       {
@@ -174,6 +176,16 @@ export const responsesAttempt = {
     return result;
   },
 };
+
+const codexBeforeCommitSnapshot = (
+  candidate: ProviderCandidate,
+  store: StatefulResponsesStore,
+): ((mode: ResponsesSnapshotMode) => void) | undefined =>
+  candidate.provider.providerKind === 'codex'
+    ? mode => {
+      if (mode === 'replace') advanceCodexSnapshotWindowGeneration(store);
+    }
+    : undefined;
 
 type RewriteOutcome =
   | RewrittenResponsesPayload

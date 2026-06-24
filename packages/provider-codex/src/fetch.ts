@@ -173,25 +173,26 @@ const buildCodexTurnMetadata = (identity: CodexRequestIdentity, options: CodexTu
 const buildCodexTurnMetadataJson = (identity: CodexRequestIdentity, options: CodexTurnMetadataOptions): string =>
   JSON.stringify(buildCodexTurnMetadata(identity, options));
 
+const buildCodexClientMetadata = (identity: CodexRequestIdentity, turnMetadataJson: string): Record<string, string> => ({
+  'x-codex-installation-id': identity.installationId,
+  session_id: identity.sessionId,
+  thread_id: identity.threadId,
+  'x-codex-window-id': identity.windowId,
+  turn_id: identity.turnId,
+  'x-codex-turn-metadata': turnMetadataJson,
+});
+
 const buildCodexResponsesBody = (
   opts: CallCodexResponsesOptions,
   identity: CodexRequestIdentity,
-  metadata: CodexTurnMetadataOptions,
+  turnMetadataJson: string,
 ): Record<string, unknown> => {
-  const turnMetadataJson = buildCodexTurnMetadataJson(identity, metadata);
   const body: Record<string, unknown> = {
     ...(opts.body as unknown as Record<string, unknown>),
     model: opts.model.id,
     store: false,
     stream: true,
-    client_metadata: {
-      'x-codex-installation-id': identity.installationId,
-      session_id: identity.sessionId,
-      thread_id: identity.threadId,
-      turn_id: identity.turnId,
-      'x-codex-window-id': identity.windowId,
-      'x-codex-turn-metadata': turnMetadataJson,
-    },
+    client_metadata: buildCodexClientMetadata(identity, turnMetadataJson),
   };
   if (body.prompt_cache_key === undefined) body.prompt_cache_key = identity.threadId;
   return body;
@@ -301,12 +302,13 @@ const performStreamingResponsesCall = async (
 ): Promise<ProviderStreamResult<ResponsesStreamEvent>> => {
   const identity = await buildCodexRequestIdentity(opts);
   const metadata = codexTurnMetadataOptions(opts);
+  const turnMetadataJson = buildCodexTurnMetadataJson(identity, metadata);
   const upstreamFetch = dispatchCodexHttpCall(
     opts,
     accessToken,
     CODEX_RESPONSES_PATH,
     'text/event-stream',
-    buildCodexResponsesBody(opts, identity, metadata),
+    buildCodexResponsesBody(opts, identity, turnMetadataJson),
     identity,
     metadata,
   ).then(ensureSseContentType);

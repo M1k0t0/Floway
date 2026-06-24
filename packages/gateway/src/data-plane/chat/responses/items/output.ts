@@ -1,5 +1,5 @@
 import { createStoredResponsesItemId, hashResponsesItemContent, hashResponsesItemEncryptedContent, responsesItemEncryptedContent, responsesItemId } from './format.ts';
-import type { StatefulResponsesStore } from './store.ts';
+import type { ResponsesSnapshotMode, StatefulResponsesStore } from './store.ts';
 import type { StoredResponsesItem } from '../../../../repo/types.ts';
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import { responsesResultToEvents, type ResponsesInputItem, type ResponsesResult, type ResponsesStreamEvent } from '@floway-dev/protocols/responses';
@@ -42,9 +42,10 @@ export const wrapResponsesOutputForStorage = async function* (
     readonly upstream: string;
     readonly targetApi: ChatTargetApi;
     readonly responseId: string;
+    readonly beforeCommitSnapshot?: (mode: ResponsesSnapshotMode) => void;
   },
 ): AsyncGenerator<ProtocolFrame<ResponsesStreamEvent>> {
-  const { store, upstream, targetApi, responseId } = args;
+  const { store, upstream, targetApi, responseId, beforeCommitSnapshot } = args;
   const upstreamToStored = new Map<string, string>();
 
   const idMapper = (upstreamId: string, itemType: string): string => {
@@ -164,8 +165,10 @@ export const wrapResponsesOutputForStorage = async function* (
       // generator another tick, so any post-yield work would be lost.
       // The downstream HTTP entry has nothing to observe pre-snapshot —
       // ordering matches a synchronous emit.
+      const snapshotMode: ResponsesSnapshotMode = sawCompactionItem ? 'replace' : 'append';
       try {
-        await store.commitSnapshot(responseId, sawCompactionItem ? 'replace' : 'append');
+        beforeCommitSnapshot?.(snapshotMode);
+        await store.commitSnapshot(responseId, snapshotMode);
       } catch (error) {
         console.error('Failed to persist stored Responses snapshot:', error);
       }

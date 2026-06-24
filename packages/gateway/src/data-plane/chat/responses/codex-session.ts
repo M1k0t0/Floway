@@ -5,6 +5,7 @@ import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_TURN_ID_HEADER, FLOWAY_COD
 const CODEX_SESSION_METADATA_KEY = 'codex_session_id';
 const CODEX_WINDOW_METADATA_KEY = 'codex_window_id';
 const CODEX_DOWNSTREAM_WINDOW_METADATA_KEY = 'codex_downstream_window_id';
+const CODEX_DOWNSTREAM_WINDOW_ADVANCED_METADATA_KEY = 'codex_downstream_window_advanced';
 
 export const attachCodexSessionHeader = (
   candidate: ProviderCandidate,
@@ -44,20 +45,46 @@ const ensureCodexTurnId = (headers: Headers): string =>
 const ensureCodexWindowId = (store: StatefulResponsesStore, sessionId: string, downstreamWindowId: string | null): string => {
   const existingWindowId = codexWindowMetadata(store, sessionId);
   const existingDownstreamWindowId = stringMetadata(store, CODEX_DOWNSTREAM_WINDOW_METADATA_KEY);
+  const downstreamWindowAlreadyAdvanced = store.getSnapshotMetadata(CODEX_DOWNSTREAM_WINDOW_ADVANCED_METADATA_KEY) === true;
 
   if (downstreamWindowId !== null) {
     if (existingWindowId !== null && existingDownstreamWindowId === downstreamWindowId) return existingWindowId;
+    if (existingWindowId !== null && downstreamWindowAlreadyAdvanced) {
+      store.setSnapshotMetadata(CODEX_DOWNSTREAM_WINDOW_METADATA_KEY, downstreamWindowId);
+      store.setSnapshotMetadata(CODEX_DOWNSTREAM_WINDOW_ADVANCED_METADATA_KEY, false);
+      return existingWindowId;
+    }
     const existingGeneration = existingWindowId === null ? null : codexWindowGeneration(existingWindowId, sessionId);
     const windowId = formatCodexWindowId(sessionId, existingGeneration === null ? 0 : existingGeneration + 1);
     store.setSnapshotMetadata(CODEX_WINDOW_METADATA_KEY, windowId);
     store.setSnapshotMetadata(CODEX_DOWNSTREAM_WINDOW_METADATA_KEY, downstreamWindowId);
+    store.setSnapshotMetadata(CODEX_DOWNSTREAM_WINDOW_ADVANCED_METADATA_KEY, false);
     return windowId;
   }
 
   if (existingWindowId !== null) return existingWindowId;
   const windowId = formatCodexWindowId(sessionId, 0);
   store.setSnapshotMetadata(CODEX_WINDOW_METADATA_KEY, windowId);
+  store.setSnapshotMetadata(CODEX_DOWNSTREAM_WINDOW_ADVANCED_METADATA_KEY, false);
   return windowId;
+};
+
+export const advanceCodexSnapshotWindowGeneration = (store: StatefulResponsesStore): void => {
+  const sessionId = stringMetadata(store, CODEX_SESSION_METADATA_KEY);
+  if (sessionId === null) return;
+  const existingWindowId = codexWindowMetadata(store, sessionId);
+  const existingGeneration = existingWindowId === null ? 0 : codexWindowGeneration(existingWindowId, sessionId);
+  const nextWindowId = formatCodexWindowId(sessionId, existingGeneration === null ? 1 : existingGeneration + 1);
+  store.setSnapshotMetadata(CODEX_WINDOW_METADATA_KEY, nextWindowId);
+
+  const downstreamWindowId = stringMetadata(store, CODEX_DOWNSTREAM_WINDOW_METADATA_KEY);
+  const nextDownstreamWindowId = downstreamWindowId === null ? null : advanceWindowId(downstreamWindowId);
+  if (nextDownstreamWindowId !== null) {
+    store.setSnapshotMetadata(CODEX_DOWNSTREAM_WINDOW_METADATA_KEY, nextDownstreamWindowId);
+    store.setSnapshotMetadata(CODEX_DOWNSTREAM_WINDOW_ADVANCED_METADATA_KEY, false);
+    return;
+  }
+  if (downstreamWindowId !== null) store.setSnapshotMetadata(CODEX_DOWNSTREAM_WINDOW_ADVANCED_METADATA_KEY, true);
 };
 
 const codexWindowMetadata = (store: StatefulResponsesStore, sessionId: string): string | null => {
@@ -66,6 +93,15 @@ const codexWindowMetadata = (store: StatefulResponsesStore, sessionId: string): 
 };
 
 const formatCodexWindowId = (sessionId: string, generation: number): string => `${sessionId}:${generation}`;
+
+const advanceWindowId = (windowId: string): string | null => {
+  const match = /^(.*):(0|[1-9]\d*)$/.exec(windowId);
+  if (match === null) return null;
+  const [, prefix, generationText] = match;
+  if (prefix === undefined || generationText === undefined) return null;
+  const generation = Number(generationText);
+  return Number.isSafeInteger(generation) ? `${prefix}:${generation + 1}` : null;
+};
 
 const codexWindowGeneration = (windowId: string, sessionId: string): number | null => {
   const prefix = `${sessionId}:`;
