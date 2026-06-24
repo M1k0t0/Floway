@@ -6,6 +6,7 @@ import { app } from '../../../app.ts';
 import { copilotModels, setupAppTest, sseResponsesResponse } from '../../../test-helpers.ts';
 import { FakeTime } from '../../../test-time.ts';
 import { DOWNSTREAM_KEEP_ALIVE_INTERVAL_MS } from '../shared/stream/sse.ts';
+import type { UpstreamRecord } from '@floway-dev/provider';
 import { assert, assertEquals, assertExists, assertStringIncludes, jsonResponse, withMockedFetch } from '@floway-dev/test-utils';
 
 type WorkerResponseInit = ResponseInit & { readonly webSocket?: WebSocket };
@@ -111,18 +112,18 @@ const responseDoneId = (messages: readonly Record<string, unknown>[]): string =>
   return id;
 };
 
-const connectResponsesWebSocket = async (apiKey: string): Promise<TestWorkerWebSocket> => {
+const connectResponsesWebSocket = async (apiKey: string, extraHeaders: HeadersInit = {}): Promise<TestWorkerWebSocket> => {
   const executionCtx = {
     waitUntil: () => {},
     passThroughOnException: () => {},
     props: {},
   } satisfies ExecutionContext;
+  const headers = new Headers(extraHeaders);
+  headers.set('upgrade', 'websocket');
+  headers.set('x-api-key', apiKey);
   const response = await app.fetch(new Request('https://example.test/v1/responses', {
     method: 'GET',
-    headers: {
-      upgrade: 'websocket',
-      'x-api-key': apiKey,
-    },
+    headers,
   }), {}, executionCtx);
   assertEquals(response.status, 101);
 
@@ -130,6 +131,107 @@ const connectResponsesWebSocket = async (apiKey: string): Promise<TestWorkerWebS
   const pair = runtime.pairs.at(-1);
   assertExists(pair);
   return pair.client;
+};
+
+interface CapturedCodexRequest {
+  readonly headers: Headers;
+  readonly body: Record<string, unknown>;
+}
+
+const codexUpstreamRecord = (): UpstreamRecord => ({
+  id: 'up_codex_ws',
+  provider: 'codex',
+  name: 'Codex WS Test',
+  enabled: true,
+  sortOrder: 0,
+  createdAt: '2026-03-15T00:00:00.000Z',
+  updatedAt: '2026-03-15T00:00:00.000Z',
+  state: {
+    accounts: [{
+      chatgptAccountId: 'acc_codex_ws',
+      refresh_token: 'rt_codex_ws',
+      state: 'active',
+      state_updated_at: '2026-03-15T00:00:00.000Z',
+      accessToken: {
+        token: 'codex-access-token',
+        expiresAt: 4_102_444_800_000,
+        refreshedAt: '2026-03-15T00:00:00.000Z',
+      },
+      quotaSnapshot: null,
+    }],
+  },
+  config: {
+    accounts: [{
+      email: 'codex@example.com',
+      chatgptAccountId: 'acc_codex_ws',
+      chatgptUserId: 'usr_codex_ws',
+      planType: 'plus',
+    }],
+  },
+  flagOverrides: {},
+  disabledPublicModelIds: [],
+  proxyFallbackList: [],
+});
+
+const useCodexOnlyUpstream = async (ctx: Awaited<ReturnType<typeof setupAppTest>>): Promise<void> => {
+  await ctx.repo.upstreams.save({ ...ctx.copilotUpstream, enabled: false });
+  await ctx.repo.upstreams.save(codexUpstreamRecord());
+};
+
+const codexFetch = (requests: CapturedCodexRequest[]) => async (request: Request): Promise<Response> => {
+  const url = new URL(request.url);
+  if (url.hostname === 'chatgpt.com' && url.pathname === '/backend-api/codex/models') {
+    return jsonResponse({
+      models: [{
+        slug: 'gpt-direct-responses',
+        display_name: 'GPT Direct Responses',
+        context_window: 128000,
+      }],
+    });
+  }
+  if (url.hostname === 'chatgpt.com' && url.pathname === '/backend-api/codex/responses') {
+    requests.push({
+      headers: new Headers(request.headers),
+      body: JSON.parse(await request.text()) as Record<string, unknown>,
+    });
+    const turn = requests.length;
+    return sseResponsesResponse({
+      id: `resp_codex_ws_${turn}`,
+      object: 'response',
+      model: 'gpt-direct-responses',
+      status: 'completed',
+      output_text: `codex ws answer ${turn}`,
+      output: [{
+        id: `assistant_codex_ws_${turn}`,
+        type: 'message',
+        role: 'assistant',
+        status: 'completed',
+        content: [{ type: 'output_text', text: `codex ws answer ${turn}` }],
+      }],
+    });
+  }
+  throw new Error(`Unhandled fetch ${request.url}`);
+};
+
+const assertCodexPromptCacheScope = (request: CapturedCodexRequest, sessionId: string, windowId: string): void => {
+  assertEquals(request.headers.get('session-id'), sessionId);
+  assertEquals(request.headers.get('thread-id'), sessionId);
+  assertEquals(request.headers.get('x-client-request-id'), sessionId);
+  assertEquals(request.headers.get('x-codex-window-id'), windowId);
+  assertEquals(request.body.prompt_cache_key, sessionId);
+  const clientMetadata = request.body.client_metadata;
+  if (typeof clientMetadata !== 'object' || clientMetadata === null || Array.isArray(clientMetadata)) {
+    throw new Error(`expected client_metadata object, got ${String(clientMetadata)}`);
+  }
+  assertEquals((clientMetadata as Record<string, unknown>).session_id, sessionId);
+  assertEquals((clientMetadata as Record<string, unknown>).thread_id, sessionId);
+  assertEquals((clientMetadata as Record<string, unknown>)['x-codex-window-id'], windowId);
+  const turnMetadataRaw = request.headers.get('x-codex-turn-metadata');
+  assertExists(turnMetadataRaw);
+  const turnMetadata = JSON.parse(turnMetadataRaw) as Record<string, unknown>;
+  assertEquals(turnMetadata.session_id, sessionId);
+  assertEquals(turnMetadata.thread_id, sessionId);
+  assertEquals(turnMetadata.window_id, windowId);
 };
 
 let currentRuntime: ReturnType<typeof installWorkerWebSocketRuntime> | undefined;
@@ -585,6 +687,76 @@ test('Responses WebSocket store:true durable snapshots can chain through local s
   assertExists(firstSnapshot);
   assertExists(secondSnapshot);
   assertEquals(secondSnapshot.itemIds.length > firstSnapshot.itemIds.length, true);
+});
+
+const runCodexWebSocketPromptCacheScopeTest = async (store: boolean): Promise<void> => {
+  const ctx = await setupAppTest();
+  await useCodexOnlyUpstream(ctx);
+  const { apiKey, repo } = ctx;
+  const requests: CapturedCodexRequest[] = [];
+
+  await withMockedFetch(
+    codexFetch(requests),
+    async () => await withWorkerWebSocketRuntime(async () => {
+      const client = await connectResponsesWebSocket(apiKey.key, {
+        'session-id': 'codex-ws-session',
+        'thread-id': 'codex-ws-thread',
+        'x-client-request-id': 'codex-ws-thread',
+        'x-codex-window-id': 'codex-ws-thread:0',
+        'openai-beta': 'responses_websockets=2026-02-06',
+      });
+
+      const firstDone = waitForMessages(client, messages => messages.some(message => message.type === 'response.done'));
+      client.send(JSON.stringify({
+        type: 'response.create',
+        event_id: 'evt_codex_ws_first',
+        response: {
+          model: 'gpt-direct-responses',
+          input: 'first Codex WS question',
+          store,
+        },
+      }));
+      const firstMessages = await firstDone;
+      const firstResponseId = responseDoneId(firstMessages);
+      const firstSnapshot = await repo.responsesSnapshots.lookup(apiKey.id, firstResponseId);
+      if (store) assertExists(firstSnapshot);
+      else assertEquals(firstSnapshot, null);
+
+      const secondDone = waitForMessages(client, messages => messages.some(message => message.type === 'response.done'));
+      client.send(JSON.stringify({
+        type: 'response.create',
+        event_id: 'evt_codex_ws_second',
+        response: {
+          model: 'gpt-direct-responses',
+          previous_response_id: firstResponseId,
+          input: 'second Codex WS question',
+          store,
+        },
+      }));
+      const secondMessages = await secondDone;
+      const secondResponseId = responseDoneId(secondMessages);
+      const secondSnapshot = await repo.responsesSnapshots.lookup(apiKey.id, secondResponseId);
+      if (store) assertExists(secondSnapshot);
+      else assertEquals(secondSnapshot, null);
+    }),
+  );
+
+  assertEquals(requests.length, 2);
+  for (const request of requests) {
+    assertCodexPromptCacheScope(request, 'codex-ws-session', 'codex-ws-session:0');
+  }
+  const secondBody = requests[1]?.body as { previous_response_id?: unknown; input?: unknown } | undefined;
+  assertExists(secondBody);
+  assertEquals(secondBody.previous_response_id, undefined);
+  assert(Array.isArray(secondBody.input), 'expected second Codex WS request to replay expanded input');
+};
+
+test('Responses WebSocket Codex downstream store:false preserves session-id for upstream prompt cache', async () => {
+  await runCodexWebSocketPromptCacheScopeTest(false);
+});
+
+test('Responses WebSocket Codex downstream store:true preserves session-id for upstream prompt cache', async () => {
+  await runCodexWebSocketPromptCacheScopeTest(true);
 });
 
 // Exercises the session-level item cache directly: createResponsesWsSession
