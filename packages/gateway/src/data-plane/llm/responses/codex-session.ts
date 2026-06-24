@@ -16,16 +16,21 @@ export const attachCodexSessionHeader = (
     headers.delete(FLOWAY_CODEX_WINDOW_ID_HEADER);
     return;
   }
+  const downstreamSessionId = trimHeader(headers, 'session-id') ?? trimHeader(headers, 'session_id');
   const downstreamWindowId = trimHeader(headers, 'x-codex-window-id');
   headers.delete('x-codex-window-id');
-  const sessionId = ensureCodexSessionId(store);
+  const sessionId = ensureCodexSessionId(store, downstreamSessionId);
   headers.set(FLOWAY_CODEX_SESSION_ID_HEADER, sessionId);
   headers.set(FLOWAY_CODEX_WINDOW_ID_HEADER, ensureCodexWindowId(store, sessionId, downstreamWindowId));
 };
 
-const ensureCodexSessionId = (store: StatefulResponsesStore): string => {
-  const existing = store.getSnapshotMetadata(CODEX_SESSION_METADATA_KEY);
-  if (typeof existing === 'string' && existing.length > 0) return existing;
+const ensureCodexSessionId = (store: StatefulResponsesStore, downstreamSessionId: string | null): string => {
+  if (downstreamSessionId !== null) {
+    store.setSnapshotMetadata(CODEX_SESSION_METADATA_KEY, downstreamSessionId);
+    return downstreamSessionId;
+  }
+  const existing = stringMetadata(store, CODEX_SESSION_METADATA_KEY);
+  if (existing !== null) return existing;
   const sessionId = uuidV7();
   store.setSnapshotMetadata(CODEX_SESSION_METADATA_KEY, sessionId);
   return sessionId;

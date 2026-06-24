@@ -319,6 +319,123 @@ test('generate carries Floway-owned Codex session and window ids across previous
   assertEquals(turn3Snapshot?.metadata.codex_downstream_window_id, 'downstream-window-b');
 });
 
+test('generate preserves a real Codex downstream session id for upstream prompt cache scope', async () => {
+  const repo = installRepo();
+  const sessionIds: string[] = [];
+  const windowIds: string[] = [];
+  const callResponses = vi.fn(async (_model, _body, _signal, opts): Promise<ProviderStreamResult<ResponsesStreamEvent>> => {
+    const sessionId = opts?.headers.get(FLOWAY_CODEX_SESSION_ID_HEADER);
+    const windowId = opts?.headers.get(FLOWAY_CODEX_WINDOW_ID_HEADER);
+    if (sessionId === null || windowId === null) throw new Error('expected internal Codex scope headers');
+    if (opts?.headers.get('x-codex-window-id') !== null) throw new Error('expected downstream x-codex-window-id marker to be scrubbed before provider dispatch');
+    sessionIds.push(sessionId);
+    windowIds.push(windowId);
+    return {
+      ok: true,
+      events: makeProtocolFrames([{
+        type: 'response.completed',
+        sequence_number: 0,
+        response: makeResponsesResult(`resp_codex_${sessionIds.length}`),
+      }]),
+      modelKey: 'test-model-key',
+      headers: new Headers(),
+    };
+  });
+
+  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
+  const turn1 = await responsesServe.generate({
+    payload: makePayload({ input: [{ type: 'message', role: 'user', content: 'first Codex turn' }] }),
+    ctx: makeGatewayCtx(),
+    store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers({
+      'session-id': 'codex-client-session',
+      'thread-id': 'codex-client-thread',
+      'x-codex-window-id': 'codex-client-thread:0',
+    }),
+  });
+  if (turn1.type !== 'events') throw new Error('turn 1: expected events');
+  const turn1Events = await collectEvents(turn1.events);
+  const turn1ResponseId = (turn1Events.find(e => e.type === 'response.completed') as Extract<ResponsesStreamEvent, { type: 'response.completed' }>).response.id;
+  const turn1Snapshot = await repo.responsesSnapshots.lookup(API_KEY_ID, turn1ResponseId);
+
+  assertEquals(sessionIds[0], 'codex-client-session');
+  assertEquals(windowIds[0], 'codex-client-session:0');
+  assertEquals(turn1Snapshot?.metadata.codex_session_id, 'codex-client-session');
+  assertEquals(turn1Snapshot?.metadata.codex_window_id, 'codex-client-session:0');
+
+  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
+  const turn2 = await responsesServe.generate({
+    payload: makePayload({
+      previous_response_id: turn1ResponseId,
+      input: [{ type: 'message', role: 'user', content: 'second Codex turn' }],
+    }),
+    ctx: makeGatewayCtx(),
+    store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers({
+      'session-id': 'codex-client-session',
+      'thread-id': 'codex-client-thread',
+      'x-codex-window-id': 'codex-client-thread:0',
+    }),
+  });
+  if (turn2.type !== 'events') throw new Error('turn 2: expected events');
+  await collectEvents(turn2.events);
+
+  assertEquals(sessionIds, ['codex-client-session', 'codex-client-session']);
+  assertEquals(windowIds, ['codex-client-session:0', 'codex-client-session:0']);
+});
+
+test('generate synthesizes stable Codex scope for a generic Responses downstream without Codex headers', async () => {
+  installRepo();
+  const sessionIds: string[] = [];
+  const windowIds: string[] = [];
+  const callResponses = vi.fn(async (_model, _body, _signal, opts): Promise<ProviderStreamResult<ResponsesStreamEvent>> => {
+    const sessionId = opts?.headers.get(FLOWAY_CODEX_SESSION_ID_HEADER);
+    const windowId = opts?.headers.get(FLOWAY_CODEX_WINDOW_ID_HEADER);
+    if (sessionId === null || !UUID_V7_RE.test(sessionId)) throw new Error(`expected generated Codex session id, got ${sessionId}`);
+    if (windowId !== `${sessionId}:0`) throw new Error(`expected generated Codex window id ${sessionId}:0, got ${windowId}`);
+    sessionIds.push(sessionId);
+    windowIds.push(windowId);
+    return {
+      ok: true,
+      events: makeProtocolFrames([{
+        type: 'response.completed',
+        sequence_number: 0,
+        response: makeResponsesResult(`resp_generic_${sessionIds.length}`),
+      }]),
+      modelKey: 'test-model-key',
+      headers: new Headers(),
+    };
+  });
+
+  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
+  const turn1 = await responsesServe.generate({
+    payload: makePayload({ input: [{ type: 'message', role: 'user', content: 'first generic turn' }] }),
+    ctx: makeGatewayCtx(),
+    store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers(),
+  });
+  if (turn1.type !== 'events') throw new Error('turn 1: expected events');
+  const turn1Events = await collectEvents(turn1.events);
+  const turn1ResponseId = (turn1Events.find(e => e.type === 'response.completed') as Extract<ResponsesStreamEvent, { type: 'response.completed' }>).response.id;
+
+  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
+  const turn2 = await responsesServe.generate({
+    payload: makePayload({
+      previous_response_id: turn1ResponseId,
+      input: [{ type: 'message', role: 'user', content: 'second generic turn' }],
+    }),
+    ctx: makeGatewayCtx(),
+    store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers(),
+  });
+  if (turn2.type !== 'events') throw new Error('turn 2: expected events');
+  await collectEvents(turn2.events);
+
+  assertEquals(sessionIds.length, 2);
+  assertEquals(sessionIds[1], sessionIds[0]);
+  assertEquals(windowIds, [`${sessionIds[0]}:0`, `${sessionIds[0]}:0`]);
+});
+
 test('generate renders model-missing when no candidates are available', async () => {
   installRepo();
   queueCandidates([]);
