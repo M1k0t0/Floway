@@ -239,7 +239,7 @@ test('generate carries Floway-owned Codex session and window ids across previous
     const sessionId = opts?.headers.get(FLOWAY_CODEX_SESSION_ID_HEADER);
     if (sessionId === null || !UUID_V7_RE.test(sessionId)) throw new Error(`expected internal Codex session id, got ${sessionId}`);
     const windowId = opts?.headers.get(FLOWAY_CODEX_WINDOW_ID_HEADER);
-    if (windowId === null || !UUID_V7_RE.test(windowId)) throw new Error(`expected internal Codex window id, got ${windowId}`);
+    if (windowId === null || !windowId.startsWith(`${sessionId}:`)) throw new Error(`expected internal Codex window id for ${sessionId}, got ${windowId}`);
     if (opts?.headers.get('x-codex-window-id') !== null) throw new Error('expected downstream x-codex-window-id marker to be scrubbed before provider dispatch');
     sessionIds.push(sessionId);
     windowIds.push(windowId);
@@ -272,6 +272,7 @@ test('generate carries Floway-owned Codex session and window ids across previous
   const turn1ResponseId = (turn1Events.find(e => e.type === 'response.completed') as Extract<ResponsesStreamEvent, { type: 'response.completed' }>).response.id;
   const turn1Snapshot = await repo.responsesSnapshots.lookup(API_KEY_ID, turn1ResponseId);
   assertEquals(turn1Snapshot?.metadata.codex_session_id, sessionIds[0]);
+  assertEquals(windowIds[0], `${sessionIds[0]}:0`);
   assertEquals(turn1Snapshot?.metadata.codex_window_id, windowIds[0]);
   assertEquals(turn1Snapshot?.metadata.codex_downstream_window_id, 'downstream-window-a');
 
@@ -313,7 +314,7 @@ test('generate carries Floway-owned Codex session and window ids across previous
 
   assertEquals(sessionIds.length, 3);
   assertEquals(sessionIds[2], sessionIds[0]);
-  assertEquals(windowIds[2] === windowIds[0], false);
+  assertEquals(windowIds[2], `${sessionIds[0]}:1`);
   assertEquals(turn3Snapshot?.metadata.codex_window_id, windowIds[2]);
   assertEquals(turn3Snapshot?.metadata.codex_downstream_window_id, 'downstream-window-b');
 });

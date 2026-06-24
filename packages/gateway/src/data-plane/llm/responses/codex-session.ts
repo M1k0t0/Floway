@@ -18,8 +18,9 @@ export const attachCodexSessionHeader = (
   }
   const downstreamWindowId = trimHeader(headers, 'x-codex-window-id');
   headers.delete('x-codex-window-id');
-  headers.set(FLOWAY_CODEX_SESSION_ID_HEADER, ensureCodexSessionId(store));
-  headers.set(FLOWAY_CODEX_WINDOW_ID_HEADER, ensureCodexWindowId(store, downstreamWindowId));
+  const sessionId = ensureCodexSessionId(store);
+  headers.set(FLOWAY_CODEX_SESSION_ID_HEADER, sessionId);
+  headers.set(FLOWAY_CODEX_WINDOW_ID_HEADER, ensureCodexWindowId(store, sessionId, downstreamWindowId));
 };
 
 const ensureCodexSessionId = (store: StatefulResponsesStore): string => {
@@ -30,22 +31,39 @@ const ensureCodexSessionId = (store: StatefulResponsesStore): string => {
   return sessionId;
 };
 
-const ensureCodexWindowId = (store: StatefulResponsesStore, downstreamWindowId: string | null): string => {
-  const existingWindowId = stringMetadata(store, CODEX_WINDOW_METADATA_KEY);
+const ensureCodexWindowId = (store: StatefulResponsesStore, sessionId: string, downstreamWindowId: string | null): string => {
+  const existingWindowId = codexWindowMetadata(store, sessionId);
   const existingDownstreamWindowId = stringMetadata(store, CODEX_DOWNSTREAM_WINDOW_METADATA_KEY);
 
   if (downstreamWindowId !== null) {
     if (existingWindowId !== null && existingDownstreamWindowId === downstreamWindowId) return existingWindowId;
-    const windowId = uuidV7();
+    const existingGeneration = existingWindowId === null ? null : codexWindowGeneration(existingWindowId, sessionId);
+    const windowId = formatCodexWindowId(sessionId, existingGeneration === null ? 0 : existingGeneration + 1);
     store.setSnapshotMetadata(CODEX_WINDOW_METADATA_KEY, windowId);
     store.setSnapshotMetadata(CODEX_DOWNSTREAM_WINDOW_METADATA_KEY, downstreamWindowId);
     return windowId;
   }
 
   if (existingWindowId !== null) return existingWindowId;
-  const windowId = uuidV7();
+  const windowId = formatCodexWindowId(sessionId, 0);
   store.setSnapshotMetadata(CODEX_WINDOW_METADATA_KEY, windowId);
   return windowId;
+};
+
+const codexWindowMetadata = (store: StatefulResponsesStore, sessionId: string): string | null => {
+  const value = stringMetadata(store, CODEX_WINDOW_METADATA_KEY);
+  return value !== null && codexWindowGeneration(value, sessionId) !== null ? value : null;
+};
+
+const formatCodexWindowId = (sessionId: string, generation: number): string => `${sessionId}:${generation}`;
+
+const codexWindowGeneration = (windowId: string, sessionId: string): number | null => {
+  const prefix = `${sessionId}:`;
+  if (!windowId.startsWith(prefix)) return null;
+  const generationText = windowId.slice(prefix.length);
+  if (!/^(0|[1-9]\d*)$/.test(generationText)) return null;
+  const generation = Number(generationText);
+  return Number.isSafeInteger(generation) ? generation : null;
 };
 
 const stringMetadata = (store: StatefulResponsesStore, key: string): string | null => {
