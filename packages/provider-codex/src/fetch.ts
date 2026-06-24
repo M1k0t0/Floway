@@ -8,7 +8,7 @@ import {
   CODEX_RESPONSES_PATH,
   CODEX_USER_AGENT,
 } from './constants.ts';
-import { sha256Uuid, uuidV7 } from './ids.ts';
+import { sha256Uuid } from './ids.ts';
 import {
   getCodexQuota,
   isCodexRateLimited,
@@ -18,7 +18,7 @@ import {
 import type { CodexAccountCredential } from './state.ts';
 import type { ResponsesCompactPayload, ResponsesPayload, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 import { parseResponsesStream } from '@floway-dev/protocols/responses';
-import { type ProviderCompactionResult, type ProviderStreamResult, streamingProviderCall, type UpstreamCallOptions, type UpstreamModel } from '@floway-dev/provider';
+import { FLOWAY_CODEX_SESSION_ID_HEADER, type ProviderCompactionResult, type ProviderStreamResult, streamingProviderCall, uuidV7, type UpstreamCallOptions, type UpstreamModel } from '@floway-dev/provider';
 
 // Hooks for repo-side state transitions, applied with optimistic concurrency.
 // Refresh-token rotations and terminal-state transitions go through the repo;
@@ -114,7 +114,10 @@ const trimHeader = (headers: Headers, name: string): string | null => {
 };
 
 const buildCodexRequestIdentity = async (opts: CodexBackendCallBase): Promise<CodexRequestIdentity> => {
-  const sessionId = trimHeader(opts.headers, 'session-id') ?? trimHeader(opts.headers, 'session_id') ?? uuidV7();
+  const sessionId = trimHeader(opts.headers, FLOWAY_CODEX_SESSION_ID_HEADER)
+    ?? trimHeader(opts.headers, 'session-id')
+    ?? trimHeader(opts.headers, 'session_id')
+    ?? uuidV7();
   const installationId = await sha256Uuid(`codex-installation:${opts.upstreamId}:${opts.account.chatgptAccountId}`);
   const turnId = uuidV7();
   const windowId = uuidV7();
