@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { CODEX_CLI_VERSION, CODEX_ORIGINATOR, CODEX_USER_AGENT } from './constants.ts';
 import { callCodexResponses, type CodexCallEffects } from './fetch.ts';
 import type { CodexAccessTokenEntry, CodexAccountCredential, CodexQuotaSnapshotEntry, CodexUpstreamState } from './state.ts';
-import { initProviderRepo, type Fetcher, type UpstreamModel, type UpstreamRecord } from '@floway-dev/provider';
+import { FLOWAY_CODEX_SESSION_ID_HEADER, initProviderRepo, type Fetcher, type UpstreamModel, type UpstreamRecord } from '@floway-dev/provider';
 import { noopUpstreamCallOptions } from '@floway-dev/test-utils';
 
 const makeEffects = (): CodexCallEffects => ({
@@ -305,6 +305,30 @@ describe('callCodexResponses — upstream classification', () => {
     expect(firstMetadata.turn_id).toMatch(UUID_V7_RE);
     expect(secondMetadata.turn_id).toMatch(UUID_V7_RE);
     expect(firstMetadata.turn_id).not.toBe(secondMetadata.turn_id);
+  });
+
+  test('prefers Floway internal session scope over downstream session headers', async () => {
+    seedFreshAccessToken();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
+    await callCodexResponses({
+      upstreamId, account: activeAccount, model,
+      body: { input: [], stream: true },
+      headers: new Headers({
+        [FLOWAY_CODEX_SESSION_ID_HEADER]: 'floway-internal-session',
+        'session-id': 'downstream-session',
+        session_id: 'alias-session',
+      }),
+      effects: makeEffects(),
+      call: noopUpstreamCallOptions(),
+    });
+
+    const headers = new Headers((fetchSpy.mock.calls[0][1] as RequestInit).headers);
+    expect(headers.get('session-id')).toBe('floway-internal-session');
+    expect(headers.get('thread-id')).toBe('floway-internal-session');
+    expect(headers.get('x-client-request-id')).toBe('floway-internal-session');
+    expect(headers.get(FLOWAY_CODEX_SESSION_ID_HEADER)).toBeNull();
+    const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string) as Record<string, unknown>;
+    expect(body.prompt_cache_key).toBe('floway-internal-session');
   });
 
   test('different sessions produce different synthesized window and turn metadata', async () => {

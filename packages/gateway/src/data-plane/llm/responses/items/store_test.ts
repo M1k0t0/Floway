@@ -40,6 +40,7 @@ test('snapshots with non-replayable metadata-only rows load as missing', async (
     id: 'resp_expired',
     apiKeyId: API_KEY_ID,
     itemIds: [missingPayload.id],
+    metadata: {},
     createdAt: 1_000,
     refreshedAt: 1_000,
   });
@@ -66,6 +67,7 @@ test('snapshots with upstream-owned metadata-only rows remain replayable', async
     id: 'resp_metadata',
     apiKeyId: API_KEY_ID,
     itemIds: [upstreamOwned.id],
+    metadata: {},
     createdAt: 1_000,
     refreshedAt: 1_000,
   });
@@ -75,6 +77,37 @@ test('snapshots with upstream-owned metadata-only rows remain replayable', async
 
   assertExists(snapshot);
   assertEquals(snapshot.itemIds, [upstreamOwned.id]);
+});
+
+test('snapshot metadata is loaded and propagated to committed snapshots', async () => {
+  const repo = new InMemoryRepo();
+  initRepo(repo);
+  const item = storedRow({
+    id: createStoredResponsesItemId('message'),
+    itemType: 'message',
+    payload: { item: { type: 'message', role: 'user', content: 'hello' } },
+  });
+  await repo.responsesItems.insertMany([item]);
+  await repo.responsesSnapshots.insert({
+    id: 'resp_prev',
+    apiKeyId: API_KEY_ID,
+    itemIds: [item.id],
+    metadata: { codex_session_id: 'session-prev' },
+    createdAt: 1_000,
+    refreshedAt: 1_000,
+  });
+
+  const store = createResponsesHttpStore(API_KEY_ID, undefined);
+  assertExists(await store.loadSnapshot('resp_prev'));
+  assertEquals(store.getSnapshotMetadata('codex_session_id'), 'session-prev');
+  store.stageOutputItem(storedRow({
+    id: createStoredResponsesItemId('message'),
+    itemType: 'message',
+    payload: { item: { type: 'message', role: 'assistant', content: 'hi' } },
+  }));
+  await store.commitSnapshot('resp_next', 'append');
+
+  assertEquals((await repo.responsesSnapshots.lookup(API_KEY_ID, 'resp_next'))?.metadata, { codex_session_id: 'session-prev' });
 });
 
 test('createNonResponsesSourceStore reads items for affinity but does not write snapshots', async () => {

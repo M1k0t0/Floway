@@ -101,3 +101,5 @@ export {
 } from './image-helpers.ts';
 
 export { COMPACTION_TRIGGER, compactionResponse } from './compaction.ts';
+export { uuidV7 } from './ids.ts';
+export { FLOWAY_CODEX_SESSION_ID_HEADER } from './internal-headers.ts';

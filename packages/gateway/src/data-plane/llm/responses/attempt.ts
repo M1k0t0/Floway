@@ -1,5 +1,6 @@
 import { responsesInterceptors } from './interceptors/index.ts';
 import type { ResponsesAttemptResult, ResponsesInvocation } from './interceptors/types.ts';
+import { attachCodexSessionHeader } from './codex-session.ts';
 import { createStoredResponseId } from './items/format.ts';
 import { normalizeAssistantInputText } from './items/normalize-assistant-content.ts';
 import { drainAsync, syntheticEventsFromResult, wrapResponsesOutputForStorage } from './items/output.ts';
@@ -115,7 +116,7 @@ export const responsesAttempt = {
 
     const invocation: ResponsesInvocation = { payload: normalized, candidate, store, headers };
     const chainResult = await runInterceptors(invocation, ctx, responsesInterceptors, async () =>
-      await callResponsesCompactAsExecuteResult(invocation.payload, ctx, candidate, invocation.headers));
+      await callResponsesCompactAsExecuteResult(invocation.payload, ctx, store, candidate, invocation.headers));
 
     if (chainResult.type !== 'events') return chainResult;
 
@@ -190,6 +191,7 @@ const dispatchResponses = async (
 ): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => {
   switch (candidate.targetApi) {
   case 'responses': {
+    attachCodexSessionHeader(candidate, store, headers);
     const { model: _model, ...body } = payload;
     const recorder = createUpstreamLatencyRecorder();
     const providerResult = await candidate.binding.provider.callResponses(
@@ -236,10 +238,12 @@ const dispatchResponses = async (
 const callResponsesCompactAsExecuteResult = async (
   payload: ResponsesPayload,
   ctx: GatewayCtx,
+  store: StatefulResponsesStore,
   candidate: ProviderCandidate,
   headers: Headers,
 ): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => {
   const { model: _model, stream: _stream, store: _store, ...body } = payload;
+  attachCodexSessionHeader(candidate, store, headers);
   const recorder = createUpstreamLatencyRecorder();
   const providerResult = await candidate.binding.provider.callResponsesCompact(
     candidate.binding.upstreamModel,

@@ -1031,7 +1031,7 @@ class SqlResponsesSnapshotsRepo implements ResponsesSnapshotsRepo {
 
   async lookup(apiKeyId: string | null, id: string): Promise<StoredResponsesSnapshot | null> {
     const row = await this.db
-      .prepare('SELECT id, api_key_id, item_ids_json, created_at, refreshed_at FROM responses_snapshots WHERE id = ? AND COALESCE(api_key_id, \'\') = COALESCE(?, \'\')')
+      .prepare('SELECT id, api_key_id, item_ids_json, metadata_json, created_at, refreshed_at FROM responses_snapshots WHERE id = ? AND COALESCE(api_key_id, \'\') = COALESCE(?, \'\')')
       .bind(id, apiKeyId)
       .first<ResponsesSnapshotRow>();
     return row ? toStoredResponsesSnapshot(row) : null;
@@ -1040,10 +1040,10 @@ class SqlResponsesSnapshotsRepo implements ResponsesSnapshotsRepo {
   async insert(snapshot: StoredResponsesSnapshot): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO responses_snapshots (id, api_key_id, item_ids_json, created_at, refreshed_at) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT (id, COALESCE(api_key_id, '')) DO UPDATE SET item_ids_json = excluded.item_ids_json, refreshed_at = excluded.refreshed_at`,
+        `INSERT INTO responses_snapshots (id, api_key_id, item_ids_json, metadata_json, created_at, refreshed_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id, COALESCE(api_key_id, '')) DO UPDATE SET item_ids_json = excluded.item_ids_json, metadata_json = excluded.metadata_json, refreshed_at = excluded.refreshed_at`,
       )
-      .bind(snapshot.id, snapshot.apiKeyId, JSON.stringify(snapshot.itemIds), snapshot.createdAt, snapshot.refreshedAt)
+      .bind(snapshot.id, snapshot.apiKeyId, JSON.stringify(snapshot.itemIds), JSON.stringify(snapshot.metadata), snapshot.createdAt, snapshot.refreshedAt)
       .run();
   }
 
@@ -1069,6 +1069,7 @@ interface ResponsesSnapshotRow {
   id: string;
   api_key_id: string | null;
   item_ids_json: string;
+  metadata_json: string | null;
   created_at: number;
   refreshed_at: number;
 }
@@ -1078,10 +1079,13 @@ const toStoredResponsesSnapshot = (row: ResponsesSnapshotRow): StoredResponsesSn
   if (!Array.isArray(parsed) || parsed.some(item => typeof item !== 'string')) {
     throw new Error(`Invalid responses_snapshots.item_ids_json for id=${row.id}`);
   }
+  const metadata: unknown = row.metadata_json === null ? {} : JSON.parse(row.metadata_json);
+  if (!isRecord(metadata)) throw new Error(`Invalid responses_snapshots.metadata_json for id=${row.id}`);
   return {
     id: row.id,
     apiKeyId: row.api_key_id,
     itemIds: parsed,
+    metadata,
     createdAt: row.created_at,
     refreshedAt: row.refreshed_at,
   };

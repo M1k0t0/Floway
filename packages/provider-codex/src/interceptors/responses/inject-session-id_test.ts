@@ -3,7 +3,7 @@ import { test } from 'vitest';
 import { injectSessionId } from './inject-session-id.ts';
 import type { ResponsesBoundaryCtx } from './types.ts';
 import type { ResponsesPayload, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
-import type { ProviderStreamResult } from '@floway-dev/provider';
+import { FLOWAY_CODEX_SESSION_ID_HEADER, type ProviderStreamResult } from '@floway-dev/provider';
 import { assert, assertEquals, stubUpstreamModel } from '@floway-dev/test-utils';
 
 const stubRequest = {};
@@ -54,6 +54,19 @@ test('honors a client-supplied session-id (hyphen form) without overwriting', as
   await injectSessionId(ctx, stubRequest, okEvents);
 
   assertEquals(ctx.headers.get('session-id'), 'client-supplied');
+});
+
+test('prefers a Floway-owned internal session id over downstream session headers', async () => {
+  const ctx = invocation({ model: 'gpt-test', input: 'hi' }, new Headers({
+    [FLOWAY_CODEX_SESSION_ID_HEADER]: 'floway-internal',
+    'session-id': 'client-supplied',
+    session_id: 'alias',
+  }));
+
+  await injectSessionId(ctx, stubRequest, okEvents);
+
+  assertEquals(ctx.headers.get('session-id'), 'floway-internal');
+  assertEquals(ctx.headers.get('session_id'), null);
 });
 
 test('canonicalizes a client-supplied session_id alias when session-id is absent', async () => {
