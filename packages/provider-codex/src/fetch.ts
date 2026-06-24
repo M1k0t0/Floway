@@ -36,6 +36,7 @@ export interface CallCodexResponsesOptions {
   model: UpstreamModel;
   body: Omit<ResponsesPayload, 'model'>;
   headers: Headers;
+  turnMetadata?: CodexTurnMetadataOptions;
   signal?: AbortSignal;
   effects: CodexCallEffects;
   call: UpstreamCallOptions;
@@ -95,6 +96,30 @@ interface CodexRequestIdentity {
   windowId: string;
 }
 
+export interface CodexCompactionTurnMetadata {
+  trigger: 'manual' | 'auto';
+  reason: 'user_requested' | 'context_limit';
+  implementation: 'responses_compact' | 'responses_compaction_v2';
+  phase: 'standalone_turn' | 'mid_turn';
+  strategy: 'memento';
+}
+
+export interface CodexTurnMetadataOptions {
+  requestKind: 'turn' | 'compaction';
+  compaction?: CodexCompactionTurnMetadata;
+}
+
+export const CODEX_RESPONSES_COMPACTION_V2_TURN_METADATA: CodexTurnMetadataOptions = {
+  requestKind: 'compaction',
+  compaction: {
+    trigger: 'manual',
+    reason: 'user_requested',
+    implementation: 'responses_compaction_v2',
+    phase: 'standalone_turn',
+    strategy: 'memento',
+  },
+};
+
 const trimHeader = (headers: Headers, name: string): string | null => {
   const value = headers.get(name)?.trim();
   return value || null;
@@ -114,21 +139,24 @@ const buildCodexRequestIdentity = async (opts: CallCodexResponsesOptions): Promi
   return { installationId, sessionId, threadId, turnId, windowId };
 };
 
-const buildCodexTurnMetadata = (identity: CodexRequestIdentity): Record<string, string> => ({
-  installation_id: identity.installationId,
-  session_id: identity.sessionId,
-  thread_id: identity.threadId,
-  turn_id: identity.turnId,
-  window_id: identity.windowId,
-  request_kind: 'turn',
-});
+const buildCodexTurnMetadata = (identity: CodexRequestIdentity, options: CodexTurnMetadataOptions): Record<string, unknown> => {
+  const metadata: Record<string, unknown> = {
+    session_id: identity.sessionId,
+    thread_id: identity.threadId,
+    turn_id: identity.turnId,
+    window_id: identity.windowId,
+    request_kind: options.requestKind,
+  };
+  if (options.compaction !== undefined) metadata.compaction = options.compaction;
+  return metadata;
+};
 
-const buildCodexTurnMetadataJson = (identity: CodexRequestIdentity): string =>
-  JSON.stringify(buildCodexTurnMetadata(identity));
+const buildCodexTurnMetadataJson = (identity: CodexRequestIdentity, options: CodexTurnMetadataOptions): string =>
+  JSON.stringify(buildCodexTurnMetadata(identity, options));
 
-const buildCodexResponsesHeaders = (opts: CallCodexResponsesOptions, accessToken: string, identity: CodexRequestIdentity): Headers => {
+const buildCodexResponsesHeaders = (opts: CallCodexResponsesOptions, accessToken: string, identity: CodexRequestIdentity, metadata: CodexTurnMetadataOptions): Headers => {
   const headers = new Headers();
-  const turnMetadataJson = buildCodexTurnMetadataJson(identity);
+  const turnMetadataJson = buildCodexTurnMetadataJson(identity, metadata);
   headers.set('authorization', `Bearer ${accessToken}`);
   headers.set('chatgpt-account-id', opts.account.chatgptAccountId);
   headers.set('originator', CODEX_ORIGINATOR);
@@ -141,6 +169,7 @@ const buildCodexResponsesHeaders = (opts: CallCodexResponsesOptions, accessToken
   headers.set('x-client-request-id', identity.threadId);
   headers.set('x-codex-window-id', identity.windowId);
   headers.set('x-codex-turn-metadata', turnMetadataJson);
+  if (metadata.requestKind === 'compaction') headers.set('x-codex-beta-features', 'remote_compaction_v2');
 
   return headers;
 };
@@ -149,7 +178,6 @@ const buildCodexResponsesBody = (
   opts: CallCodexResponsesOptions,
   identity: CodexRequestIdentity,
 ): Record<string, unknown> => {
-  const turnMetadataJson = buildCodexTurnMetadataJson(identity);
   const body: Record<string, unknown> = {
     ...(opts.body as unknown as Record<string, unknown>),
     model: opts.model.id,
@@ -157,16 +185,17 @@ const buildCodexResponsesBody = (
     stream: true,
     client_metadata: {
       'x-codex-installation-id': identity.installationId,
-      session_id: identity.sessionId,
-      thread_id: identity.threadId,
-      turn_id: identity.turnId,
-      'x-codex-window-id': identity.windowId,
-      'x-codex-turn-metadata': turnMetadataJson,
     },
   };
   if (body.prompt_cache_key === undefined) body.prompt_cache_key = identity.threadId;
   return body;
 };
+
+const codexTurnMetadataOptions = (opts: CallCodexResponsesOptions): CodexTurnMetadataOptions =>
+  opts.turnMetadata ?? (containsCompactionTrigger(opts.body.input) ? CODEX_RESPONSES_COMPACTION_V2_TURN_METADATA : { requestKind: 'turn' });
+
+const containsCompactionTrigger = (input: ResponsesPayload['input']): boolean =>
+  Array.isArray(input) && input.some(item => item.type === 'compaction_trigger');
 
 const performUpstreamCall = async (
   opts: CallCodexResponsesOptions,
@@ -174,7 +203,8 @@ const performUpstreamCall = async (
   alreadyRetried: boolean,
 ): Promise<ProviderStreamResult<ResponsesStreamEvent>> => {
   const identity = await buildCodexRequestIdentity(opts);
-  const headers = buildCodexResponsesHeaders(opts, accessToken, identity);
+  const metadata = codexTurnMetadataOptions(opts);
+  const headers = buildCodexResponsesHeaders(opts, accessToken, identity, metadata);
   const body = buildCodexResponsesBody(opts, identity);
 
   const upstreamFetch = opts.call.fetcher(`${CODEX_BACKEND_BASE}${CODEX_RESPONSES_PATH}`, {

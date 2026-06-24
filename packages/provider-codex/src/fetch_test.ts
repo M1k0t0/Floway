@@ -248,7 +248,6 @@ describe('callCodexResponses — upstream classification', () => {
     expect(headers.get('x-codex-window-id')).not.toBe('downstream-window');
     const turnMetadata = JSON.parse(headers.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
     expect(turnMetadata).toEqual({
-      installation_id: expect.stringMatching(UUID_V4_RE),
       session_id: 'downstream-session',
       thread_id: 'downstream-thread',
       turn_id: expect.stringMatching(UUID_V7_RE),
@@ -264,12 +263,7 @@ describe('callCodexResponses — upstream classification', () => {
     const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string) as Record<string, unknown>;
     expect(body.prompt_cache_key).toBe('downstream-thread');
     expect(body.client_metadata).toEqual({
-      'x-codex-installation-id': turnMetadata.installation_id,
-      session_id: 'downstream-session',
-      thread_id: 'downstream-thread',
-      turn_id: turnMetadata.turn_id,
-      'x-codex-window-id': headers.get('x-codex-window-id'),
-      'x-codex-turn-metadata': headers.get('x-codex-turn-metadata'),
+      'x-codex-installation-id': expect.stringMatching(UUID_V4_RE),
     });
   });
 
@@ -296,7 +290,6 @@ describe('callCodexResponses — upstream classification', () => {
     expect(secondHeaders.get('x-client-request-id')).toBe('stable-session');
     const firstMetadata = JSON.parse(firstHeaders.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
     const secondMetadata = JSON.parse(secondHeaders.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
-    expect(firstMetadata.installation_id).toBe(secondMetadata.installation_id);
     expect(firstMetadata.session_id).toBe('stable-session');
     expect(secondMetadata.session_id).toBe('stable-session');
     expect(firstMetadata.thread_id).toBe('stable-session');
@@ -375,11 +368,8 @@ describe('callCodexResponses — upstream classification', () => {
     expect(turnMetadata.window_id).toBe(internalWindowId);
     const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string) as Record<string, unknown>;
     expect(body.prompt_cache_key).toBe('floway-internal-thread');
-    expect(body.client_metadata).toMatchObject({
-      session_id: 'floway-internal-session',
-      thread_id: 'floway-internal-thread',
-      'x-codex-window-id': internalWindowId,
-      'x-codex-turn-metadata': headers.get('x-codex-turn-metadata'),
+    expect(body.client_metadata).toEqual({
+      'x-codex-installation-id': expect.stringMatching(UUID_V4_RE),
     });
   });
 
@@ -408,7 +398,6 @@ describe('callCodexResponses — upstream classification', () => {
     expect(firstHeaders.get('x-codex-turn-metadata')).not.toBe(secondHeaders.get('x-codex-turn-metadata'));
     const firstMetadata = JSON.parse(firstHeaders.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
     const secondMetadata = JSON.parse(secondHeaders.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
-    expect(firstMetadata.installation_id).toBe(secondMetadata.installation_id);
     expect(firstMetadata.session_id).toBe('session-a');
     expect(secondMetadata.session_id).toBe('session-b');
     expect(firstMetadata.window_id).toBe('session-a:0');

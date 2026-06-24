@@ -82,6 +82,19 @@ describe('callCodexResponsesCompact', () => {
     expect(sentBody.input.at(-1)).toEqual({ type: 'compaction_trigger' });
     expect(sentBody.store).toBe(false);
     expect(sentBody.stream).toBe(true);
+    const sentHeaders = new Headers((fetchSpy.mock.calls[0][1] as RequestInit).headers);
+    const turnMetadata = JSON.parse(sentHeaders.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
+    expect(sentHeaders.get('x-codex-beta-features')).toBe('remote_compaction_v2');
+    expect(turnMetadata).not.toHaveProperty('installation_id');
+    expect(turnMetadata.request_kind).toBe('compaction');
+    expect(turnMetadata.compaction).toEqual({
+      trigger: 'manual',
+      reason: 'user_requested',
+      implementation: 'responses_compaction_v2',
+      phase: 'standalone_turn',
+      strategy: 'memento',
+    });
+    expect(sentBody.client_metadata).toEqual({ 'x-codex-installation-id': expect.any(String) });
 
     expect(result.result.object).toBe('response.compaction');
     expect(result.result.output).toHaveLength(2);
