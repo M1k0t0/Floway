@@ -1,4 +1,4 @@
-import { type CallCodexResponsesOptions, callCodexResponses } from './fetch.ts';
+import { CODEX_RESPONSES_COMPACTION_V2_TURN_METADATA, type CallCodexResponsesOptions, callCodexResponses } from './fetch.ts';
 import type { ResponsesCompactPayload, ResponsesInputItem, ResponsesPayload, ResponsesResult } from '@floway-dev/protocols/responses';
 import { COMPACTION_TRIGGER, compactionResponse, type ProviderCompactionResult } from '@floway-dev/provider';
 
@@ -20,7 +20,7 @@ export const callCodexResponsesCompact = async (opts: CallCodexResponsesCompactO
   const triggerInput: ResponsesInputItem[] = [...originalInput, COMPACTION_TRIGGER];
 
   const triggeredBody: Omit<ResponsesPayload, 'model'> = { ...opts.body, input: triggerInput };
-  const result = await callCodexResponses({ ...opts, body: triggeredBody });
+  const result = await callCodexResponses({ ...opts, body: triggeredBody, turnMetadata: CODEX_RESPONSES_COMPACTION_V2_TURN_METADATA });
 
   if (!result.ok) return { ok: false, response: result.response, modelKey: opts.model.id };
 

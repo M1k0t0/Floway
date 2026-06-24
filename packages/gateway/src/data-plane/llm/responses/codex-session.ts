@@ -1,6 +1,6 @@
 import type { StatefulResponsesStore } from './items/store.ts';
 import type { ProviderCandidate } from '../shared/candidates.ts';
-import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_THREAD_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, uuidV7 } from '@floway-dev/provider';
+import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_THREAD_ID_HEADER, FLOWAY_CODEX_TURN_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, uuidV7 } from '@floway-dev/provider';
 
 const CODEX_SESSION_METADATA_KEY = 'codex_session_id';
 const CODEX_THREAD_METADATA_KEY = 'codex_thread_id';
@@ -15,6 +15,7 @@ export const attachCodexSessionHeader = (
   if (candidate.binding.providerKind !== 'codex') {
     headers.delete(FLOWAY_CODEX_SESSION_ID_HEADER);
     headers.delete(FLOWAY_CODEX_THREAD_ID_HEADER);
+    headers.delete(FLOWAY_CODEX_TURN_ID_HEADER);
     headers.delete(FLOWAY_CODEX_WINDOW_ID_HEADER);
     return;
   }
@@ -26,6 +27,7 @@ export const attachCodexSessionHeader = (
   const threadId = ensureCodexThreadId(store, sessionId, downstreamThreadId);
   headers.set(FLOWAY_CODEX_SESSION_ID_HEADER, sessionId);
   headers.set(FLOWAY_CODEX_THREAD_ID_HEADER, threadId);
+  headers.set(FLOWAY_CODEX_TURN_ID_HEADER, ensureCodexTurnId(headers));
   headers.set(FLOWAY_CODEX_WINDOW_ID_HEADER, ensureCodexWindowId(store, threadId, downstreamWindowId));
 };
 
@@ -51,6 +53,9 @@ const ensureCodexThreadId = (store: StatefulResponsesStore, sessionId: string, d
   store.setSnapshotMetadata(CODEX_THREAD_METADATA_KEY, sessionId);
   return sessionId;
 };
+
+const ensureCodexTurnId = (headers: Headers): string =>
+  trimHeader(headers, FLOWAY_CODEX_TURN_ID_HEADER) ?? uuidV7();
 
 const ensureCodexWindowId = (store: StatefulResponsesStore, threadId: string, downstreamWindowId: string | null): string => {
   const existingWindowId = codexWindowMetadata(store, threadId);

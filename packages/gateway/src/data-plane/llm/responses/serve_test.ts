@@ -11,7 +11,7 @@ import type { ChatCompletionsStreamEvent } from '@floway-dev/protocols/chat-comp
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { MessagesStreamEvent } from '@floway-dev/protocols/messages';
 import type { ResponsesPayload, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
-import { directFetcher, FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_THREAD_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, type ProviderStreamResult, type UpstreamCallOptions, type UpstreamProviderKind } from '@floway-dev/provider';
+import { directFetcher, FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_THREAD_ID_HEADER, FLOWAY_CODEX_TURN_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, type ProviderStreamResult, type UpstreamCallOptions, type UpstreamProviderKind } from '@floway-dev/provider';
 import { assert, assertEquals, stubProvider, stubUpstreamModel } from '@floway-dev/test-utils';
 
 // `enumerateProviderCandidates` is the only seam between serve and the
@@ -235,17 +235,21 @@ test('generate carries Floway-owned Codex session and window ids across previous
   let turn = 0;
   const sessionIds: string[] = [];
   const threadIds: string[] = [];
+  const turnIds: string[] = [];
   const windowIds: string[] = [];
   const callResponses = vi.fn(async (_model, _body, _signal, opts): Promise<ProviderStreamResult<ResponsesStreamEvent>> => {
     const sessionId = opts?.headers.get(FLOWAY_CODEX_SESSION_ID_HEADER);
     if (sessionId === null || !UUID_V7_RE.test(sessionId)) throw new Error(`expected internal Codex session id, got ${sessionId}`);
     const threadId = opts?.headers.get(FLOWAY_CODEX_THREAD_ID_HEADER);
     if (threadId !== sessionId) throw new Error(`expected generated Codex thread id ${sessionId}, got ${threadId}`);
+    const turnId = opts?.headers.get(FLOWAY_CODEX_TURN_ID_HEADER);
+    if (turnId === null || !UUID_V7_RE.test(turnId)) throw new Error(`expected internal Codex turn id, got ${turnId}`);
     const windowId = opts?.headers.get(FLOWAY_CODEX_WINDOW_ID_HEADER);
     if (windowId === null || !windowId.startsWith(`${threadId}:`)) throw new Error(`expected internal Codex window id for ${threadId}, got ${windowId}`);
     if (opts?.headers.get('x-codex-window-id') !== null) throw new Error('expected downstream x-codex-window-id marker to be scrubbed before provider dispatch');
     sessionIds.push(sessionId);
     threadIds.push(threadId);
+    turnIds.push(turnId);
     windowIds.push(windowId);
     turn += 1;
     return {
@@ -322,6 +326,7 @@ test('generate carries Floway-owned Codex session and window ids across previous
   assertEquals(sessionIds.length, 3);
   assertEquals(sessionIds[2], sessionIds[0]);
   assertEquals(threadIds[2], threadIds[0]);
+  assertEquals(turnIds.length, 3);
   assertEquals(windowIds[2], `${threadIds[0]}:1`);
   assertEquals(turn3Snapshot?.metadata.codex_window_id, windowIds[2]);
   assertEquals(turn3Snapshot?.metadata.codex_downstream_window_id, 'downstream-window-b');
