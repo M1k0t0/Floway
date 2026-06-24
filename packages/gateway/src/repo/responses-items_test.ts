@@ -471,7 +471,7 @@ test('migration 0026 adds Responses state snapshots and content hash index', asy
   }
 });
 
-test('migration 0038 adds Responses snapshot metadata', async () => {
+test('migration 0044 adds Responses snapshot metadata', async () => {
   const SQL = await initSqlJs();
   const db = new SQL.Database();
   try {
@@ -480,7 +480,7 @@ test('migration 0038 adds Responses snapshot metadata', async () => {
     applySqlJsFile(db, '0026_responses_state.sql');
     db.run("INSERT INTO responses_snapshots (id, api_key_id, item_ids_json, created_at, refreshed_at) VALUES ('resp_a', 'key_a', '[\"msg_a\"]', 1, 1)");
 
-    applySqlJsFile(db, '0038_responses_snapshot_metadata.sql');
+    applySqlJsFile(db, '0044_responses_snapshot_metadata.sql');
 
     assertEquals(
       sqlJsRows<{ name: string }>(db, 'PRAGMA table_info(responses_snapshots)').map(row => row.name).filter(name => name === 'metadata_json'),
