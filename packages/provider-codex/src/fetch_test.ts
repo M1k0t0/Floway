@@ -17,7 +17,8 @@ const model: UpstreamModel = {
 };
 
 const upstreamId = 'up_a';
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const UUID_V7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 const farFutureAccessToken: CodexAccessTokenEntry = {
   token: 'at_kv',
@@ -242,14 +243,14 @@ describe('callCodexResponses — upstream classification', () => {
     expect(headers.get('x-client-request-id')).toBe('downstream-session');
     expect(headers.get('thread-id')).toBe('downstream-session');
     expect(headers.get('x-codex-beta-features')).toBeNull();
-    expect(headers.get('x-codex-window-id')).toMatch(UUID_RE);
+    expect(headers.get('x-codex-window-id')).toMatch(UUID_V7_RE);
     expect(headers.get('x-codex-window-id')).not.toBe('downstream-window');
     const turnMetadata = JSON.parse(headers.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
     expect(turnMetadata).toEqual({
-      installation_id: expect.stringMatching(UUID_RE),
+      installation_id: expect.stringMatching(UUID_V4_RE),
       session_id: 'downstream-session',
       thread_id: 'downstream-session',
-      turn_id: expect.stringMatching(UUID_RE),
+      turn_id: expect.stringMatching(UUID_V7_RE),
       window_id: headers.get('x-codex-window-id'),
       request_kind: 'turn',
     });
@@ -271,7 +272,7 @@ describe('callCodexResponses — upstream classification', () => {
     });
   });
 
-  test('synthesized Codex identity keeps session scope stable while rotating turn ids', async () => {
+  test('synthesized Codex identity keeps supplied session scope stable while rotating window and turn ids', async () => {
     seedFreshAccessToken();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => sseResponse());
     const request = {
@@ -287,7 +288,9 @@ describe('callCodexResponses — upstream classification', () => {
 
     const firstHeaders = new Headers((fetchSpy.mock.calls[0][1] as RequestInit).headers);
     const secondHeaders = new Headers((fetchSpy.mock.calls[1][1] as RequestInit).headers);
-    expect(firstHeaders.get('x-codex-window-id')).toBe(secondHeaders.get('x-codex-window-id'));
+    expect(firstHeaders.get('x-codex-window-id')).toMatch(UUID_V7_RE);
+    expect(secondHeaders.get('x-codex-window-id')).toMatch(UUID_V7_RE);
+    expect(firstHeaders.get('x-codex-window-id')).not.toBe(secondHeaders.get('x-codex-window-id'));
     expect(firstHeaders.get('x-codex-turn-metadata')).not.toBe(secondHeaders.get('x-codex-turn-metadata'));
     expect(firstHeaders.get('x-client-request-id')).toBe('stable-session');
     expect(secondHeaders.get('x-client-request-id')).toBe('stable-session');
@@ -298,9 +301,9 @@ describe('callCodexResponses — upstream classification', () => {
     expect(secondMetadata.session_id).toBe('stable-session');
     expect(firstMetadata.thread_id).toBe('stable-session');
     expect(secondMetadata.thread_id).toBe('stable-session');
-    expect(firstMetadata.window_id).toBe(secondMetadata.window_id);
-    expect(firstMetadata.turn_id).toMatch(UUID_RE);
-    expect(secondMetadata.turn_id).toMatch(UUID_RE);
+    expect(firstMetadata.window_id).not.toBe(secondMetadata.window_id);
+    expect(firstMetadata.turn_id).toMatch(UUID_V7_RE);
+    expect(secondMetadata.turn_id).toMatch(UUID_V7_RE);
     expect(firstMetadata.turn_id).not.toBe(secondMetadata.turn_id);
   });
 
@@ -332,6 +335,10 @@ describe('callCodexResponses — upstream classification', () => {
     expect(firstMetadata.installation_id).toBe(secondMetadata.installation_id);
     expect(firstMetadata.session_id).toBe('session-a');
     expect(secondMetadata.session_id).toBe('session-b');
+    expect(firstMetadata.window_id).toMatch(UUID_V7_RE);
+    expect(secondMetadata.window_id).toMatch(UUID_V7_RE);
+    expect(firstMetadata.turn_id).toMatch(UUID_V7_RE);
+    expect(secondMetadata.turn_id).toMatch(UUID_V7_RE);
     expect(firstMetadata.turn_id).not.toBe(secondMetadata.turn_id);
     expect(firstMetadata.request_kind).toBe('turn');
     expect(secondMetadata.request_kind).toBe('turn');
@@ -431,7 +438,8 @@ describe('callCodexResponses — upstream classification', () => {
     });
 
     const headers = new Headers((fetchSpy.mock.calls[0][1] as RequestInit).headers);
-    expect(headers.get('session-id')).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(headers.get('session-id')).toMatch(UUID_V7_RE);
+    expect(headers.get('thread-id')).toBe(headers.get('session-id'));
     expect(headers.get('session_id')).toBeNull();
   });
 

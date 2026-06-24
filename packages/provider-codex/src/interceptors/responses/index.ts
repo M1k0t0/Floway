@@ -10,8 +10,7 @@ import type { Interceptor } from '@floway-dev/interceptor';
 
 // Order rationale: none of the three interceptors below read or write a field
 // the others touch, so order is positional only. inject-session-id last is
-// conventional but not load-bearing — it hashes only `instructions + first
-// user-message text`, neither of which is mutated by the other two.
+// conventional but not load-bearing.
 //
 // Each interceptor is generic over the terminal result type: the streaming
 // `/responses` chain runs to ProviderStreamResult, the compaction chain runs
