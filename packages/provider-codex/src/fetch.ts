@@ -2,7 +2,6 @@ import { ensureCodexAccessToken, invalidateCodexAccessToken, mintCodexAccessToke
 import { CodexOAuthSessionTerminatedError } from './auth/oauth.ts';
 import {
   CODEX_BACKEND_BASE,
-  CODEX_CLI_VERSION,
   CODEX_ORIGINATOR,
   CODEX_RESPONSES_COMPACT_PATH,
   CODEX_RESPONSES_PATH,
@@ -223,7 +222,6 @@ const dispatchCodexHttpCall = async (
   headers.set('content-type', 'application/json');
   headers.set('session-id', identity.sessionId);
   headers.set('thread-id', identity.threadId);
-  headers.set('version', CODEX_CLI_VERSION);
   headers.set('x-client-request-id', identity.threadId);
   headers.set('x-codex-window-id', identity.windowId);
   headers.set('x-codex-turn-metadata', turnMetadataJson);

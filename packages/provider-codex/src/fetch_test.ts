@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
-import { CODEX_CLI_VERSION, CODEX_ORIGINATOR, CODEX_USER_AGENT } from './constants.ts';
+import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from './constants.ts';
 import { callCodexResponses, callCodexResponsesCompact, type CodexCallEffects } from './fetch.ts';
 import type { CodexAccessTokenEntry, CodexAccountCredential, CodexQuotaSnapshotEntry, CodexUpstreamState } from './state.ts';
 import type { ResponsesResult } from '@floway-dev/protocols/responses';
@@ -241,7 +241,6 @@ describe('callCodexResponses — upstream classification', () => {
     expect(headers.get('content-type')).toBe('application/json');
     expect(headers.get('session-id')).toBe('downstream-session');
     expect(headers.get('session_id')).toBeNull();
-    expect(headers.get('version')).toBe(CODEX_CLI_VERSION);
     expect(headers.get('x-client-request-id')).toBe('downstream-session');
     expect(headers.get('thread-id')).toBe('downstream-session');
     expect(headers.get('x-codex-beta-features')).toBeNull();
