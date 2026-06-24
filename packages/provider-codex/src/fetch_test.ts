@@ -308,6 +308,39 @@ describe('callCodexResponses — upstream classification', () => {
     expect(firstMetadata.turn_id).not.toBe(secondMetadata.turn_id);
   });
 
+  test('ignores x-client-request-id as a downstream thread scope when thread-id is absent', async () => {
+    seedFreshAccessToken();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => sseResponse());
+    const request = {
+      upstreamId, account: activeAccount, model,
+      body: { input: [], stream: true },
+      effects: makeEffects(),
+      call: noopUpstreamCallOptions(),
+    } satisfies Omit<Parameters<typeof callCodexResponses>[0], 'headers'>;
+
+    await callCodexResponses({
+      ...request,
+      headers: new Headers({ 'session-id': 'request-id-session', 'x-client-request-id': 'request-1' }),
+    });
+    await callCodexResponses({
+      ...request,
+      headers: new Headers({ 'session-id': 'request-id-session', 'x-client-request-id': 'request-2' }),
+    });
+
+    const firstHeaders = new Headers((fetchSpy.mock.calls[0][1] as RequestInit).headers);
+    const secondHeaders = new Headers((fetchSpy.mock.calls[1][1] as RequestInit).headers);
+    const firstBody = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string) as Record<string, unknown>;
+    const secondBody = JSON.parse((fetchSpy.mock.calls[1][1] as RequestInit).body as string) as Record<string, unknown>;
+    expect(firstHeaders.get('thread-id')).toBe('request-id-session');
+    expect(secondHeaders.get('thread-id')).toBe('request-id-session');
+    expect(firstHeaders.get('x-client-request-id')).toBe('request-id-session');
+    expect(secondHeaders.get('x-client-request-id')).toBe('request-id-session');
+    expect(firstHeaders.get('x-codex-window-id')).toBe('request-id-session:0');
+    expect(secondHeaders.get('x-codex-window-id')).toBe('request-id-session:0');
+    expect(firstBody.prompt_cache_key).toBe('request-id-session');
+    expect(secondBody.prompt_cache_key).toBe('request-id-session');
+  });
+
   test('prefers Floway internal session and window scope over downstream headers', async () => {
     seedFreshAccessToken();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());

@@ -19,7 +19,7 @@ export const attachCodexSessionHeader = (
     return;
   }
   const downstreamSessionId = trimHeader(headers, 'session-id') ?? trimHeader(headers, 'session_id');
-  const downstreamThreadId = trimHeader(headers, 'thread-id') ?? trimHeader(headers, 'x-client-request-id');
+  const downstreamThreadId = trimHeader(headers, 'thread-id');
   const downstreamWindowId = trimHeader(headers, 'x-codex-window-id');
   headers.delete('x-codex-window-id');
   const sessionId = ensureCodexSessionId(store, downstreamSessionId);

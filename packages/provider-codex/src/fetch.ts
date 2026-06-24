@@ -107,7 +107,6 @@ const buildCodexRequestIdentity = async (opts: CallCodexResponsesOptions): Promi
     ?? uuidV7();
   const threadId = trimHeader(opts.headers, FLOWAY_CODEX_THREAD_ID_HEADER)
     ?? trimHeader(opts.headers, 'thread-id')
-    ?? trimHeader(opts.headers, 'x-client-request-id')
     ?? sessionId;
   const installationId = await sha256Uuid(`codex-installation:${opts.upstreamId}:${opts.account.chatgptAccountId}`);
   const turnId = uuidV7();

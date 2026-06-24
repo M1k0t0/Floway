@@ -398,6 +398,66 @@ test('generate preserves real Codex downstream session and thread ids for upstre
   assertEquals(windowIds, ['codex-client-thread:0', 'codex-client-thread:0']);
 });
 
+test('generate ignores per-request x-client-request-id when no Codex thread-id is supplied', async () => {
+  installRepo();
+  const sessionIds: string[] = [];
+  const threadIds: string[] = [];
+  const windowIds: string[] = [];
+  const callResponses = vi.fn(async (_model, _body, _signal, opts): Promise<ProviderStreamResult<ResponsesStreamEvent>> => {
+    const sessionId = opts?.headers.get(FLOWAY_CODEX_SESSION_ID_HEADER);
+    const threadId = opts?.headers.get(FLOWAY_CODEX_THREAD_ID_HEADER);
+    const windowId = opts?.headers.get(FLOWAY_CODEX_WINDOW_ID_HEADER);
+    if (sessionId === null || threadId === null || windowId === null) throw new Error('expected internal Codex scope headers');
+    sessionIds.push(sessionId);
+    threadIds.push(threadId);
+    windowIds.push(windowId);
+    return {
+      ok: true,
+      events: makeProtocolFrames([{
+        type: 'response.completed',
+        sequence_number: 0,
+        response: makeResponsesResult(`resp_request_id_${sessionIds.length}`),
+      }]),
+      modelKey: 'test-model-key',
+      headers: new Headers(),
+    };
+  });
+
+  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
+  const turn1 = await responsesServe.generate({
+    payload: makePayload({ input: [{ type: 'message', role: 'user', content: 'first request-id turn' }] }),
+    ctx: makeGatewayCtx(),
+    store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers({
+      'session-id': 'request-id-client-session',
+      'x-client-request-id': 'request-id-1',
+    }),
+  });
+  if (turn1.type !== 'events') throw new Error('turn 1: expected events');
+  const turn1Events = await collectEvents(turn1.events);
+  const turn1ResponseId = (turn1Events.find(e => e.type === 'response.completed') as Extract<ResponsesStreamEvent, { type: 'response.completed' }>).response.id;
+
+  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
+  const turn2 = await responsesServe.generate({
+    payload: makePayload({
+      previous_response_id: turn1ResponseId,
+      input: [{ type: 'message', role: 'user', content: 'second request-id turn' }],
+    }),
+    ctx: makeGatewayCtx(),
+    store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers({
+      'session-id': 'request-id-client-session',
+      'x-client-request-id': 'request-id-2',
+    }),
+  });
+  if (turn2.type !== 'events') throw new Error('turn 2: expected events');
+  await collectEvents(turn2.events);
+
+  assertEquals(sessionIds, ['request-id-client-session', 'request-id-client-session']);
+  assertEquals(threadIds, ['request-id-client-session', 'request-id-client-session']);
+  assertEquals(windowIds, ['request-id-client-session:0', 'request-id-client-session:0']);
+});
+
 test('generate synthesizes stable Codex scope for a generic Responses downstream without Codex headers', async () => {
   installRepo();
   const sessionIds: string[] = [];
