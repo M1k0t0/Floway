@@ -800,6 +800,7 @@ test('generate treats compaction_trigger-bearing input as compaction: snapshot r
     id: 'resp_before_compact',
     apiKeyId: API_KEY_ID,
     itemIds: [priorMessageId],
+    metadata: {},
     createdAt: 1_000,
     refreshedAt: 1_000,
   });
