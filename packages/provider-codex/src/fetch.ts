@@ -102,7 +102,7 @@ const trimHeader = (headers: Headers, name: string): string | null => {
 const buildCodexRequestIdentity = async (opts: CallCodexResponsesOptions): Promise<CodexRequestIdentity> => {
   const sessionId = trimHeader(opts.headers, 'session-id') ?? trimHeader(opts.headers, 'session_id') ?? crypto.randomUUID();
   const installationId = await sha256Uuid(`codex-installation:${opts.upstreamId}:${opts.account.chatgptAccountId}`);
-  const turnId = await sha256Uuid(`codex-turn:${opts.upstreamId}:${opts.account.chatgptAccountId}:${sessionId}`);
+  const turnId = crypto.randomUUID();
   const windowId = await sha256Uuid(`codex-window:${opts.upstreamId}:${opts.account.chatgptAccountId}:${sessionId}`);
   return { installationId, sessionId, threadId: sessionId, turnId, windowId };
 };

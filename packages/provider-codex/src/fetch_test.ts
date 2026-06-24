@@ -271,7 +271,7 @@ describe('callCodexResponses — upstream classification', () => {
     });
   });
 
-  test('synthesized Codex identity is deterministic for the same session and account', async () => {
+  test('synthesized Codex identity keeps session scope stable while rotating turn ids', async () => {
     seedFreshAccessToken();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => sseResponse());
     const request = {
@@ -288,9 +288,20 @@ describe('callCodexResponses — upstream classification', () => {
     const firstHeaders = new Headers((fetchSpy.mock.calls[0][1] as RequestInit).headers);
     const secondHeaders = new Headers((fetchSpy.mock.calls[1][1] as RequestInit).headers);
     expect(firstHeaders.get('x-codex-window-id')).toBe(secondHeaders.get('x-codex-window-id'));
-    expect(firstHeaders.get('x-codex-turn-metadata')).toBe(secondHeaders.get('x-codex-turn-metadata'));
+    expect(firstHeaders.get('x-codex-turn-metadata')).not.toBe(secondHeaders.get('x-codex-turn-metadata'));
     expect(firstHeaders.get('x-client-request-id')).toBe('stable-session');
     expect(secondHeaders.get('x-client-request-id')).toBe('stable-session');
+    const firstMetadata = JSON.parse(firstHeaders.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
+    const secondMetadata = JSON.parse(secondHeaders.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
+    expect(firstMetadata.installation_id).toBe(secondMetadata.installation_id);
+    expect(firstMetadata.session_id).toBe('stable-session');
+    expect(secondMetadata.session_id).toBe('stable-session');
+    expect(firstMetadata.thread_id).toBe('stable-session');
+    expect(secondMetadata.thread_id).toBe('stable-session');
+    expect(firstMetadata.window_id).toBe(secondMetadata.window_id);
+    expect(firstMetadata.turn_id).toMatch(UUID_RE);
+    expect(secondMetadata.turn_id).toMatch(UUID_RE);
+    expect(firstMetadata.turn_id).not.toBe(secondMetadata.turn_id);
   });
 
   test('different sessions produce different synthesized window and turn metadata', async () => {
