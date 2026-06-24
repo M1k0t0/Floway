@@ -1091,6 +1091,9 @@ const toStoredResponsesSnapshot = (row: ResponsesSnapshotRow): StoredResponsesSn
   };
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
 class SqlSearchConfigRepo implements SearchConfigRepo {
   constructor(private db: SqlDatabase) {}
 
