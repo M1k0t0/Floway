@@ -1,11 +1,14 @@
+import {
+  CODEX_CHILD_RESPONSE_ID_METADATA_KEY,
+  CODEX_DOWNSTREAM_WINDOW_ADVANCED_METADATA_KEY,
+  CODEX_DOWNSTREAM_WINDOW_METADATA_KEY,
+  CODEX_NEXT_WINDOW_GENERATION_METADATA_KEY,
+  CODEX_SESSION_METADATA_KEY,
+  CODEX_WINDOW_METADATA_KEY,
+} from './codex-metadata.ts';
 import type { StatefulResponsesStore } from './items/store.ts';
 import type { ProviderCandidate } from '@floway-dev/provider';
 import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_TURN_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, uuidV7 } from '@floway-dev/provider';
-
-const CODEX_SESSION_METADATA_KEY = 'codex_session_id';
-const CODEX_WINDOW_METADATA_KEY = 'codex_window_id';
-const CODEX_DOWNSTREAM_WINDOW_METADATA_KEY = 'codex_downstream_window_id';
-const CODEX_DOWNSTREAM_WINDOW_ADVANCED_METADATA_KEY = 'codex_downstream_window_advanced';
 
 export const attachCodexSessionHeader = (
   candidate: ProviderCandidate,
@@ -46,23 +49,30 @@ const ensureCodexWindowId = (store: StatefulResponsesStore, sessionId: string, d
   const existingWindowId = codexWindowMetadata(store, sessionId);
   const existingDownstreamWindowId = stringMetadata(store, CODEX_DOWNSTREAM_WINDOW_METADATA_KEY);
   const downstreamWindowAlreadyAdvanced = store.getSnapshotMetadata(CODEX_DOWNSTREAM_WINDOW_ADVANCED_METADATA_KEY) === true;
+  const forkedFromLoadedSnapshot = loadedStringMetadata(store, CODEX_CHILD_RESPONSE_ID_METADATA_KEY) !== null;
+  const nextWindowGeneration = loadedNumberMetadata(store, CODEX_NEXT_WINDOW_GENERATION_METADATA_KEY);
 
   if (downstreamWindowId !== null) {
-    if (existingWindowId !== null && existingDownstreamWindowId === downstreamWindowId) return existingWindowId;
+    if (!forkedFromLoadedSnapshot && existingWindowId !== null && existingDownstreamWindowId === downstreamWindowId) return existingWindowId;
     if (existingWindowId !== null && downstreamWindowAlreadyAdvanced) {
       store.setSnapshotMetadata(CODEX_DOWNSTREAM_WINDOW_METADATA_KEY, downstreamWindowId);
       store.setSnapshotMetadata(CODEX_DOWNSTREAM_WINDOW_ADVANCED_METADATA_KEY, false);
       return existingWindowId;
     }
-    const existingGeneration = existingWindowId === null ? null : codexWindowGeneration(existingWindowId, sessionId);
-    const windowId = formatCodexWindowId(sessionId, existingGeneration === null ? 0 : existingGeneration + 1);
+    const windowId = nextCodexWindowId(sessionId, existingWindowId, nextWindowGeneration);
     store.setSnapshotMetadata(CODEX_WINDOW_METADATA_KEY, windowId);
     store.setSnapshotMetadata(CODEX_DOWNSTREAM_WINDOW_METADATA_KEY, downstreamWindowId);
     store.setSnapshotMetadata(CODEX_DOWNSTREAM_WINDOW_ADVANCED_METADATA_KEY, false);
     return windowId;
   }
 
-  if (existingWindowId !== null) return existingWindowId;
+  if (existingWindowId !== null) {
+    if (!forkedFromLoadedSnapshot) return existingWindowId;
+    const windowId = nextCodexWindowId(sessionId, existingWindowId, nextWindowGeneration);
+    store.setSnapshotMetadata(CODEX_WINDOW_METADATA_KEY, windowId);
+    store.setSnapshotMetadata(CODEX_DOWNSTREAM_WINDOW_ADVANCED_METADATA_KEY, false);
+    return windowId;
+  }
   const windowId = formatCodexWindowId(sessionId, 0);
   store.setSnapshotMetadata(CODEX_WINDOW_METADATA_KEY, windowId);
   store.setSnapshotMetadata(CODEX_DOWNSTREAM_WINDOW_ADVANCED_METADATA_KEY, false);
@@ -87,12 +97,33 @@ export const advanceCodexSnapshotWindowGeneration = (store: StatefulResponsesSto
   if (downstreamWindowId !== null) store.setSnapshotMetadata(CODEX_DOWNSTREAM_WINDOW_ADVANCED_METADATA_KEY, true);
 };
 
+export const markCodexSnapshotContinued = (store: StatefulResponsesStore, childResponseId: string): void => {
+  const sessionId = stringMetadata(store, CODEX_SESSION_METADATA_KEY);
+  if (sessionId === null) return;
+  const windowId = stringMetadata(store, CODEX_WINDOW_METADATA_KEY);
+  const childGeneration = windowId === null ? null : codexWindowGeneration(windowId, sessionId);
+  const existingNextGeneration = loadedNumberMetadata(store, CODEX_NEXT_WINDOW_GENERATION_METADATA_KEY);
+  store.setLoadedSnapshotMetadata(CODEX_CHILD_RESPONSE_ID_METADATA_KEY, childResponseId);
+  if (childGeneration !== null || existingNextGeneration !== null) {
+    store.setLoadedSnapshotMetadata(
+      CODEX_NEXT_WINDOW_GENERATION_METADATA_KEY,
+      Math.max(existingNextGeneration ?? 0, childGeneration === null ? 0 : childGeneration + 1),
+    );
+  }
+};
+
 const codexWindowMetadata = (store: StatefulResponsesStore, sessionId: string): string | null => {
   const value = stringMetadata(store, CODEX_WINDOW_METADATA_KEY);
   return value !== null && codexWindowGeneration(value, sessionId) !== null ? value : null;
 };
 
 const formatCodexWindowId = (sessionId: string, generation: number): string => `${sessionId}:${generation}`;
+
+const nextCodexWindowId = (sessionId: string, existingWindowId: string | null, minimumGeneration: number | null): string => {
+  const existingGeneration = existingWindowId === null ? null : codexWindowGeneration(existingWindowId, sessionId);
+  const nextGeneration = existingGeneration === null ? 0 : existingGeneration + 1;
+  return formatCodexWindowId(sessionId, Math.max(nextGeneration, minimumGeneration ?? 0));
+};
 
 const advanceWindowId = (windowId: string): string | null => {
   const match = /^(.*):(0|[1-9]\d*)$/.exec(windowId);
@@ -115,6 +146,16 @@ const codexWindowGeneration = (windowId: string, sessionId: string): number | nu
 const stringMetadata = (store: StatefulResponsesStore, key: string): string | null => {
   const value = store.getSnapshotMetadata(key);
   return typeof value === 'string' && value.length > 0 ? value : null;
+};
+
+const loadedStringMetadata = (store: StatefulResponsesStore, key: string): string | null => {
+  const value = store.getLoadedSnapshotMetadata(key);
+  return typeof value === 'string' && value.length > 0 ? value : null;
+};
+
+const loadedNumberMetadata = (store: StatefulResponsesStore, key: string): number | null => {
+  const value = store.getLoadedSnapshotMetadata(key);
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 };
 
 const trimHeader = (headers: Headers, name: string): string | null => {

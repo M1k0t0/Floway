@@ -1,4 +1,4 @@
-import { advanceCodexSnapshotWindowGeneration, attachCodexSessionHeader } from './codex-session.ts';
+import { advanceCodexSnapshotWindowGeneration, attachCodexSessionHeader, markCodexSnapshotContinued } from './codex-session.ts';
 import { responsesInterceptors } from './interceptors/index.ts';
 import type { ResponsesAttemptResult, ResponsesInvocation } from './interceptors/types.ts';
 import { createStoredResponseId } from './items/format.ts';
@@ -180,10 +180,11 @@ export const responsesAttempt = {
 const codexBeforeCommitSnapshot = (
   candidate: ProviderCandidate,
   store: StatefulResponsesStore,
-): ((mode: ResponsesSnapshotMode) => void) | undefined =>
+): ((mode: ResponsesSnapshotMode, responseId: string) => void) | undefined =>
   candidate.provider.providerKind === 'codex'
-    ? mode => {
+    ? (mode, responseId) => {
       if (mode === 'replace') advanceCodexSnapshotWindowGeneration(store);
+      markCodexSnapshotContinued(store, responseId);
     }
     : undefined;
 

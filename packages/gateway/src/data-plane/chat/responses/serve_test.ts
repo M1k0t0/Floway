@@ -322,6 +322,86 @@ test('generate prefers caller-supplied Codex session id before previous_response
   assertEquals(turn3Snapshot?.metadata.codex_downstream_window_id, 'downstream-window-b');
 });
 
+test('generate advances Codex window generation when a standard Responses client forks from an old snapshot', async () => {
+  installRepo();
+  let turn = 0;
+  const sessionIds: string[] = [];
+  const windowIds: string[] = [];
+  const callResponses = vi.fn(async (_model, _body, _signal, opts): Promise<ProviderStreamResult<ResponsesStreamEvent>> => {
+    const sessionId = opts?.headers.get(FLOWAY_CODEX_SESSION_ID_HEADER);
+    if (sessionId === null) throw new Error('expected internal Codex session id');
+    const windowId = opts?.headers.get(FLOWAY_CODEX_WINDOW_ID_HEADER);
+    if (windowId === null) throw new Error('expected internal Codex window id');
+    sessionIds.push(sessionId);
+    windowIds.push(windowId);
+    turn += 1;
+    return {
+      ok: true,
+      events: makeProtocolFrames([{
+        type: 'response.completed',
+        sequence_number: 0,
+        response: makeResponsesResult(`resp_upstream_${turn}`),
+      }]),
+      modelKey: 'test-model-key',
+      headers: new Headers(),
+    };
+  });
+
+  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
+  const turn1 = await responsesServe.generate({
+    payload: makePayload({ input: [{ type: 'message', role: 'user', content: 'first turn' }] }),
+    ctx: makeGatewayCtx(),
+    store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers(),
+  });
+  if (turn1.type !== 'events') throw new Error('turn 1: expected events');
+  const turn1Events = await collectEvents(turn1.events);
+  const turn1ResponseId = (turn1Events.find(e => e.type === 'response.completed') as Extract<ResponsesStreamEvent, { type: 'response.completed' }>).response.id;
+
+  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
+  const turn2 = await responsesServe.generate({
+    payload: makePayload({
+      previous_response_id: turn1ResponseId,
+      input: [{ type: 'message', role: 'user', content: 'second turn' }],
+    }),
+    ctx: makeGatewayCtx(),
+    store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers(),
+  });
+  if (turn2.type !== 'events') throw new Error('turn 2: expected events');
+  await collectEvents(turn2.events);
+
+  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
+  const fork1 = await responsesServe.generate({
+    payload: makePayload({
+      previous_response_id: turn1ResponseId,
+      input: [{ type: 'message', role: 'user', content: 'first fork' }],
+    }),
+    ctx: makeGatewayCtx(),
+    store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers(),
+  });
+  if (fork1.type !== 'events') throw new Error('fork 1: expected events');
+  await collectEvents(fork1.events);
+
+  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
+  const fork2 = await responsesServe.generate({
+    payload: makePayload({
+      previous_response_id: turn1ResponseId,
+      input: [{ type: 'message', role: 'user', content: 'second fork' }],
+    }),
+    ctx: makeGatewayCtx(),
+    store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers(),
+  });
+  if (fork2.type !== 'events') throw new Error('fork 2: expected events');
+  await collectEvents(fork2.events);
+
+  assertEquals(new Set(sessionIds).size, 1);
+  const sessionId = sessionIds[0];
+  assertEquals(windowIds, [`${sessionId}:0`, `${sessionId}:0`, `${sessionId}:1`, `${sessionId}:2`]);
+});
+
 test('generate advances Codex window generation after compaction replaces the snapshot', async () => {
   const repo = installRepo();
   let turn = 0;
