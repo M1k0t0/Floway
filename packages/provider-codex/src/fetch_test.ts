@@ -473,9 +473,13 @@ describe('callCodexResponses — upstream classification', () => {
     });
 
     const headers = new Headers((fetchSpy.mock.calls[0][1] as RequestInit).headers);
-    expect(headers.get('session-id')).toMatch(UUID_V7_RE);
-    expect(headers.get('thread-id')).toBe(headers.get('session-id'));
+    const sessionId = headers.get('session-id');
+    expect(sessionId).toMatch(UUID_V7_RE);
+    expect(headers.get('thread-id')).toBe(sessionId);
     expect(headers.get('session_id')).toBeNull();
+    expect(headers.get('x-codex-window-id')).toBe(`${sessionId}:0`);
+    const turnMetadata = JSON.parse(headers.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
+    expect(turnMetadata.window_id).toBe(`${sessionId}:0`);
   });
 
   test('401 token_invalidated → persistTerminalState session_terminated, return 503', async () => {
