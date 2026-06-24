@@ -1,5 +1,6 @@
 import type { Context } from 'hono';
-import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER } from '@floway-dev/provider';
+
+import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_TURN_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER } from '@floway-dev/provider';
 
 // Headers stripped from the inbound request before the data plane threads
 // the bag down to the provider boundary. Four groups, one deny-list:
@@ -64,6 +65,7 @@ const SCRUBBED_INBOUND_HEADER_NAMES = [
   'true-client-ip',
   'upgrade',
   FLOWAY_CODEX_SESSION_ID_HEADER,
+  FLOWAY_CODEX_TURN_ID_HEADER,
   FLOWAY_CODEX_WINDOW_ID_HEADER,
   'x-api-key',
   'x-client-ip',
