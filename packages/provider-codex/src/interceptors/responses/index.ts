@@ -11,8 +11,7 @@ import type { ProviderResponsesResult } from '@floway-dev/provider';
 
 // Order rationale: none of the three interceptors below read or write a field
 // the others touch, so order is positional only. inject-session-id last is
-// conventional but not load-bearing — it hashes only `instructions + first
-// user-message text`, neither of which is mutated by the other two.
+// conventional but not load-bearing.
 //
 // Codex interceptors are pure payload/header mutators, so the chain's only
 // terminal — the streaming `generate` + non-streaming `compact` dispatch —

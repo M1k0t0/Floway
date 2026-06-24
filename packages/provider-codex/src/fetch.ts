@@ -8,6 +8,7 @@ import {
   CODEX_RESPONSES_PATH,
   CODEX_USER_AGENT,
 } from './constants.ts';
+import { sha256Uuid, uuidV7 } from './ids.ts';
 import {
   getCodexQuota,
   isCodexRateLimited,
@@ -111,6 +112,7 @@ interface CodexRequestIdentity {
   installationId: string;
   sessionId: string;
   threadId: string;
+  turnId: string;
   windowId: string;
 }
 
@@ -120,16 +122,30 @@ const trimHeader = (headers: Headers, name: string): string | null => {
 };
 
 const buildCodexRequestIdentity = async (opts: CodexBackendCallBase): Promise<CodexRequestIdentity> => {
-  const sessionId = trimHeader(opts.headers, 'session-id') ?? trimHeader(opts.headers, 'session_id') ?? crypto.randomUUID();
+  const sessionId = trimHeader(opts.headers, 'session-id') ?? trimHeader(opts.headers, 'session_id') ?? uuidV7();
   const installationId = await sha256Uuid(`codex-installation:${opts.upstreamId}:${opts.account.chatgptAccountId}`);
-  const windowId = await sha256Uuid(`codex-window:${opts.upstreamId}:${opts.account.chatgptAccountId}:${sessionId}`);
-  return { installationId, sessionId, threadId: sessionId, windowId };
+  const turnId = uuidV7();
+  const windowId = uuidV7();
+  return { installationId, sessionId, threadId: sessionId, turnId, windowId };
 };
+
+const buildCodexTurnMetadata = (identity: CodexRequestIdentity): Record<string, string> => ({
+  installation_id: identity.installationId,
+  session_id: identity.sessionId,
+  thread_id: identity.threadId,
+  turn_id: identity.turnId,
+  window_id: identity.windowId,
+  request_kind: 'turn',
+});
+
+const buildCodexTurnMetadataJson = (identity: CodexRequestIdentity): string =>
+  JSON.stringify(buildCodexTurnMetadata(identity));
 
 const buildCodexResponsesBody = (
   opts: CallCodexResponsesOptions,
   identity: CodexRequestIdentity,
 ): Record<string, unknown> => {
+  const turnMetadataJson = buildCodexTurnMetadataJson(identity);
   const body: Record<string, unknown> = {
     ...(opts.body as unknown as Record<string, unknown>),
     model: opts.model.id,
@@ -137,6 +153,11 @@ const buildCodexResponsesBody = (
     stream: true,
     client_metadata: {
       'x-codex-installation-id': identity.installationId,
+      session_id: identity.sessionId,
+      thread_id: identity.threadId,
+      turn_id: identity.turnId,
+      'x-codex-window-id': identity.windowId,
+      'x-codex-turn-metadata': turnMetadataJson,
     },
   };
   if (body.prompt_cache_key === undefined) body.prompt_cache_key = identity.threadId;
@@ -159,6 +180,7 @@ const dispatchCodexHttpCall = async (
   body: Record<string, unknown>,
   identity: CodexRequestIdentity,
 ): Promise<Response> => {
+  const turnMetadataJson = buildCodexTurnMetadataJson(identity);
   const headers = new Headers();
   headers.set('authorization', `Bearer ${accessToken}`);
   headers.set('chatgpt-account-id', opts.account.chatgptAccountId);
@@ -171,12 +193,7 @@ const dispatchCodexHttpCall = async (
   headers.set('version', CODEX_CLI_VERSION);
   headers.set('x-client-request-id', identity.threadId);
   headers.set('x-codex-window-id', identity.windowId);
-  headers.set('x-codex-turn-metadata', JSON.stringify({
-    installation_id: identity.installationId,
-    session_id: identity.sessionId,
-    thread_id: identity.threadId,
-    window_id: identity.windowId,
-  }));
+  headers.set('x-codex-turn-metadata', turnMetadataJson);
 
   const response = await opts.call.fetcher(`${CODEX_BACKEND_BASE}${path}`, {
     method: 'POST',
@@ -301,16 +318,6 @@ const parseUpstreamError = (rawText: string): { code: string | null; message: st
   } catch {
     return { code: null, message: rawText.slice(0, 256) };
   }
-};
-
-// Format the SHA-256 hex digest as a UUIDv4-shaped opaque identifier. The
-// upstream treats these values opaquely, but UUID shape keeps logs and tools
-// that validate ids happy.
-const sha256Uuid = async (input: string): Promise<string> => {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
-  const hex = Array.from(new Uint8Array(buf), b => b.toString(16).padStart(2, '0')).join('');
-  const variantNibble = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16);
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variantNibble}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 };
 
 const synthetic503 = (message: string): Response => new Response(JSON.stringify({ error: { type: 'codex_upstream_unavailable', message } }), {
