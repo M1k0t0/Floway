@@ -4,7 +4,7 @@ import { CODEX_CLI_VERSION, CODEX_ORIGINATOR, CODEX_USER_AGENT } from './constan
 import { callCodexResponses, callCodexResponsesCompact, type CodexCallEffects } from './fetch.ts';
 import type { CodexAccessTokenEntry, CodexAccountCredential, CodexQuotaSnapshotEntry, CodexUpstreamState } from './state.ts';
 import type { ResponsesResult } from '@floway-dev/protocols/responses';
-import { FLOWAY_CODEX_SESSION_ID_HEADER, initProviderRepo, type Fetcher, type UpstreamModel, type UpstreamRecord } from '@floway-dev/provider';
+import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, initProviderRepo, type Fetcher, type UpstreamModel, type UpstreamRecord } from '@floway-dev/provider';
 import { noopUpstreamCallOptions } from '@floway-dev/test-utils';
 
 const makeEffects = (): CodexCallEffects => ({
@@ -245,7 +245,7 @@ describe('callCodexResponses — upstream classification', () => {
     expect(headers.get('x-client-request-id')).toBe('downstream-session');
     expect(headers.get('thread-id')).toBe('downstream-session');
     expect(headers.get('x-codex-beta-features')).toBeNull();
-    expect(headers.get('x-codex-window-id')).toMatch(UUID_V7_RE);
+    expect(headers.get('x-codex-window-id')).toBe('downstream-session:0');
     expect(headers.get('x-codex-window-id')).not.toBe('downstream-window');
     const turnMetadata = JSON.parse(headers.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
     expect(turnMetadata).toEqual({
@@ -274,7 +274,7 @@ describe('callCodexResponses — upstream classification', () => {
     });
   });
 
-  test('synthesized Codex identity keeps supplied session scope stable while rotating window and turn ids', async () => {
+  test('synthesized Codex identity keeps supplied session and fallback window stable while rotating turn ids', async () => {
     seedFreshAccessToken();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => sseResponse());
     const request = {
@@ -290,9 +290,8 @@ describe('callCodexResponses — upstream classification', () => {
 
     const firstHeaders = new Headers((fetchSpy.mock.calls[0][1] as RequestInit).headers);
     const secondHeaders = new Headers((fetchSpy.mock.calls[1][1] as RequestInit).headers);
-    expect(firstHeaders.get('x-codex-window-id')).toMatch(UUID_V7_RE);
-    expect(secondHeaders.get('x-codex-window-id')).toMatch(UUID_V7_RE);
-    expect(firstHeaders.get('x-codex-window-id')).not.toBe(secondHeaders.get('x-codex-window-id'));
+    expect(firstHeaders.get('x-codex-window-id')).toBe('stable-session:0');
+    expect(secondHeaders.get('x-codex-window-id')).toBe('stable-session:0');
     expect(firstHeaders.get('x-codex-turn-metadata')).not.toBe(secondHeaders.get('x-codex-turn-metadata'));
     expect(firstHeaders.get('x-client-request-id')).toBe('stable-session');
     expect(secondHeaders.get('x-client-request-id')).toBe('stable-session');
@@ -303,22 +302,26 @@ describe('callCodexResponses — upstream classification', () => {
     expect(secondMetadata.session_id).toBe('stable-session');
     expect(firstMetadata.thread_id).toBe('stable-session');
     expect(secondMetadata.thread_id).toBe('stable-session');
-    expect(firstMetadata.window_id).not.toBe(secondMetadata.window_id);
+    expect(firstMetadata.window_id).toBe('stable-session:0');
+    expect(secondMetadata.window_id).toBe('stable-session:0');
     expect(firstMetadata.turn_id).toMatch(UUID_V7_RE);
     expect(secondMetadata.turn_id).toMatch(UUID_V7_RE);
     expect(firstMetadata.turn_id).not.toBe(secondMetadata.turn_id);
   });
 
-  test('prefers Floway internal session scope over downstream session headers', async () => {
+  test('prefers Floway internal session and window scope over downstream headers', async () => {
     seedFreshAccessToken();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
+    const internalWindowId = 'floway-internal-session:1';
     await callCodexResponses({
       upstreamId, account: activeAccount, model,
       body: { input: [], stream: true },
       headers: new Headers({
         [FLOWAY_CODEX_SESSION_ID_HEADER]: 'floway-internal-session',
+        [FLOWAY_CODEX_WINDOW_ID_HEADER]: internalWindowId,
         'session-id': 'downstream-session',
         session_id: 'alias-session',
+        'x-codex-window-id': 'downstream-window',
       }),
       effects: makeEffects(),
       call: noopUpstreamCallOptions(),
@@ -328,9 +331,17 @@ describe('callCodexResponses — upstream classification', () => {
     expect(headers.get('session-id')).toBe('floway-internal-session');
     expect(headers.get('thread-id')).toBe('floway-internal-session');
     expect(headers.get('x-client-request-id')).toBe('floway-internal-session');
+    expect(headers.get('x-codex-window-id')).toBe(internalWindowId);
     expect(headers.get(FLOWAY_CODEX_SESSION_ID_HEADER)).toBeNull();
+    expect(headers.get(FLOWAY_CODEX_WINDOW_ID_HEADER)).toBeNull();
+    const turnMetadata = JSON.parse(headers.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
+    expect(turnMetadata.window_id).toBe(internalWindowId);
     const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string) as Record<string, unknown>;
     expect(body.prompt_cache_key).toBe('floway-internal-session');
+    expect(body.client_metadata).toMatchObject({
+      'x-codex-window-id': internalWindowId,
+      'x-codex-turn-metadata': headers.get('x-codex-turn-metadata'),
+    });
   });
 
   test('different sessions produce different synthesized window and turn metadata', async () => {
@@ -361,8 +372,8 @@ describe('callCodexResponses — upstream classification', () => {
     expect(firstMetadata.installation_id).toBe(secondMetadata.installation_id);
     expect(firstMetadata.session_id).toBe('session-a');
     expect(secondMetadata.session_id).toBe('session-b');
-    expect(firstMetadata.window_id).toMatch(UUID_V7_RE);
-    expect(secondMetadata.window_id).toMatch(UUID_V7_RE);
+    expect(firstMetadata.window_id).toBe('session-a:0');
+    expect(secondMetadata.window_id).toBe('session-b:0');
     expect(firstMetadata.turn_id).toMatch(UUID_V7_RE);
     expect(secondMetadata.turn_id).toMatch(UUID_V7_RE);
     expect(firstMetadata.turn_id).not.toBe(secondMetadata.turn_id);

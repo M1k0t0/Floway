@@ -18,7 +18,7 @@ import {
 import type { CodexAccountCredential } from './state.ts';
 import type { ResponsesCompactPayload, ResponsesPayload, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 import { parseResponsesStream } from '@floway-dev/protocols/responses';
-import { FLOWAY_CODEX_SESSION_ID_HEADER, type ProviderStreamResult, streamingProviderCall, type UpstreamCallOptions, type UpstreamModel, uuidV7 } from '@floway-dev/provider';
+import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, type ProviderStreamResult, streamingProviderCall, type UpstreamCallOptions, type UpstreamModel, uuidV7 } from '@floway-dev/provider';
 
 // Pre-tagging shape used by the unary compact backend call; the codex provider
 // terminal re-tags it onto the unified `ProviderResponsesResult` with
@@ -128,7 +128,7 @@ const buildCodexRequestIdentity = async (opts: CodexBackendCallBase): Promise<Co
     ?? uuidV7();
   const installationId = await sha256Uuid(`codex-installation:${opts.upstreamId}:${opts.account.chatgptAccountId}`);
   const turnId = uuidV7();
-  const windowId = uuidV7();
+  const windowId = trimHeader(opts.headers, FLOWAY_CODEX_WINDOW_ID_HEADER) ?? `${sessionId}:0`;
   return { installationId, sessionId, threadId: sessionId, turnId, windowId };
 };
 

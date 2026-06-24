@@ -108,4 +108,4 @@ export {
 
 export { COMPACTION_TRIGGER, compactionResponse } from './compaction.ts';
 export { uuidV7 } from './ids.ts';
-export { FLOWAY_CODEX_SESSION_ID_HEADER } from './internal-headers.ts';
+export { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER } from './internal-headers.ts';
