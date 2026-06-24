@@ -45,12 +45,12 @@ export const CODEX_RESPONSES_COMPACT_PATH = '/codex/responses/compact';
 export const CODEX_MODELS_PATH = '/codex/models';
 
 // codex_cli_rs version we impersonate on the data plane. Bumped against the
-// latest tag at https://github.com/openai/codex/releases — newer entries in
+// latest stable release at https://github.com/openai/codex/releases — newer entries in
 // /codex/models gate themselves behind a `minimal_client_version` (e.g.
 // gpt-5.5 needs 0.124.0+), so a stale value here silently truncates the model
 // list. The same value flows into both the `?client_version=` query param and
 // the User-Agent so the upstream sees a self-consistent client.
-export const CODEX_CLI_VERSION = '0.137.0';
+export const CODEX_CLI_VERSION = '0.142.0';
 
 // Shared official Codex data-plane identity for /codex/models and
 // /codex/responses. The User-Agent intentionally includes Codex's normal

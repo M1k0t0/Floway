@@ -1,6 +1,6 @@
+import { advanceCodexSnapshotWindowGeneration, attachCodexSessionHeader } from './codex-session.ts';
 import { responsesInterceptors } from './interceptors/index.ts';
 import type { ResponsesAttemptResult, ResponsesInvocation } from './interceptors/types.ts';
-import { attachCodexSessionHeader } from './codex-session.ts';
 import { createStoredResponseId } from './items/format.ts';
 import { normalizeAssistantInputText } from './items/normalize-assistant-content.ts';
 import { drainAsync, syntheticEventsFromResult, wrapResponsesOutputForStorage } from './items/output.ts';
@@ -92,6 +92,7 @@ export const responsesAttempt = {
         snapshotMode,
         targetApi: candidate.targetApi,
         responseId,
+        beforeCommitSnapshot: codexBeforeCommitSnapshot(candidate, snapshotMode, store),
       }),
       chainResult.modelIdentity,
       {
@@ -132,6 +133,7 @@ export const responsesAttempt = {
       snapshotMode: 'replace',
       targetApi: 'responses',
       responseId,
+      beforeCommitSnapshot: codexBeforeCommitSnapshot(candidate, 'replace', store),
     }));
     return {
       type: 'result',
@@ -141,6 +143,15 @@ export const responsesAttempt = {
     };
   },
 };
+
+const codexBeforeCommitSnapshot = (
+  candidate: ProviderCandidate,
+  snapshotMode: ResponsesSnapshotMode,
+  store: StatefulResponsesStore,
+): (() => void) | undefined =>
+  candidate.binding.providerKind === 'codex' && snapshotMode === 'replace'
+    ? () => advanceCodexSnapshotWindowGeneration(store)
+    : undefined;
 
 type RewriteOutcome =
   | RewrittenResponsesPayload

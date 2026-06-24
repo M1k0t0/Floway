@@ -32,9 +32,10 @@ export const wrapResponsesOutputForStorage = async function* (
     readonly snapshotMode: ResponsesSnapshotMode;
     readonly targetApi: ChatTargetApi;
     readonly responseId: string;
+    readonly beforeCommitSnapshot?: () => void;
   },
 ): AsyncGenerator<ProtocolFrame<ResponsesStreamEvent>> {
-  const { store, upstream, snapshotMode, targetApi, responseId } = args;
+  const { store, upstream, snapshotMode, targetApi, responseId, beforeCommitSnapshot } = args;
   const upstreamToStored = new Map<string, string>();
 
   const idMapper = (upstreamId: string, itemType: string): string => {
@@ -153,6 +154,7 @@ export const wrapResponsesOutputForStorage = async function* (
       // ordering matches a synchronous emit.
       if (snapshotMode !== 'none') {
         try {
+          beforeCommitSnapshot?.();
           await store.commitSnapshot(responseId, snapshotMode);
         } catch (error) {
           console.error('Failed to persist stored Responses snapshot:', error);

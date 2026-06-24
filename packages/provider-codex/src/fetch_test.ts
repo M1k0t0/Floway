@@ -247,7 +247,8 @@ describe('callCodexResponses — upstream classification', () => {
     expect(headers.get('x-codex-beta-features')).toBeNull();
     expect(headers.get('x-codex-window-id')).toBe('downstream-session:0');
     expect(headers.get('x-codex-window-id')).not.toBe('downstream-window');
-    const turnMetadata = JSON.parse(headers.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
+    const turnMetadataJson = headers.get('x-codex-turn-metadata');
+    const turnMetadata = JSON.parse(turnMetadataJson ?? 'null') as Record<string, unknown>;
     expect(turnMetadata).toEqual({
       installation_id: expect.stringMatching(UUID_V4_RE),
       session_id: 'downstream-session',
@@ -266,11 +267,11 @@ describe('callCodexResponses — upstream classification', () => {
     expect(body.prompt_cache_key).toBe('downstream-session');
     expect(body.client_metadata).toEqual({
       'x-codex-installation-id': turnMetadata.installation_id,
-      session_id: 'downstream-session',
-      thread_id: 'downstream-session',
+      session_id: turnMetadata.session_id,
+      thread_id: turnMetadata.thread_id,
+      'x-codex-window-id': turnMetadata.window_id,
       turn_id: turnMetadata.turn_id,
-      'x-codex-window-id': headers.get('x-codex-window-id'),
-      'x-codex-turn-metadata': headers.get('x-codex-turn-metadata'),
+      'x-codex-turn-metadata': turnMetadataJson,
     });
   });
 
@@ -334,13 +335,18 @@ describe('callCodexResponses — upstream classification', () => {
     expect(headers.get('x-codex-window-id')).toBe(internalWindowId);
     expect(headers.get(FLOWAY_CODEX_SESSION_ID_HEADER)).toBeNull();
     expect(headers.get(FLOWAY_CODEX_WINDOW_ID_HEADER)).toBeNull();
-    const turnMetadata = JSON.parse(headers.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
+    const turnMetadataJson = headers.get('x-codex-turn-metadata');
+    const turnMetadata = JSON.parse(turnMetadataJson ?? 'null') as Record<string, unknown>;
     expect(turnMetadata.window_id).toBe(internalWindowId);
     const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string) as Record<string, unknown>;
     expect(body.prompt_cache_key).toBe('floway-internal-session');
-    expect(body.client_metadata).toMatchObject({
-      'x-codex-window-id': internalWindowId,
-      'x-codex-turn-metadata': headers.get('x-codex-turn-metadata'),
+    expect(body.client_metadata).toEqual({
+      'x-codex-installation-id': turnMetadata.installation_id,
+      session_id: turnMetadata.session_id,
+      thread_id: turnMetadata.thread_id,
+      'x-codex-window-id': turnMetadata.window_id,
+      turn_id: turnMetadata.turn_id,
+      'x-codex-turn-metadata': turnMetadataJson,
     });
   });
 

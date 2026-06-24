@@ -321,6 +321,86 @@ test('generate prefers caller-supplied Codex session id before previous_response
   assertEquals(turn3Snapshot?.metadata.codex_downstream_window_id, 'downstream-window-b');
 });
 
+test('generate advances Codex window generation after compaction replaces the snapshot', async () => {
+  const repo = installRepo();
+  let turn = 0;
+  const windowIds: string[] = [];
+  const callResponses = vi.fn(async (_model, body, _signal, opts): Promise<ProviderStreamResult<ResponsesStreamEvent>> => {
+    const sessionId = opts?.headers.get(FLOWAY_CODEX_SESSION_ID_HEADER);
+    assertEquals(sessionId, 'codex-session');
+    const windowId = opts?.headers.get(FLOWAY_CODEX_WINDOW_ID_HEADER);
+    if (windowId === null) throw new Error('expected internal Codex window id');
+    windowIds.push(windowId);
+    turn += 1;
+    const input = (body as ResponsesPayload).input;
+    const isCompaction = Array.isArray(input) && input.some(item => item.type === 'compaction_trigger');
+    return {
+      ok: true,
+      events: makeProtocolFrames([{
+        type: 'response.completed',
+        sequence_number: 0,
+        response: {
+          ...makeResponsesResult(`resp_upstream_${turn}`),
+          output: isCompaction
+            ? [{ type: 'compaction', id: `upstream_cmp_${turn}`, encrypted_content: 'ENC' }] as unknown as ResponsesResult['output']
+            : makeResponsesResult(`resp_upstream_${turn}`).output,
+        },
+      }]),
+      modelKey: 'test-model-key',
+      headers: new Headers(),
+    };
+  });
+
+  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
+  const turn1 = await responsesServe.generate({
+    payload: makePayload({ input: [{ type: 'message', role: 'user', content: 'first turn' }] }),
+    ctx: makeGatewayCtx(),
+    store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers({
+      'session-id': 'codex-session',
+      'x-codex-window-id': 'codex-session:0',
+    }),
+  });
+  if (turn1.type !== 'events') throw new Error('turn 1: expected events');
+  const turn1Events = await collectEvents(turn1.events);
+  const turn1ResponseId = (turn1Events.find(e => e.type === 'response.completed') as Extract<ResponsesStreamEvent, { type: 'response.completed' }>).response.id;
+
+  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
+  const compactTurn = await responsesServe.generate({
+    payload: makePayload({
+      previous_response_id: turn1ResponseId,
+      input: [{ type: 'compaction_trigger' }],
+    }),
+    ctx: makeGatewayCtx(),
+    store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers({
+      'session-id': 'codex-session',
+      'x-codex-window-id': 'codex-session:0',
+    }),
+  });
+  if (compactTurn.type !== 'events') throw new Error('compact turn: expected events');
+  const compactEvents = await collectEvents(compactTurn.events);
+  const compactResponseId = (compactEvents.find(e => e.type === 'response.completed') as Extract<ResponsesStreamEvent, { type: 'response.completed' }>).response.id;
+  const compactSnapshot = await repo.responsesSnapshots.lookup(API_KEY_ID, compactResponseId);
+  assertEquals(compactSnapshot?.metadata.codex_window_id, 'codex-session:1');
+  assertEquals(compactSnapshot?.metadata.codex_downstream_window_id, 'codex-session:1');
+
+  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
+  const postCompactTurn = await responsesServe.generate({
+    payload: makePayload({
+      previous_response_id: compactResponseId,
+      input: [{ type: 'message', role: 'user', content: 'after compact' }],
+    }),
+    ctx: makeGatewayCtx(),
+    store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers(),
+  });
+  if (postCompactTurn.type !== 'events') throw new Error('post-compact turn: expected events');
+  await collectEvents(postCompactTurn.events);
+
+  assertEquals(windowIds, ['codex-session:0', 'codex-session:0', 'codex-session:1']);
+});
+
 test('generate renders model-missing when no candidates are available', async () => {
   installRepo();
   queueCandidates([]);
