@@ -127,8 +127,6 @@ const makeCandidate = (overrides: {
   };
 };
 
-const UUID_V7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-
 const collectEvents = async (events: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>): Promise<ResponsesStreamEvent[]> => {
   const out: ResponsesStreamEvent[] = [];
   for await (const frame of events) {
@@ -231,14 +229,14 @@ test('generate stops at the first candidate even when it yields an upstream erro
   assertEquals(secondCall.mock.calls.length, 0);
 });
 
-test('generate carries Floway-owned Codex session and window ids across previous_response_id snapshots', async () => {
+test('generate prefers caller-supplied Codex session id before previous_response_id snapshot metadata', async () => {
   const repo = installRepo();
   let turn = 0;
   const sessionIds: string[] = [];
   const windowIds: string[] = [];
   const callResponses = vi.fn(async (_model, _body, _signal, opts): Promise<ProviderStreamResult<ResponsesStreamEvent>> => {
     const sessionId = opts?.headers.get(FLOWAY_CODEX_SESSION_ID_HEADER);
-    if (sessionId === null || !UUID_V7_RE.test(sessionId)) throw new Error(`expected internal Codex session id, got ${sessionId}`);
+    if (sessionId === null) throw new Error('expected internal Codex session id');
     const windowId = opts?.headers.get(FLOWAY_CODEX_WINDOW_ID_HEADER);
     if (windowId === null || !windowId.startsWith(`${sessionId}:`)) throw new Error(`expected internal Codex window id for ${sessionId}, got ${windowId}`);
     if (opts?.headers.get('x-codex-window-id') !== null) throw new Error('expected downstream x-codex-window-id marker to be scrubbed before provider dispatch');
@@ -265,6 +263,7 @@ test('generate carries Floway-owned Codex session and window ids across previous
     headers: new Headers({
       [FLOWAY_CODEX_SESSION_ID_HEADER]: 'forged-downstream-session',
       [FLOWAY_CODEX_WINDOW_ID_HEADER]: 'forged-downstream-window',
+      'session-id': 'caller-session',
       'x-codex-window-id': 'downstream-window-a',
     }),
   });
@@ -272,6 +271,7 @@ test('generate carries Floway-owned Codex session and window ids across previous
   const turn1Events = await collectEvents(turn1.events);
   const turn1ResponseId = (turn1Events.find(e => e.type === 'response.completed') as Extract<ResponsesStreamEvent, { type: 'response.completed' }>).response.id;
   const turn1Snapshot = await repo.responsesSnapshots.lookup(API_KEY_ID, turn1ResponseId);
+  assertEquals(sessionIds[0], 'caller-session');
   assertEquals(turn1Snapshot?.metadata.codex_session_id, sessionIds[0]);
   assertEquals(windowIds[0], `${sessionIds[0]}:0`);
   assertEquals(turn1Snapshot?.metadata.codex_window_id, windowIds[0]);
@@ -306,7 +306,7 @@ test('generate carries Floway-owned Codex session and window ids across previous
     }),
     ctx: makeGatewayCtx(),
     store: createResponsesHttpStore(API_KEY_ID, true),
-    headers: new Headers({ 'x-codex-window-id': 'downstream-window-b' }),
+    headers: new Headers({ 'session-id': 'caller-override', 'x-codex-window-id': 'downstream-window-b' }),
   });
   if (turn3.type !== 'events') throw new Error('turn 3: expected events');
   const turn3Events = await collectEvents(turn3.events);
@@ -314,8 +314,9 @@ test('generate carries Floway-owned Codex session and window ids across previous
   const turn3Snapshot = await repo.responsesSnapshots.lookup(API_KEY_ID, turn3ResponseId);
 
   assertEquals(sessionIds.length, 3);
-  assertEquals(sessionIds[2], sessionIds[0]);
-  assertEquals(windowIds[2], `${sessionIds[0]}:1`);
+  assertEquals(sessionIds[2], 'caller-override');
+  assertEquals(windowIds[2], 'caller-override:0');
+  assertEquals(turn3Snapshot?.metadata.codex_session_id, 'caller-override');
   assertEquals(turn3Snapshot?.metadata.codex_window_id, windowIds[2]);
   assertEquals(turn3Snapshot?.metadata.codex_downstream_window_id, 'downstream-window-b');
 });
@@ -684,6 +685,7 @@ test('generate treats compaction_trigger-bearing input as compaction: snapshot r
     id: 'resp_before_compact',
     apiKeyId: API_KEY_ID,
     itemIds: [priorMessageId],
+    metadata: {},
     createdAt: 1_000,
     refreshedAt: 1_000,
   });

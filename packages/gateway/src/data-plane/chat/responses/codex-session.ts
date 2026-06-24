@@ -1,6 +1,6 @@
 import type { StatefulResponsesStore } from './items/store.ts';
 import type { ProviderCandidate } from '../shared/candidates.ts';
-import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, uuidV7 } from '@floway-dev/provider';
+import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_TURN_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, uuidV7 } from '@floway-dev/provider';
 
 const CODEX_SESSION_METADATA_KEY = 'codex_session_id';
 const CODEX_WINDOW_METADATA_KEY = 'codex_window_id';
@@ -13,23 +13,33 @@ export const attachCodexSessionHeader = (
 ): void => {
   if (candidate.binding.providerKind !== 'codex') {
     headers.delete(FLOWAY_CODEX_SESSION_ID_HEADER);
+    headers.delete(FLOWAY_CODEX_TURN_ID_HEADER);
     headers.delete(FLOWAY_CODEX_WINDOW_ID_HEADER);
     return;
   }
   const downstreamWindowId = trimHeader(headers, 'x-codex-window-id');
+  const downstreamSessionId = trimHeader(headers, 'session-id') ?? trimHeader(headers, 'session_id');
   headers.delete('x-codex-window-id');
-  const sessionId = ensureCodexSessionId(store);
+  const sessionId = ensureCodexSessionId(store, downstreamSessionId);
   headers.set(FLOWAY_CODEX_SESSION_ID_HEADER, sessionId);
+  headers.set(FLOWAY_CODEX_TURN_ID_HEADER, ensureCodexTurnId(headers));
   headers.set(FLOWAY_CODEX_WINDOW_ID_HEADER, ensureCodexWindowId(store, sessionId, downstreamWindowId));
 };
 
-const ensureCodexSessionId = (store: StatefulResponsesStore): string => {
+const ensureCodexSessionId = (store: StatefulResponsesStore, downstreamSessionId: string | null): string => {
+  if (downstreamSessionId !== null) {
+    store.setSnapshotMetadata(CODEX_SESSION_METADATA_KEY, downstreamSessionId);
+    return downstreamSessionId;
+  }
   const existing = store.getSnapshotMetadata(CODEX_SESSION_METADATA_KEY);
   if (typeof existing === 'string' && existing.length > 0) return existing;
   const sessionId = uuidV7();
   store.setSnapshotMetadata(CODEX_SESSION_METADATA_KEY, sessionId);
   return sessionId;
 };
+
+const ensureCodexTurnId = (headers: Headers): string =>
+  trimHeader(headers, FLOWAY_CODEX_TURN_ID_HEADER) ?? uuidV7();
 
 const ensureCodexWindowId = (store: StatefulResponsesStore, sessionId: string, downstreamWindowId: string | null): string => {
   const existingWindowId = codexWindowMetadata(store, sessionId);
@@ -72,6 +82,6 @@ const stringMetadata = (store: StatefulResponsesStore, key: string): string | nu
 };
 
 const trimHeader = (headers: Headers, name: string): string | null => {
-  const value = headers.get(name)?.trim();
-  return value || null;
+  const value = headers.get(name)?.trim() ?? '';
+  return value.length > 0 ? value : null;
 };

@@ -18,7 +18,7 @@ import {
 import type { CodexAccountCredential } from './state.ts';
 import type { ResponsesCompactPayload, ResponsesPayload, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 import { parseResponsesStream } from '@floway-dev/protocols/responses';
-import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, type ProviderCompactionResult, type ProviderStreamResult, streamingProviderCall, uuidV7, type UpstreamCallOptions, type UpstreamModel } from '@floway-dev/provider';
+import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_TURN_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, type ProviderCompactionResult, type ProviderStreamResult, streamingProviderCall, uuidV7, type UpstreamCallOptions, type UpstreamModel } from '@floway-dev/provider';
 
 // Hooks for repo-side state transitions, applied with optimistic concurrency.
 // Refresh-token rotations and terminal-state transitions go through the repo;
@@ -37,6 +37,7 @@ interface CodexBackendCallBase {
   account: CodexAccountCredential;
   model: UpstreamModel;
   headers: Headers;
+  turnMetadata?: CodexTurnMetadataOptions;
   signal?: AbortSignal;
   effects: CodexCallEffects;
   call: UpstreamCallOptions;
@@ -108,9 +109,33 @@ interface CodexRequestIdentity {
   windowId: string;
 }
 
+export interface CodexCompactionTurnMetadata {
+  trigger: 'manual' | 'auto';
+  reason: 'user_requested' | 'context_limit';
+  implementation: 'responses_compact' | 'responses_compaction_v2';
+  phase: 'standalone_turn' | 'mid_turn';
+  strategy: 'memento';
+}
+
+export interface CodexTurnMetadataOptions {
+  requestKind: 'turn' | 'compaction';
+  compaction?: CodexCompactionTurnMetadata;
+}
+
+export const CODEX_RESPONSES_COMPACTION_V2_TURN_METADATA: CodexTurnMetadataOptions = {
+  requestKind: 'compaction',
+  compaction: {
+    trigger: 'manual',
+    reason: 'user_requested',
+    implementation: 'responses_compaction_v2',
+    phase: 'standalone_turn',
+    strategy: 'memento',
+  },
+};
+
 const trimHeader = (headers: Headers, name: string): string | null => {
-  const value = headers.get(name)?.trim();
-  return value || null;
+  const value = headers.get(name)?.trim() ?? '';
+  return value.length > 0 ? value : null;
 };
 
 const buildCodexRequestIdentity = async (opts: CodexBackendCallBase): Promise<CodexRequestIdentity> => {
@@ -119,28 +144,33 @@ const buildCodexRequestIdentity = async (opts: CodexBackendCallBase): Promise<Co
     ?? trimHeader(opts.headers, 'session_id')
     ?? uuidV7();
   const installationId = await sha256Uuid(`codex-installation:${opts.upstreamId}:${opts.account.chatgptAccountId}`);
-  const turnId = uuidV7();
+  const turnId = trimHeader(opts.headers, FLOWAY_CODEX_TURN_ID_HEADER) ?? uuidV7();
   const windowId = trimHeader(opts.headers, FLOWAY_CODEX_WINDOW_ID_HEADER) ?? `${sessionId}:0`;
   return { installationId, sessionId, threadId: sessionId, turnId, windowId };
 };
 
-const buildCodexTurnMetadata = (identity: CodexRequestIdentity): Record<string, string> => ({
-  installation_id: identity.installationId,
-  session_id: identity.sessionId,
-  thread_id: identity.threadId,
-  turn_id: identity.turnId,
-  window_id: identity.windowId,
-  request_kind: 'turn',
-});
+const buildCodexTurnMetadata = (identity: CodexRequestIdentity, options: CodexTurnMetadataOptions): Record<string, unknown> => {
+  const metadata: Record<string, unknown> = {
+    installation_id: identity.installationId,
+    session_id: identity.sessionId,
+    thread_id: identity.threadId,
+    turn_id: identity.turnId,
+    window_id: identity.windowId,
+    request_kind: options.requestKind,
+  };
+  if (options.compaction !== undefined) metadata.compaction = options.compaction;
+  return metadata;
+};
 
-const buildCodexTurnMetadataJson = (identity: CodexRequestIdentity): string =>
-  JSON.stringify(buildCodexTurnMetadata(identity));
+const buildCodexTurnMetadataJson = (identity: CodexRequestIdentity, options: CodexTurnMetadataOptions): string =>
+  JSON.stringify(buildCodexTurnMetadata(identity, options));
 
 const buildCodexResponsesBody = (
   opts: CallCodexResponsesOptions,
   identity: CodexRequestIdentity,
+  metadata: CodexTurnMetadataOptions,
 ): Record<string, unknown> => {
-  const turnMetadataJson = buildCodexTurnMetadataJson(identity);
+  const turnMetadataJson = buildCodexTurnMetadataJson(identity, metadata);
   const body: Record<string, unknown> = {
     ...(opts.body as unknown as Record<string, unknown>),
     model: opts.model.id,
@@ -159,6 +189,12 @@ const buildCodexResponsesBody = (
   return body;
 };
 
+const codexTurnMetadataOptions = (opts: CallCodexResponsesOptions): CodexTurnMetadataOptions =>
+  opts.turnMetadata ?? (containsCompactionTrigger(opts.body.input) ? CODEX_RESPONSES_COMPACTION_V2_TURN_METADATA : { requestKind: 'turn' });
+
+const containsCompactionTrigger = (input: ResponsesPayload['input']): boolean =>
+  Array.isArray(input) && input.some(item => item.type === 'compaction_trigger');
+
 // One upstream round-trip with quota-header persistence and terminal-401
 // classification. The returned Response is what the caller relays:
 //   - 2xx: caller decodes the body (SSE for /responses, JSON for /responses/compact)
@@ -174,8 +210,9 @@ const dispatchCodexHttpCall = async (
   accept: string,
   body: Record<string, unknown>,
   identity: CodexRequestIdentity,
+  metadata: CodexTurnMetadataOptions,
 ): Promise<Response> => {
-  const turnMetadataJson = buildCodexTurnMetadataJson(identity);
+  const turnMetadataJson = buildCodexTurnMetadataJson(identity, metadata);
   const headers = new Headers();
   headers.set('authorization', `Bearer ${accessToken}`);
   headers.set('chatgpt-account-id', opts.account.chatgptAccountId);
@@ -255,13 +292,15 @@ const performStreamingResponsesCall = async (
   alreadyRetried: boolean,
 ): Promise<ProviderStreamResult<ResponsesStreamEvent>> => {
   const identity = await buildCodexRequestIdentity(opts);
+  const metadata = codexTurnMetadataOptions(opts);
   const upstreamFetch = dispatchCodexHttpCall(
     opts,
     accessToken,
     CODEX_RESPONSES_PATH,
     'text/event-stream',
-    buildCodexResponsesBody(opts, identity),
+    buildCodexResponsesBody(opts, identity, metadata),
     identity,
+    metadata,
   ).then(ensureSseContentType);
 
   const result = await streamingProviderCall(upstreamFetch, parseResponsesStream, opts.model.id, opts.signal);
@@ -281,6 +320,7 @@ const performUnaryCompactCall = async (
   alreadyRetried: boolean,
 ): Promise<ProviderCompactionResult> => {
   const identity = await buildCodexRequestIdentity(opts);
+  const metadata = opts.turnMetadata ?? { requestKind: 'compaction' };
   const response = await dispatchCodexHttpCall(
     opts,
     accessToken,
@@ -288,6 +328,7 @@ const performUnaryCompactCall = async (
     'application/json',
     { ...opts.body, model: opts.model.id },
     identity,
+    metadata,
   );
 
   if (response.status === 401 && !alreadyRetried) {
