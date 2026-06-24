@@ -10,7 +10,7 @@ import type { ChatCompletionsStreamEvent } from '@floway-dev/protocols/chat-comp
 import { doneFrame, eventFrame, type ModelEndpoints, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { MessagesStreamEvent } from '@floway-dev/protocols/messages';
 import type { ResponsesPayload, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
-import { type ProviderCandidate, directFetcher, type ProviderResponsesResult, type ProviderStreamResult, type ResponsesAction, type UpstreamCallOptions } from '@floway-dev/provider';
+import { type ProviderCandidate, directFetcher, FLOWAY_CODEX_SESSION_ID_HEADER, type ProviderResponsesResult, type ProviderStreamResult, type ResponsesAction, type UpstreamCallOptions, type UpstreamProviderKind } from '@floway-dev/provider';
 import { assert, assertEquals, stubProvider, stubUpstreamModel } from '@floway-dev/test-utils';
 
 // `enumerateModelCandidates` is the only seam between serve and the
@@ -98,12 +98,14 @@ const makeProtocolFrames = async function* <E>(events: readonly E[]): AsyncGener
 
 const makeCandidate = (overrides: {
   upstream?: string;
+  providerKind?: UpstreamProviderKind;
   endpoints?: ModelEndpoints;
   callResponses?: (model: unknown, body: unknown, action: ResponsesAction, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderResponsesResult>;
   callMessages?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderStreamResult<MessagesStreamEvent>>;
   callChatCompletions?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderStreamResult<ChatCompletionsStreamEvent>>;
 } = {}): ProviderCandidate => {
   const upstream = overrides.upstream ?? 'up_test';
+  const providerKind = overrides.providerKind ?? 'custom';
   const provider = stubProvider({
     callResponses: overrides.callResponses,
     callMessages: overrides.callMessages,
@@ -112,7 +114,7 @@ const makeCandidate = (overrides: {
   return {
     provider: {
       upstream,
-      providerKind: 'custom',
+      providerKind,
       name: upstream,
       disabledPublicModelIds: [],
       modelPrefix: null,
@@ -125,6 +127,8 @@ const makeCandidate = (overrides: {
     fetcher: directFetcher,
   };
 };
+
+const UUID_V7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 const collectEvents = async (events: AsyncIterable<ProtocolFrame<ResponsesStreamEvent>>): Promise<ResponsesStreamEvent[]> => {
   const out: ResponsesStreamEvent[] = [];
@@ -226,6 +230,57 @@ test('generate stops at the first candidate even when it yields an upstream erro
   assertEquals(result.type, 'api-error');
   assertEquals(firstCall.mock.calls.length, 1);
   assertEquals(secondCall.mock.calls.length, 0);
+});
+
+test('generate carries a Floway-owned Codex session id across previous_response_id snapshots', async () => {
+  const repo = installRepo();
+  let turn = 0;
+  const sessionIds: string[] = [];
+  const callResponses = vi.fn(async (_model, _body, _action, _signal, opts): Promise<ProviderResponsesResult> => {
+    const sessionId = opts?.headers.get(FLOWAY_CODEX_SESSION_ID_HEADER);
+    if (sessionId === null || !UUID_V7_RE.test(sessionId)) throw new Error(`expected internal Codex session id, got ${sessionId}`);
+    sessionIds.push(sessionId);
+    turn += 1;
+    return {
+      action: 'generate', ok: true,
+      events: makeProtocolFrames([{
+        type: 'response.completed',
+        sequence_number: 0,
+        response: makeResponsesResult(`resp_upstream_${turn}`),
+      }]),
+      modelKey: 'test-model-key',
+      headers: new Headers(),
+    };
+  });
+
+  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
+  const turn1 = await responsesServe.generate({
+    payload: makePayload({ input: [{ type: 'message', role: 'user', content: 'first turn' }] }),
+    ctx: makeGatewayCtx(),
+    store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers({ [FLOWAY_CODEX_SESSION_ID_HEADER]: 'forged-downstream' }),
+  });
+  if (turn1.type !== 'events') throw new Error('turn 1: expected events');
+  const turn1Events = await collectEvents(turn1.events);
+  const turn1ResponseId = (turn1Events.find(e => e.type === 'response.completed') as Extract<ResponsesStreamEvent, { type: 'response.completed' }>).response.id;
+  const turn1Snapshot = await repo.responsesSnapshots.lookup(API_KEY_ID, turn1ResponseId);
+  assertEquals(turn1Snapshot?.metadata.codex_session_id, sessionIds[0]);
+
+  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
+  const turn2 = await responsesServe.generate({
+    payload: makePayload({
+      previous_response_id: turn1ResponseId,
+      input: [{ type: 'message', role: 'user', content: 'second turn' }],
+    }),
+    ctx: makeGatewayCtx(),
+    store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers(),
+  });
+  if (turn2.type !== 'events') throw new Error('turn 2: expected events');
+  await collectEvents(turn2.events);
+
+  assertEquals(sessionIds.length, 2);
+  assertEquals(sessionIds[1], sessionIds[0]);
 });
 
 test('generate renders model-missing when no candidates are available', async () => {
@@ -399,6 +454,7 @@ test('expandPreviousResponseId prepends snapshot items and strips the previous_r
     id: 'resp_prev',
     apiKeyId: API_KEY_ID,
     itemIds: [previousMessageId],
+    metadata: {},
     createdAt: 1_000,
     refreshedAt: 1_000,
   };
@@ -457,6 +513,7 @@ test('expandPreviousResponseId resolves snapshots from a non-repo-backed store',
     id: 'resp_mem',
     apiKeyId: API_KEY_ID,
     itemIds: [id],
+    metadata: {},
     createdAt: 1_000,
     refreshedAt: 1_000,
   };

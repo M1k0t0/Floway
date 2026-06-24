@@ -1,5 +1,6 @@
 import { responsesInterceptors } from './interceptors/index.ts';
 import type { ResponsesAttemptResult, ResponsesInvocation } from './interceptors/types.ts';
+import { attachCodexSessionHeader } from './codex-session.ts';
 import { createStoredResponseId } from './items/format.ts';
 import { normalizeAssistantInputText } from './items/normalize-assistant-content.ts';
 import { drainAsync, syntheticEventsFromResult, wrapResponsesOutputForStorage } from './items/output.ts';
@@ -221,6 +222,7 @@ const dispatchResponses = async (
   const { candidate, targetApi, store } = invocation;
   switch (targetApi) {
   case 'responses': {
+    attachCodexSessionHeader(candidate, store, invocation.headers);
     const recorder = createUpstreamLatencyRecorder();
     if (invocation.action === 'compact') {
       // The compact wire body drops `stream` and `store` — `store` is a
