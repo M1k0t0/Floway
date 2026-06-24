@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { CODEX_CLI_VERSION, CODEX_ORIGINATOR, CODEX_USER_AGENT } from './constants.ts';
 import { callCodexResponses, type CodexCallEffects } from './fetch.ts';
 import type { CodexAccessTokenEntry, CodexAccountCredential, CodexQuotaSnapshotEntry, CodexUpstreamState } from './state.ts';
-import { FLOWAY_CODEX_SESSION_ID_HEADER, initProviderRepo, type Fetcher, type UpstreamModel, type UpstreamRecord } from '@floway-dev/provider';
+import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, initProviderRepo, type Fetcher, type UpstreamModel, type UpstreamRecord } from '@floway-dev/provider';
 import { noopUpstreamCallOptions } from '@floway-dev/test-utils';
 
 const makeEffects = (): CodexCallEffects => ({
@@ -272,7 +272,7 @@ describe('callCodexResponses — upstream classification', () => {
     });
   });
 
-  test('synthesized Codex identity keeps supplied session scope stable while rotating window and turn ids', async () => {
+  test('synthesized Codex identity keeps supplied session scope stable while rotating fallback window and turn ids', async () => {
     seedFreshAccessToken();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => sseResponse());
     const request = {
@@ -307,16 +307,19 @@ describe('callCodexResponses — upstream classification', () => {
     expect(firstMetadata.turn_id).not.toBe(secondMetadata.turn_id);
   });
 
-  test('prefers Floway internal session scope over downstream session headers', async () => {
+  test('prefers Floway internal session and window scope over downstream headers', async () => {
     seedFreshAccessToken();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
+    const internalWindowId = '019f0000-0000-7000-8000-000000000001';
     await callCodexResponses({
       upstreamId, account: activeAccount, model,
       body: { input: [], stream: true },
       headers: new Headers({
         [FLOWAY_CODEX_SESSION_ID_HEADER]: 'floway-internal-session',
+        [FLOWAY_CODEX_WINDOW_ID_HEADER]: internalWindowId,
         'session-id': 'downstream-session',
         session_id: 'alias-session',
+        'x-codex-window-id': 'downstream-window',
       }),
       effects: makeEffects(),
       call: noopUpstreamCallOptions(),
@@ -326,9 +329,17 @@ describe('callCodexResponses — upstream classification', () => {
     expect(headers.get('session-id')).toBe('floway-internal-session');
     expect(headers.get('thread-id')).toBe('floway-internal-session');
     expect(headers.get('x-client-request-id')).toBe('floway-internal-session');
+    expect(headers.get('x-codex-window-id')).toBe(internalWindowId);
     expect(headers.get(FLOWAY_CODEX_SESSION_ID_HEADER)).toBeNull();
+    expect(headers.get(FLOWAY_CODEX_WINDOW_ID_HEADER)).toBeNull();
+    const turnMetadata = JSON.parse(headers.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
+    expect(turnMetadata.window_id).toBe(internalWindowId);
     const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string) as Record<string, unknown>;
     expect(body.prompt_cache_key).toBe('floway-internal-session');
+    expect(body.client_metadata).toMatchObject({
+      'x-codex-window-id': internalWindowId,
+      'x-codex-turn-metadata': headers.get('x-codex-turn-metadata'),
+    });
   });
 
   test('different sessions produce different synthesized window and turn metadata', async () => {
