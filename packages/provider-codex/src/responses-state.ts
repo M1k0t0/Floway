@@ -11,6 +11,8 @@ export const CODEX_DOWNSTREAM_WINDOW_ADVANCED_METADATA_KEY = 'codex_downstream_w
 export const CODEX_CHILD_RESPONSE_ID_METADATA_KEY = 'codex_child_response_id';
 export const CODEX_NEXT_WINDOW_GENERATION_METADATA_KEY = 'codex_next_window_generation';
 
+const turnIdsBySnapshotState = new WeakMap<ResponsesSnapshotState, string>();
+
 export const prepareCodexResponsesRequest = ({ headers, snapshotState }: ProviderResponsesRequestContext): void => {
   const downstreamWindowId = trimHeader(headers, 'x-codex-window-id');
   const downstreamSessionId = trimHeader(headers, 'session-id') ?? trimHeader(headers, 'session_id');
@@ -21,7 +23,7 @@ export const prepareCodexResponsesRequest = ({ headers, snapshotState }: Provide
 
   const sessionId = ensureCodexSessionId(snapshotState, downstreamSessionId);
   headers.set(FLOWAY_CODEX_SESSION_ID_HEADER, sessionId);
-  headers.set(FLOWAY_CODEX_TURN_ID_HEADER, uuidV7());
+  headers.set(FLOWAY_CODEX_TURN_ID_HEADER, ensureCodexTurnId(snapshotState));
   headers.set(FLOWAY_CODEX_WINDOW_ID_HEADER, ensureCodexWindowId(snapshotState, sessionId, downstreamWindowId));
 };
 
@@ -40,6 +42,14 @@ const ensureCodexSessionId = (state: ResponsesSnapshotState, downstreamSessionId
   const sessionId = uuidV7();
   state.setSnapshotMetadata(CODEX_SESSION_METADATA_KEY, sessionId);
   return sessionId;
+};
+
+const ensureCodexTurnId = (state: ResponsesSnapshotState): string => {
+  const existing = turnIdsBySnapshotState.get(state);
+  if (existing !== undefined) return existing;
+  const turnId = uuidV7();
+  turnIdsBySnapshotState.set(state, turnId);
+  return turnId;
 };
 
 const ensureCodexWindowId = (state: ResponsesSnapshotState, sessionId: string, downstreamWindowId: string | null): string => {

@@ -81,6 +81,25 @@ test('prepareCodexResponsesRequest prefers official downstream session scope and
   });
 });
 
+test('prepareCodexResponsesRequest keeps turn id stable for repeated dispatches in one gateway attempt', () => {
+  const state = new MemoryResponsesSnapshotState({ [CODEX_SESSION_METADATA_KEY]: 'stable-session' });
+  const headers = new Headers({ 'session-id': 'stable-session' });
+
+  prepareCodexResponsesRequest({ headers, snapshotState: state });
+  const firstTurnId = headers.get(FLOWAY_CODEX_TURN_ID_HEADER);
+  assert(firstTurnId !== null && UUID_V7_RE.test(firstTurnId), `expected UUIDv7 turn id, got ${firstTurnId}`);
+
+  headers.set(FLOWAY_CODEX_TURN_ID_HEADER, 'forged-retry-turn');
+  prepareCodexResponsesRequest({ headers, snapshotState: state });
+
+  assertEquals(headers.get(FLOWAY_CODEX_TURN_ID_HEADER), firstTurnId);
+  assertEquals(state.committedSnapshotMetadata(), {
+    [CODEX_SESSION_METADATA_KEY]: 'stable-session',
+    [CODEX_WINDOW_METADATA_KEY]: 'stable-session:0',
+    [CODEX_DOWNSTREAM_WINDOW_ADVANCED_METADATA_KEY]: false,
+  });
+});
+
 test('prepareCodexResponsesRequest advances window generation when a loaded snapshot was already continued', () => {
   const parentMetadata = {
     [CODEX_SESSION_METADATA_KEY]: 'session-a',
