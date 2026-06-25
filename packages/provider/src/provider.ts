@@ -107,6 +107,24 @@ export interface UpstreamCallOptions {
   headers: Headers;
 }
 
+export interface ResponsesSnapshotState {
+  getSnapshotMetadata(name: string): unknown;
+  setSnapshotMetadata(name: string, value: unknown): void;
+  getLoadedSnapshotMetadata(name: string): unknown;
+  setLoadedSnapshotMetadata(name: string, value: unknown): void;
+}
+
+export interface ProviderResponsesRequestContext {
+  readonly headers: Headers;
+  readonly snapshotState: ResponsesSnapshotState;
+}
+
+export interface ProviderResponsesSnapshotCommitContext {
+  readonly snapshotState: ResponsesSnapshotState;
+  readonly snapshotMode: 'append' | 'replace';
+  readonly responseId: string;
+}
+
 export interface ModelProvider {
   // Catalog refresh fetches a single resource and never enters the per-request
   // latency budget, so it takes the per-upstream fetcher directly instead of
@@ -126,6 +144,8 @@ export interface ModelProvider {
   // parsed slice for variant selection (Copilot picks a raw upstream variant
   // before the wire header is filtered down to the Copilot allow-list)
   // re-parse it from `opts.headers.get('anthropic-beta')` themselves.
+  prepareResponsesRequest?(ctx: ProviderResponsesRequestContext): void | Promise<void>;
+  beforeResponsesSnapshotCommit?(ctx: ProviderResponsesSnapshotCommitContext): void | Promise<void>;
   callChatCompletions(model: UpstreamModel, body: Omit<ChatCompletionsPayload, 'model'>, signal: AbortSignal | undefined, opts: UpstreamCallOptions): Promise<ProviderStreamResult<ChatCompletionsStreamEvent>>;
   callResponses(model: UpstreamModel, body: Omit<ResponsesPayload, 'model'>, action: ResponsesAction, signal: AbortSignal | undefined, opts: UpstreamCallOptions): Promise<ProviderResponsesResult>;
   callMessages(model: UpstreamModel, body: Omit<MessagesPayload, 'model'>, signal: AbortSignal | undefined, opts: UpstreamCallOptions): Promise<ProviderStreamResult<MessagesStreamEvent>>;

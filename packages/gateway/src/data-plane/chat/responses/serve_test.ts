@@ -10,7 +10,7 @@ import type { ChatCompletionsStreamEvent } from '@floway-dev/protocols/chat-comp
 import { doneFrame, eventFrame, type ModelEndpoints, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { MessagesStreamEvent } from '@floway-dev/protocols/messages';
 import type { ResponsesPayload, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
-import { type ProviderCandidate, directFetcher, FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, type ProviderResponsesResult, type ProviderStreamResult, type ResponsesAction, type UpstreamCallOptions, type UpstreamProviderKind } from '@floway-dev/provider';
+import { type ModelProvider, type ProviderCandidate, directFetcher, type ProviderResponsesResult, type ProviderStreamResult, type ResponsesAction, type UpstreamCallOptions, type UpstreamProviderKind } from '@floway-dev/provider';
 import { assert, assertEquals, stubProvider, stubUpstreamModel } from '@floway-dev/test-utils';
 
 // `enumerateModelCandidates` is the only seam between serve and the
@@ -103,10 +103,12 @@ const makeCandidate = (overrides: {
   callResponses?: (model: unknown, body: unknown, action: ResponsesAction, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderResponsesResult>;
   callMessages?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderStreamResult<MessagesStreamEvent>>;
   callChatCompletions?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderStreamResult<ChatCompletionsStreamEvent>>;
+  providerOverrides?: Partial<ModelProvider>;
 } = {}): ProviderCandidate => {
   const upstream = overrides.upstream ?? 'up_test';
   const providerKind = overrides.providerKind ?? 'custom';
   const provider = stubProvider({
+    ...overrides.providerOverrides,
     callResponses: overrides.callResponses,
     callMessages: overrides.callMessages,
     callChatCompletions: overrides.callChatCompletions,
@@ -230,19 +232,69 @@ test('generate stops at the first candidate even when it yields an upstream erro
   assertEquals(secondCall.mock.calls.length, 0);
 });
 
-test('generate prefers caller-supplied Codex session id before previous_response_id snapshot metadata', async () => {
+test('generate lets a provider prepare Responses request state before dispatch', async () => {
   const repo = installRepo();
-  let turn = 0;
-  const sessionIds: string[] = [];
-  const windowIds: string[] = [];
+  const preparedScopes: string[] = [];
+  const committedResponseIds: string[] = [];
+  const providerOverrides: Partial<ModelProvider> = {
+    prepareResponsesRequest: ({ headers, snapshotState }) => {
+      const scope = headers.get('x-test-scope') ?? stringMetadata(snapshotState.getSnapshotMetadata('provider_scope')) ?? 'generated-scope';
+      headers.set('x-test-provider-scope', scope);
+      snapshotState.setSnapshotMetadata('provider_scope', scope);
+    },
+    beforeResponsesSnapshotCommit: ({ snapshotState, snapshotMode, responseId }) => {
+      assertEquals(snapshotMode, 'append');
+      committedResponseIds.push(responseId);
+      snapshotState.setSnapshotMetadata('provider_committed_response_id', responseId);
+    },
+  };
   const callResponses = vi.fn(async (_model, _body, _action, _signal, opts): Promise<ProviderResponsesResult> => {
-    const sessionId = opts?.headers.get(FLOWAY_CODEX_SESSION_ID_HEADER);
-    if (sessionId === null) throw new Error('expected internal Codex session id');
-    const windowId = opts?.headers.get(FLOWAY_CODEX_WINDOW_ID_HEADER);
-    if (windowId === null || !windowId.startsWith(`${sessionId}:`)) throw new Error(`expected internal Codex window id for ${sessionId}, got ${windowId}`);
-    if (opts?.headers.get('x-codex-window-id') !== null) throw new Error('expected downstream x-codex-window-id marker to be scrubbed before provider dispatch');
-    sessionIds.push(sessionId);
-    windowIds.push(windowId);
+    preparedScopes.push(opts?.headers.get('x-test-provider-scope') ?? 'missing');
+    return {
+      action: 'generate', ok: true,
+      events: makeProtocolFrames([{
+        type: 'response.completed',
+        sequence_number: 0,
+        response: makeResponsesResult('resp_upstream_1'),
+      }]),
+      modelKey: 'test-model-key',
+      headers: new Headers(),
+    };
+  });
+
+  queueCandidates([makeCandidate({ callResponses, providerOverrides })]);
+  const result = await responsesServe.generate({
+    payload: makePayload({ input: [{ type: 'message', role: 'user', content: 'turn' }] }),
+    ctx: makeGatewayCtx(),
+    store: createResponsesHttpStore(API_KEY_ID, true),
+    headers: new Headers({ 'x-test-scope': 'caller-scope' }),
+  });
+  if (result.type !== 'events') throw new Error('expected events');
+  const events = await collectEvents(result.events);
+  const responseId = (events.find(e => e.type === 'response.completed') as Extract<ResponsesStreamEvent, { type: 'response.completed' }>).response.id;
+  const snapshot = await repo.responsesSnapshots.lookup(API_KEY_ID, responseId);
+
+  assertEquals(preparedScopes, ['caller-scope']);
+  assertEquals(committedResponseIds, [responseId]);
+  assertEquals(snapshot?.metadata, {
+    provider_scope: 'caller-scope',
+    provider_committed_response_id: responseId,
+  });
+});
+
+test('generate passes previous_response_id snapshot metadata to provider request hooks', async () => {
+  installRepo();
+  let turn = 0;
+  const preparedScopes: string[] = [];
+  const providerOverrides: Partial<ModelProvider> = {
+    prepareResponsesRequest: ({ headers, snapshotState }) => {
+      const scope = headers.get('x-test-scope') ?? stringMetadata(snapshotState.getSnapshotMetadata('provider_scope')) ?? 'generated-scope';
+      headers.set('x-test-provider-scope', scope);
+      snapshotState.setSnapshotMetadata('provider_scope', scope);
+    },
+  };
+  const callResponses = vi.fn(async (_model, _body, _action, _signal, opts): Promise<ProviderResponsesResult> => {
+    preparedScopes.push(opts?.headers.get('x-test-provider-scope') ?? 'missing');
     turn += 1;
     return {
       action: 'generate', ok: true,
@@ -256,109 +308,18 @@ test('generate prefers caller-supplied Codex session id before previous_response
     };
   });
 
-  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
+  queueCandidates([makeCandidate({ callResponses, providerOverrides })]);
   const turn1 = await responsesServe.generate({
     payload: makePayload({ input: [{ type: 'message', role: 'user', content: 'first turn' }] }),
     ctx: makeGatewayCtx(),
     store: createResponsesHttpStore(API_KEY_ID, true),
-    headers: new Headers({
-      [FLOWAY_CODEX_SESSION_ID_HEADER]: 'forged-downstream-session',
-      [FLOWAY_CODEX_WINDOW_ID_HEADER]: 'forged-downstream-window',
-      'session-id': 'caller-session',
-      'x-codex-window-id': 'downstream-window-a',
-    }),
-  });
-  if (turn1.type !== 'events') throw new Error('turn 1: expected events');
-  const turn1Events = await collectEvents(turn1.events);
-  const turn1ResponseId = (turn1Events.find(e => e.type === 'response.completed') as Extract<ResponsesStreamEvent, { type: 'response.completed' }>).response.id;
-  const turn1Snapshot = await repo.responsesSnapshots.lookup(API_KEY_ID, turn1ResponseId);
-  assertEquals(sessionIds[0], 'caller-session');
-  assertEquals(turn1Snapshot?.metadata.codex_session_id, sessionIds[0]);
-  assertEquals(windowIds[0], `${sessionIds[0]}:0`);
-  assertEquals(turn1Snapshot?.metadata.codex_window_id, windowIds[0]);
-  assertEquals(turn1Snapshot?.metadata.codex_downstream_window_id, 'downstream-window-a');
-
-  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
-  const turn2 = await responsesServe.generate({
-    payload: makePayload({
-      previous_response_id: turn1ResponseId,
-      input: [{ type: 'message', role: 'user', content: 'second turn' }],
-    }),
-    ctx: makeGatewayCtx(),
-    store: createResponsesHttpStore(API_KEY_ID, true),
-    headers: new Headers({ 'x-codex-window-id': 'downstream-window-a' }),
-  });
-  if (turn2.type !== 'events') throw new Error('turn 2: expected events');
-  const turn2Events = await collectEvents(turn2.events);
-  const turn2ResponseId = (turn2Events.find(e => e.type === 'response.completed') as Extract<ResponsesStreamEvent, { type: 'response.completed' }>).response.id;
-  const turn2Snapshot = await repo.responsesSnapshots.lookup(API_KEY_ID, turn2ResponseId);
-
-  assertEquals(sessionIds.length, 2);
-  assertEquals(sessionIds[1], sessionIds[0]);
-  assertEquals(windowIds[1], windowIds[0]);
-  assertEquals(turn2Snapshot?.metadata.codex_window_id, windowIds[0]);
-  assertEquals(turn2Snapshot?.metadata.codex_downstream_window_id, 'downstream-window-a');
-
-  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
-  const turn3 = await responsesServe.generate({
-    payload: makePayload({
-      previous_response_id: turn2ResponseId,
-      input: [{ type: 'message', role: 'user', content: 'third turn' }],
-    }),
-    ctx: makeGatewayCtx(),
-    store: createResponsesHttpStore(API_KEY_ID, true),
-    headers: new Headers({ 'session-id': 'caller-override', 'x-codex-window-id': 'downstream-window-b' }),
-  });
-  if (turn3.type !== 'events') throw new Error('turn 3: expected events');
-  const turn3Events = await collectEvents(turn3.events);
-  const turn3ResponseId = (turn3Events.find(e => e.type === 'response.completed') as Extract<ResponsesStreamEvent, { type: 'response.completed' }>).response.id;
-  const turn3Snapshot = await repo.responsesSnapshots.lookup(API_KEY_ID, turn3ResponseId);
-
-  assertEquals(sessionIds.length, 3);
-  assertEquals(sessionIds[2], 'caller-override');
-  assertEquals(windowIds[2], 'caller-override:0');
-  assertEquals(turn3Snapshot?.metadata.codex_session_id, 'caller-override');
-  assertEquals(turn3Snapshot?.metadata.codex_window_id, windowIds[2]);
-  assertEquals(turn3Snapshot?.metadata.codex_downstream_window_id, 'downstream-window-b');
-});
-
-test('generate advances Codex window generation when a standard Responses client forks from an old snapshot', async () => {
-  installRepo();
-  let turn = 0;
-  const sessionIds: string[] = [];
-  const windowIds: string[] = [];
-  const callResponses = vi.fn(async (_model, _body, _signal, opts): Promise<ProviderStreamResult<ResponsesStreamEvent>> => {
-    const sessionId = opts?.headers.get(FLOWAY_CODEX_SESSION_ID_HEADER);
-    if (sessionId === null) throw new Error('expected internal Codex session id');
-    const windowId = opts?.headers.get(FLOWAY_CODEX_WINDOW_ID_HEADER);
-    if (windowId === null) throw new Error('expected internal Codex window id');
-    sessionIds.push(sessionId);
-    windowIds.push(windowId);
-    turn += 1;
-    return {
-      ok: true,
-      events: makeProtocolFrames([{
-        type: 'response.completed',
-        sequence_number: 0,
-        response: makeResponsesResult(`resp_upstream_${turn}`),
-      }]),
-      modelKey: 'test-model-key',
-      headers: new Headers(),
-    };
-  });
-
-  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
-  const turn1 = await responsesServe.generate({
-    payload: makePayload({ input: [{ type: 'message', role: 'user', content: 'first turn' }] }),
-    ctx: makeGatewayCtx(),
-    store: createResponsesHttpStore(API_KEY_ID, true),
-    headers: new Headers(),
+    headers: new Headers({ 'x-test-scope': 'scope-a' }),
   });
   if (turn1.type !== 'events') throw new Error('turn 1: expected events');
   const turn1Events = await collectEvents(turn1.events);
   const turn1ResponseId = (turn1Events.find(e => e.type === 'response.completed') as Extract<ResponsesStreamEvent, { type: 'response.completed' }>).response.id;
 
-  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
+  queueCandidates([makeCandidate({ callResponses, providerOverrides })]);
   const turn2 = await responsesServe.generate({
     payload: makePayload({
       previous_response_id: turn1ResponseId,
@@ -371,52 +332,30 @@ test('generate advances Codex window generation when a standard Responses client
   if (turn2.type !== 'events') throw new Error('turn 2: expected events');
   await collectEvents(turn2.events);
 
-  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
-  const fork1 = await responsesServe.generate({
-    payload: makePayload({
-      previous_response_id: turn1ResponseId,
-      input: [{ type: 'message', role: 'user', content: 'first fork' }],
-    }),
-    ctx: makeGatewayCtx(),
-    store: createResponsesHttpStore(API_KEY_ID, true),
-    headers: new Headers(),
-  });
-  if (fork1.type !== 'events') throw new Error('fork 1: expected events');
-  await collectEvents(fork1.events);
-
-  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
-  const fork2 = await responsesServe.generate({
-    payload: makePayload({
-      previous_response_id: turn1ResponseId,
-      input: [{ type: 'message', role: 'user', content: 'second fork' }],
-    }),
-    ctx: makeGatewayCtx(),
-    store: createResponsesHttpStore(API_KEY_ID, true),
-    headers: new Headers(),
-  });
-  if (fork2.type !== 'events') throw new Error('fork 2: expected events');
-  await collectEvents(fork2.events);
-
-  assertEquals(new Set(sessionIds).size, 1);
-  const sessionId = sessionIds[0];
-  assertEquals(windowIds, [`${sessionId}:0`, `${sessionId}:0`, `${sessionId}:1`, `${sessionId}:2`]);
+  assertEquals(preparedScopes, ['scope-a', 'scope-a']);
 });
 
-test('generate advances Codex window generation after compaction replaces the snapshot', async () => {
+test('generate passes replace snapshot mode to provider commit hooks for compaction turns', async () => {
   const repo = installRepo();
   let turn = 0;
-  const windowIds: string[] = [];
-  const callResponses = vi.fn(async (_model, body, _signal, opts): Promise<ProviderStreamResult<ResponsesStreamEvent>> => {
-    const sessionId = opts?.headers.get(FLOWAY_CODEX_SESSION_ID_HEADER);
-    assertEquals(sessionId, 'codex-session');
-    const windowId = opts?.headers.get(FLOWAY_CODEX_WINDOW_ID_HEADER);
-    if (windowId === null) throw new Error('expected internal Codex window id');
-    windowIds.push(windowId);
+  const commitModes: string[] = [];
+  const providerOverrides: Partial<ModelProvider> = {
+    prepareResponsesRequest: ({ snapshotState }) => {
+      snapshotState.setSnapshotMetadata('provider_scope', 'scope-a');
+    },
+    beforeResponsesSnapshotCommit: ({ snapshotState, snapshotMode, responseId }) => {
+      commitModes.push(snapshotMode);
+      snapshotState.setSnapshotMetadata('provider_commit_mode', snapshotMode);
+      snapshotState.setSnapshotMetadata('provider_committed_response_id', responseId);
+    },
+  };
+  const callResponses = vi.fn(async (_model, body, _action, _signal, opts): Promise<ProviderResponsesResult> => {
+    assertEquals(opts?.headers.get('x-test-provider-scope'), null);
     turn += 1;
     const input = (body as ResponsesPayload).input;
     const isCompaction = Array.isArray(input) && input.some(item => item.type === 'compaction_trigger');
     return {
-      ok: true,
+      action: 'generate', ok: true,
       events: makeProtocolFrames([{
         type: 'response.completed',
         sequence_number: 0,
@@ -432,21 +371,18 @@ test('generate advances Codex window generation after compaction replaces the sn
     };
   });
 
-  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
+  queueCandidates([makeCandidate({ callResponses, providerOverrides })]);
   const turn1 = await responsesServe.generate({
     payload: makePayload({ input: [{ type: 'message', role: 'user', content: 'first turn' }] }),
     ctx: makeGatewayCtx(),
     store: createResponsesHttpStore(API_KEY_ID, true),
-    headers: new Headers({
-      'session-id': 'codex-session',
-      'x-codex-window-id': 'codex-session:0',
-    }),
+    headers: new Headers(),
   });
   if (turn1.type !== 'events') throw new Error('turn 1: expected events');
   const turn1Events = await collectEvents(turn1.events);
   const turn1ResponseId = (turn1Events.find(e => e.type === 'response.completed') as Extract<ResponsesStreamEvent, { type: 'response.completed' }>).response.id;
 
-  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
+  queueCandidates([makeCandidate({ callResponses, providerOverrides })]);
   const compactTurn = await responsesServe.generate({
     payload: makePayload({
       previous_response_id: turn1ResponseId,
@@ -454,33 +390,20 @@ test('generate advances Codex window generation after compaction replaces the sn
     }),
     ctx: makeGatewayCtx(),
     store: createResponsesHttpStore(API_KEY_ID, true),
-    headers: new Headers({
-      'session-id': 'codex-session',
-      'x-codex-window-id': 'codex-session:0',
-    }),
+    headers: new Headers(),
   });
   if (compactTurn.type !== 'events') throw new Error('compact turn: expected events');
   const compactEvents = await collectEvents(compactTurn.events);
   const compactResponseId = (compactEvents.find(e => e.type === 'response.completed') as Extract<ResponsesStreamEvent, { type: 'response.completed' }>).response.id;
   const compactSnapshot = await repo.responsesSnapshots.lookup(API_KEY_ID, compactResponseId);
-  assertEquals(compactSnapshot?.metadata.codex_window_id, 'codex-session:1');
-  assertEquals(compactSnapshot?.metadata.codex_downstream_window_id, 'codex-session:1');
 
-  queueCandidates([makeCandidate({ providerKind: 'codex', callResponses })]);
-  const postCompactTurn = await responsesServe.generate({
-    payload: makePayload({
-      previous_response_id: compactResponseId,
-      input: [{ type: 'message', role: 'user', content: 'after compact' }],
-    }),
-    ctx: makeGatewayCtx(),
-    store: createResponsesHttpStore(API_KEY_ID, true),
-    headers: new Headers(),
-  });
-  if (postCompactTurn.type !== 'events') throw new Error('post-compact turn: expected events');
-  await collectEvents(postCompactTurn.events);
-
-  assertEquals(windowIds, ['codex-session:0', 'codex-session:0', 'codex-session:1']);
+  assertEquals(commitModes, ['append', 'replace']);
+  assertEquals(compactSnapshot?.metadata.provider_commit_mode, 'replace');
+  assertEquals(compactSnapshot?.metadata.provider_committed_response_id, compactResponseId);
 });
+
+const stringMetadata = (value: unknown): string | null =>
+  typeof value === 'string' && value.length > 0 ? value : null;
 
 test('generate renders model-missing when no candidates are available', async () => {
   installRepo();

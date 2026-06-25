@@ -1,9 +1,10 @@
 import type { ResponsesBoundaryCtx } from './types.ts';
-import { FLOWAY_CODEX_SESSION_ID_HEADER, uuidV7 } from '@floway-dev/provider';
+import { FLOWAY_CODEX_SESSION_ID_HEADER } from '../../responses-state.ts';
+import { uuidV7 } from '@floway-dev/provider';
 
 // Choose the Codex session scope before fetch.ts builds the upstream request.
-// Gateway-dispatched Codex Responses calls pass Floway's snapshot-bound scope
-// through an internal header; direct provider callers may pass the official
+// The provider-owned Responses state hook may pass a snapshot-bound scope
+// through a private header; direct provider callers may pass the official
 // `session-id` header themselves. `session_id` is accepted only as a
 // compatibility alias and is removed before the upstream request.
 //
@@ -31,6 +32,6 @@ export const injectSessionId = async <TResult>(
 };
 
 const trimHeader = (headers: Headers, name: string): string | null => {
-  const value = headers.get(name)?.trim();
-  return value || null;
+  const value = headers.get(name)?.trim() ?? '';
+  return value.length > 0 ? value : null;
 };

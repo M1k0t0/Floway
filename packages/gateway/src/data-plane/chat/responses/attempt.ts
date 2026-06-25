@@ -1,4 +1,3 @@
-import { advanceCodexSnapshotWindowGeneration, attachCodexSessionHeader, markCodexSnapshotContinued } from './codex-session.ts';
 import { responsesInterceptors } from './interceptors/index.ts';
 import type { ResponsesAttemptResult, ResponsesInvocation } from './interceptors/types.ts';
 import { createStoredResponseId } from './items/format.ts';
@@ -127,7 +126,7 @@ export const responsesAttempt = {
         upstream: candidate.provider.upstream,
         targetApi: 'responses',
         responseId,
-        beforeCommitSnapshot: codexBeforeCommitSnapshot(candidate, store),
+        beforeCommitSnapshot: providerBeforeCommitSnapshot(candidate, store),
       }));
       return {
         type: 'result',
@@ -151,7 +150,7 @@ export const responsesAttempt = {
         upstream: candidate.provider.upstream,
         targetApi,
         responseId,
-        beforeCommitSnapshot: codexBeforeCommitSnapshot(candidate, store),
+        beforeCommitSnapshot: providerBeforeCommitSnapshot(candidate, store),
       }),
       chainResult.modelIdentity,
       {
@@ -177,16 +176,22 @@ export const responsesAttempt = {
   },
 };
 
-const codexBeforeCommitSnapshot = (
+const providerBeforeCommitSnapshot = (
   candidate: ProviderCandidate,
   store: StatefulResponsesStore,
-): ((mode: ResponsesSnapshotMode, responseId: string) => void) | undefined =>
-  candidate.provider.providerKind === 'codex'
-    ? (mode, responseId) => {
-      if (mode === 'replace') advanceCodexSnapshotWindowGeneration(store);
-      markCodexSnapshotContinued(store, responseId);
-    }
-    : undefined;
+): ((mode: ResponsesSnapshotMode, responseId: string) => void | Promise<void>) | undefined => {
+  const hook = candidate.provider.provider.beforeResponsesSnapshotCommit;
+  if (hook === undefined) return undefined;
+  return (snapshotMode, responseId) => hook({ snapshotState: store, snapshotMode, responseId });
+};
+
+const prepareProviderResponsesRequest = async (
+  candidate: ProviderCandidate,
+  store: StatefulResponsesStore,
+  headers: Headers,
+): Promise<void> => {
+  await candidate.provider.provider.prepareResponsesRequest?.({ snapshotState: store, headers });
+};
 
 type RewriteOutcome =
   | RewrittenResponsesPayload
@@ -235,7 +240,7 @@ const dispatchResponses = async (
   const { candidate, targetApi, store } = invocation;
   switch (targetApi) {
   case 'responses': {
-    attachCodexSessionHeader(candidate, store, invocation.headers);
+    await prepareProviderResponsesRequest(candidate, store, invocation.headers);
     const recorder = createUpstreamLatencyRecorder();
     if (invocation.action === 'compact') {
       // The compact wire body drops `stream` and `store` — `store` is a

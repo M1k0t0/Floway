@@ -92,14 +92,14 @@ test('snapshot metadata is loaded and propagated to committed snapshots', async 
     id: 'resp_prev',
     apiKeyId: API_KEY_ID,
     itemIds: [item.id],
-    metadata: { codex_session_id: 'session-prev' },
+    metadata: { provider_session_id: 'session-prev' },
     createdAt: 1_000,
     refreshedAt: 1_000,
   });
 
   const store = createResponsesHttpStore(API_KEY_ID, undefined);
   assertExists(await store.loadSnapshot('resp_prev'));
-  assertEquals(store.getSnapshotMetadata('codex_session_id'), 'session-prev');
+  assertEquals(store.getSnapshotMetadata('provider_session_id'), 'session-prev');
   store.stageOutputItem(storedRow({
     id: createStoredResponsesItemId('message'),
     itemType: 'message',
@@ -107,7 +107,42 @@ test('snapshot metadata is loaded and propagated to committed snapshots', async 
   }));
   await store.commitSnapshot('resp_next', 'append');
 
-  assertEquals((await repo.responsesSnapshots.lookup(API_KEY_ID, 'resp_next'))?.metadata, { codex_session_id: 'session-prev' });
+  assertEquals((await repo.responsesSnapshots.lookup(API_KEY_ID, 'resp_next'))?.metadata, { provider_session_id: 'session-prev' });
+});
+
+test('loaded snapshot metadata updates do not propagate to committed snapshots', async () => {
+  const repo = new InMemoryRepo();
+  initRepo(repo);
+  const item = storedRow({
+    id: createStoredResponsesItemId('message'),
+    itemType: 'message',
+    payload: { item: { type: 'message', role: 'user', content: 'hello' } },
+  });
+  await repo.responsesItems.insertMany([item]);
+  await repo.responsesSnapshots.insert({
+    id: 'resp_prev',
+    apiKeyId: API_KEY_ID,
+    itemIds: [item.id],
+    metadata: { provider_session_id: 'session-prev' },
+    createdAt: 1_000,
+    refreshedAt: 1_000,
+  });
+
+  const store = createResponsesHttpStore(API_KEY_ID, undefined);
+  assertExists(await store.loadSnapshot('resp_prev'));
+  store.setLoadedSnapshotMetadata('provider_child_response_id', 'resp_child');
+  store.stageOutputItem(storedRow({
+    id: createStoredResponsesItemId('message'),
+    itemType: 'message',
+    payload: { item: { type: 'message', role: 'assistant', content: 'hi' } },
+  }));
+  await store.commitSnapshot('resp_next', 'append');
+
+  assertEquals((await repo.responsesSnapshots.lookup(API_KEY_ID, 'resp_prev'))?.metadata, {
+    provider_session_id: 'session-prev',
+    provider_child_response_id: 'resp_child',
+  });
+  assertEquals((await repo.responsesSnapshots.lookup(API_KEY_ID, 'resp_next'))?.metadata, { provider_session_id: 'session-prev' });
 });
 
 test('pending snapshot metadata is scoped to one committed snapshot', async () => {
@@ -115,7 +150,7 @@ test('pending snapshot metadata is scoped to one committed snapshot', async () =
   initRepo(repo);
 
   const store = createResponsesHttpStore(API_KEY_ID, true);
-  store.setSnapshotMetadata('codex_session_id', 'session-a');
+  store.setSnapshotMetadata('provider_session_id', 'session-a');
   store.beginAttempt([]);
   store.stageOutputItem(storedRow({
     id: createStoredResponsesItemId('message'),
@@ -124,10 +159,10 @@ test('pending snapshot metadata is scoped to one committed snapshot', async () =
   }));
   await store.commitSnapshot('resp_a', 'append');
 
-  assertEquals((await repo.responsesSnapshots.lookup(API_KEY_ID, 'resp_a'))?.metadata, { codex_session_id: 'session-a' });
-  assertEquals(store.getSnapshotMetadata('codex_session_id'), undefined);
+  assertEquals((await repo.responsesSnapshots.lookup(API_KEY_ID, 'resp_a'))?.metadata, { provider_session_id: 'session-a' });
+  assertEquals(store.getSnapshotMetadata('provider_session_id'), undefined);
 
-  store.setSnapshotMetadata('codex_session_id', 'session-b');
+  store.setSnapshotMetadata('provider_session_id', 'session-b');
   store.beginAttempt([]);
   store.stageOutputItem(storedRow({
     id: createStoredResponsesItemId('message'),
@@ -136,7 +171,7 @@ test('pending snapshot metadata is scoped to one committed snapshot', async () =
   }));
   await store.commitSnapshot('resp_b', 'append');
 
-  assertEquals((await repo.responsesSnapshots.lookup(API_KEY_ID, 'resp_b'))?.metadata, { codex_session_id: 'session-b' });
+  assertEquals((await repo.responsesSnapshots.lookup(API_KEY_ID, 'resp_b'))?.metadata, { provider_session_id: 'session-b' });
 });
 
 test('pending snapshot metadata is cleared when no snapshot is written', async () => {
@@ -144,14 +179,14 @@ test('pending snapshot metadata is cleared when no snapshot is written', async (
   initRepo(repo);
 
   const noWritesStore = createResponsesHttpStore(API_KEY_ID, false);
-  noWritesStore.setSnapshotMetadata('codex_session_id', 'session-no-writes');
+  noWritesStore.setSnapshotMetadata('provider_session_id', 'session-no-writes');
   await noWritesStore.commitSnapshot('resp_no_writes', 'append');
-  assertEquals(noWritesStore.getSnapshotMetadata('codex_session_id'), undefined);
+  assertEquals(noWritesStore.getSnapshotMetadata('provider_session_id'), undefined);
 
   const emptyStore = createResponsesHttpStore(API_KEY_ID, true);
-  emptyStore.setSnapshotMetadata('codex_session_id', 'session-empty');
+  emptyStore.setSnapshotMetadata('provider_session_id', 'session-empty');
   await emptyStore.commitSnapshot('resp_empty', 'append');
-  assertEquals(emptyStore.getSnapshotMetadata('codex_session_id'), undefined);
+  assertEquals(emptyStore.getSnapshotMetadata('provider_session_id'), undefined);
   assertEquals(await repo.responsesSnapshots.lookup(API_KEY_ID, 'resp_empty'), null);
 });
 

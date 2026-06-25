@@ -14,15 +14,12 @@ import {
   parseCodexQuotaHeaders,
   putCodexQuota,
 } from './quota.ts';
+import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_TURN_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER } from './responses-state.ts';
 import type { CodexAccountCredential } from './state.ts';
 import type { ResponsesCompactPayload, ResponsesPayload, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 import { parseResponsesStream } from '@floway-dev/protocols/responses';
-import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_TURN_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, type ProviderStreamResult, streamingProviderCall, type UpstreamCallOptions, type UpstreamModel, uuidV7 } from '@floway-dev/provider';
+import { type ProviderStreamResult, streamingProviderCall, uuidV7, type UpstreamCallOptions, type UpstreamModel } from '@floway-dev/provider';
 
-// Pre-tagging shape used by the unary compact backend call; the codex provider
-// terminal re-tags it onto the unified `ProviderResponsesResult` with
-// `action: 'compact'`. Other providers build the tagged compact variant
-// directly at their call sites, so the shape is provider-local.
 export type ProviderCompactionResult =
   | { ok: true; result: ResponsesResult; modelKey: string }
   | { ok: false; response: Response; modelKey: string };
