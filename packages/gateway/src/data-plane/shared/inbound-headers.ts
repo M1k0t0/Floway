@@ -1,7 +1,5 @@
 import type { Context } from 'hono';
 
-import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_TURN_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER } from '@floway-dev/provider';
-
 // Headers stripped from the inbound request before the data plane threads
 // the bag down to the provider boundary. Four groups, one deny-list:
 //
@@ -39,6 +37,10 @@ import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_TURN_ID_HEADER, FLOWAY_COD
 //   the same shape cubercsl reported for a Node deployment behind a
 //   Cloudflare reverse proxy.
 //
+// Gateway-private `x-floway-*` headers are also scrubbed by prefix so provider
+// packages can use private request-scoped signals without exposing those names
+// in the gateway boundary.
+//
 // Vendor business headers (`user-agent`, `anthropic-*` / `openai-*` betas,
 // `x-client-request-id`, and any other header the client legitimately
 // authored) still reach upstream. Providers that clone the bag before
@@ -64,12 +66,8 @@ const SCRUBBED_INBOUND_HEADER_NAMES = [
   'transfer-encoding',
   'true-client-ip',
   'upgrade',
-  FLOWAY_CODEX_SESSION_ID_HEADER,
-  FLOWAY_CODEX_TURN_ID_HEADER,
-  FLOWAY_CODEX_WINDOW_ID_HEADER,
   'x-api-key',
   'x-client-ip',
-  'x-floway-session',
   'x-forwarded-for',
   'x-forwarded-host',
   'x-forwarded-proto',
@@ -77,7 +75,7 @@ const SCRUBBED_INBOUND_HEADER_NAMES = [
   'x-real-ip',
 ];
 
-const SCRUBBED_INBOUND_HEADER_PREFIXES = ['cf-'];
+const SCRUBBED_INBOUND_HEADER_PREFIXES = ['cf-', 'x-floway-'];
 
 // Build the unified inbound-headers bag the data plane threads to the
 // provider boundary. Copies the source request's headers and removes the

@@ -1,5 +1,4 @@
 import { createStoredResponsesItemId, hashResponsesItemContent, hashResponsesItemEncryptedContent, isStoredResponsesItemId, responsesItemEncryptedContent, responsesItemId } from './format.ts';
-import { CODEX_NON_INHERITED_SNAPSHOT_METADATA_KEYS } from '../codex-metadata.ts';
 import { getRepo } from '../../../../repo/index.ts';
 import {
   cloneStoredResponsesItem,
@@ -273,7 +272,7 @@ export class LayeredStatefulResponsesStore implements StatefulResponsesStore {
         id: responseId,
         apiKeyId: this.options.apiKeyId,
         itemIds,
-        metadata: { ...inheritableSnapshotMetadata(this.previousSnapshotMetadata), ...this.pendingSnapshotMetadata },
+        metadata: { ...inheritableSnapshotMetadata(this.previousSnapshotMetadata, this.previousSnapshotMetadataUpdates), ...this.pendingSnapshotMetadata },
         createdAt: now,
         refreshedAt: now,
       };
@@ -702,5 +701,8 @@ const pushByHash = (target: Map<string, StoredResponsesItem[]>, hash: string, ro
 const isReplayableSnapshotRow = (row: StoredResponsesItem): boolean =>
   row.payload !== null || (row.upstreamId !== null && row.upstreamItemId !== null);
 
-const inheritableSnapshotMetadata = (metadata: Record<string, unknown>): Record<string, unknown> =>
-  Object.fromEntries(Object.entries(metadata).filter(([key]) => !CODEX_NON_INHERITED_SNAPSHOT_METADATA_KEYS.has(key)));
+const inheritableSnapshotMetadata = (
+  metadata: Record<string, unknown>,
+  loadedSnapshotUpdates: Record<string, unknown>,
+): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(metadata).filter(([key]) => !Object.hasOwn(loadedSnapshotUpdates, key)));

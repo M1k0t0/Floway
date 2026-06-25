@@ -14,10 +14,11 @@ import {
   parseCodexQuotaHeaders,
   putCodexQuota,
 } from './quota.ts';
+import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_TURN_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER } from './responses-state.ts';
 import type { CodexAccountCredential } from './state.ts';
 import type { ResponsesCompactPayload, ResponsesPayload, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 import { parseResponsesStream } from '@floway-dev/protocols/responses';
-import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_TURN_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, type ProviderCompactionResult, type ProviderStreamResult, streamingProviderCall, uuidV7, type UpstreamCallOptions, type UpstreamModel } from '@floway-dev/provider';
+import { type ProviderCompactionResult, type ProviderStreamResult, streamingProviderCall, uuidV7, type UpstreamCallOptions, type UpstreamModel } from '@floway-dev/provider';
 
 // Hooks for repo-side state transitions, applied with optimistic concurrency.
 // Refresh-token rotations and terminal-state transitions go through the repo;

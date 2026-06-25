@@ -1,4 +1,3 @@
-import { advanceCodexSnapshotWindowGeneration, attachCodexSessionHeader, markCodexSnapshotContinued } from './codex-session.ts';
 import { responsesInterceptors } from './interceptors/index.ts';
 import type { ResponsesAttemptResult, ResponsesInvocation } from './interceptors/types.ts';
 import { createStoredResponseId } from './items/format.ts';
@@ -92,7 +91,7 @@ export const responsesAttempt = {
         snapshotMode,
         targetApi: candidate.targetApi,
         responseId,
-        beforeCommitSnapshot: codexBeforeCommitSnapshot(candidate, snapshotMode, store),
+        beforeCommitSnapshot: providerBeforeCommitSnapshot(candidate, snapshotMode, store),
       }),
       chainResult.modelIdentity,
       {
@@ -133,7 +132,7 @@ export const responsesAttempt = {
       snapshotMode: 'replace',
       targetApi: 'responses',
       responseId,
-      beforeCommitSnapshot: codexBeforeCommitSnapshot(candidate, 'replace', store),
+      beforeCommitSnapshot: providerBeforeCommitSnapshot(candidate, 'replace', store),
     }));
     return {
       type: 'result',
@@ -144,19 +143,24 @@ export const responsesAttempt = {
   },
 };
 
-const codexBeforeCommitSnapshot = (
+const providerBeforeCommitSnapshot = (
   candidate: ProviderCandidate,
   snapshotMode: ResponsesSnapshotMode,
   store: StatefulResponsesStore,
-): ((responseId: string) => void) | undefined =>
-  candidate.binding.providerKind === 'codex' && snapshotMode === 'replace'
-    ? responseId => {
-      advanceCodexSnapshotWindowGeneration(store);
-      markCodexSnapshotContinued(store, responseId);
-    }
-    : candidate.binding.providerKind === 'codex'
-      ? responseId => markCodexSnapshotContinued(store, responseId)
-      : undefined;
+): ((responseId: string) => void | Promise<void>) | undefined => {
+  if (snapshotMode === 'none') return undefined;
+  const hook = candidate.binding.provider.beforeResponsesSnapshotCommit;
+  if (hook === undefined) return undefined;
+  return responseId => hook({ snapshotState: store, snapshotMode, responseId });
+};
+
+const prepareProviderResponsesRequest = async (
+  candidate: ProviderCandidate,
+  store: StatefulResponsesStore,
+  headers: Headers,
+): Promise<void> => {
+  await candidate.binding.provider.prepareResponsesRequest?.({ snapshotState: store, headers });
+};
 
 type RewriteOutcome =
   | RewrittenResponsesPayload
@@ -207,7 +211,7 @@ const dispatchResponses = async (
 ): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => {
   switch (candidate.targetApi) {
   case 'responses': {
-    attachCodexSessionHeader(candidate, store, headers);
+    await prepareProviderResponsesRequest(candidate, store, headers);
     const { model: _model, ...body } = payload;
     const recorder = createUpstreamLatencyRecorder();
     const providerResult = await candidate.binding.provider.callResponses(
@@ -260,7 +264,7 @@ const callResponsesCompactAsExecuteResult = async (
   headers: Headers,
 ): Promise<ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>> => {
   const { model: _model, stream: _stream, store: _store, ...body } = payload;
-  attachCodexSessionHeader(candidate, store, headers);
+  await prepareProviderResponsesRequest(candidate, store, headers);
   const recorder = createUpstreamLatencyRecorder();
   const providerResult = await candidate.binding.provider.callResponsesCompact(
     candidate.binding.upstreamModel,

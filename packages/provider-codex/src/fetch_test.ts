@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from './constants.ts';
 import { callCodexResponses, callCodexResponsesCompact, type CodexCallEffects } from './fetch.ts';
+import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_TURN_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER } from './responses-state.ts';
 import type { CodexAccessTokenEntry, CodexAccountCredential, CodexQuotaSnapshotEntry, CodexUpstreamState } from './state.ts';
 import type { ResponsesResult } from '@floway-dev/protocols/responses';
-import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_TURN_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER, initProviderRepo, type Fetcher, type UpstreamModel, type UpstreamRecord } from '@floway-dev/provider';
+import { initProviderRepo, type Fetcher, type UpstreamModel, type UpstreamRecord } from '@floway-dev/provider';
 import { noopUpstreamCallOptions } from '@floway-dev/test-utils';
 
 const makeEffects = (): CodexCallEffects => ({

@@ -2,7 +2,6 @@ import { Hono } from 'hono';
 import { describe, test } from 'vitest';
 
 import { inboundHeadersForUpstream } from './inbound-headers.ts';
-import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_TURN_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER } from '@floway-dev/provider';
 import { assertEquals, assertExists } from '@floway-dev/test-utils';
 
 describe('inboundHeadersForUpstream', () => {
@@ -21,9 +20,7 @@ describe('inboundHeadersForUpstream', () => {
         'Authorization': 'Bearer gateway-api-key',
         'api-key': 'azure-key',
         'x-api-key': 'gateway-api-key',
-        [FLOWAY_CODEX_SESSION_ID_HEADER]: 'forged-codex-session',
-        [FLOWAY_CODEX_TURN_ID_HEADER]: 'forged-codex-turn',
-        [FLOWAY_CODEX_WINDOW_ID_HEADER]: 'forged-codex-window',
+        'x-floway-provider-private': 'forged-private-signal',
         'x-floway-session': 'sess-1',
         'x-goog-api-key': 'goog-key',
         'proxy-authorization': 'Basic abcdef',
@@ -42,9 +39,7 @@ describe('inboundHeadersForUpstream', () => {
     assertEquals(headers.has('authorization'), false);
     assertEquals(headers.has('api-key'), false);
     assertEquals(headers.has('x-api-key'), false);
-    assertEquals(headers.has(FLOWAY_CODEX_SESSION_ID_HEADER), false);
-    assertEquals(headers.has(FLOWAY_CODEX_TURN_ID_HEADER), false);
-    assertEquals(headers.has(FLOWAY_CODEX_WINDOW_ID_HEADER), false);
+    assertEquals(headers.has('x-floway-provider-private'), false);
     assertEquals(headers.has('x-floway-session'), false);
     assertEquals(headers.has('x-goog-api-key'), false);
     assertEquals(headers.has('proxy-authorization'), false);

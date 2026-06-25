@@ -2,8 +2,9 @@ import { test } from 'vitest';
 
 import { injectSessionId } from './inject-session-id.ts';
 import type { ResponsesBoundaryCtx } from './types.ts';
+import { FLOWAY_CODEX_SESSION_ID_HEADER } from '../../responses-state.ts';
 import type { ResponsesPayload, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
-import { FLOWAY_CODEX_SESSION_ID_HEADER, type ProviderStreamResult } from '@floway-dev/provider';
+import type { ProviderStreamResult } from '@floway-dev/provider';
 import { assert, assertEquals, stubUpstreamModel } from '@floway-dev/test-utils';
 
 const stubRequest = {};
