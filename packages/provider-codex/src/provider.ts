@@ -1,8 +1,7 @@
 import { ensureCodexAccessToken, mintCodexAccessToken } from './access-token-cache.ts';
 import { CodexOAuthSessionTerminatedError } from './auth/oauth.ts';
-import { callCodexResponsesCompact } from './compaction.ts';
 import { assertCodexUpstreamRecord, type CodexUpstreamConfig } from './config.ts';
-import { callCodexResponses, type CodexCallEffects } from './fetch.ts';
+import { callCodexResponses, callCodexResponsesCompact, type CodexCallEffects } from './fetch.ts';
 import { codexResponsesChain } from './interceptors/responses/index.ts';
 import type { ResponsesBoundaryCtx } from './interceptors/responses/types.ts';
 import { codexRawToUpstreamModel, fetchCodexCatalog } from './models.ts';

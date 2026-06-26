@@ -227,12 +227,13 @@ const dispatchResponses = async (
 };
 
 // `/responses/compact` is non-streaming: the provider returns the compaction
-// envelope as a value (Copilot rebuilds it from a `compaction_trigger` turn,
-// custom upstreams call native `/responses/compact`), so we synthesize the
-// canonical event frames here instead of pretending the result came from an
-// SSE body. `model` is positional, `stream` and `store` are gateway-only and
-// must not reach the wire — `store` is a snapshot-persistence hint, the
-// upstream compact endpoint rejects it.
+// envelope as a value (Azure, Codex, and custom upstreams call native
+// `/responses/compact`; Copilot rebuilds it from a `compaction_trigger`
+// turn), so we synthesize the canonical event frames here instead of
+// pretending the result came from an SSE body. `model` is positional,
+// `stream` and `store` are gateway-only and must not reach the wire —
+// `store` is a snapshot-persistence hint, the upstream compact endpoint
+// rejects it.
 const callResponsesCompactAsExecuteResult = async (
   payload: ResponsesPayload,
   ctx: GatewayCtx,
