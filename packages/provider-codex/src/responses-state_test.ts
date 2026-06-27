@@ -13,10 +13,18 @@ import {
   FLOWAY_CODEX_WINDOW_ID_HEADER,
   prepareCodexResponsesRequest,
 } from './responses-state.ts';
+import type { ResponsesPayload } from '@floway-dev/protocols/responses';
 import type { ResponsesSnapshotState } from '@floway-dev/provider';
 import { assert, assertEquals } from '@floway-dev/test-utils';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const UUID_V7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+// Most window-tracking tests below don't exercise the derive-from-input
+// fallback, so a stub payload is enough — the session id comes from headers
+// or snapshot metadata in those cases. Tests that DO want the derive path
+// build their own payload inline.
+const stubPayload: ResponsesPayload = { model: 'gpt-test', input: [] };
 
 class MemoryResponsesSnapshotState implements ResponsesSnapshotState {
   readonly loadedUpdates: Record<string, unknown> = {};
@@ -55,7 +63,7 @@ class MemoryResponsesSnapshotState implements ResponsesSnapshotState {
   }
 }
 
-test('prepareCodexResponsesRequest prefers official downstream session scope and scrubs forged private headers', () => {
+test('prepareCodexResponsesRequest prefers official downstream session scope and scrubs forged private headers', async () => {
   const state = new MemoryResponsesSnapshotState({ [CODEX_SESSION_METADATA_KEY]: 'snapshot-session' });
   const headers = new Headers({
     [FLOWAY_CODEX_SESSION_ID_HEADER]: 'forged-session',
@@ -65,7 +73,7 @@ test('prepareCodexResponsesRequest prefers official downstream session scope and
     'x-codex-window-id': 'downstream-window-a',
   });
 
-  prepareCodexResponsesRequest({ headers, snapshotState: state });
+  await prepareCodexResponsesRequest({ headers, payload: stubPayload, snapshotState: state });
 
   assertEquals(headers.get(FLOWAY_CODEX_SESSION_ID_HEADER), 'caller-session');
   assertEquals(headers.get(FLOWAY_CODEX_WINDOW_ID_HEADER), 'caller-session:0');
@@ -81,16 +89,16 @@ test('prepareCodexResponsesRequest prefers official downstream session scope and
   });
 });
 
-test('prepareCodexResponsesRequest keeps turn id stable for repeated dispatches in one gateway attempt', () => {
+test('prepareCodexResponsesRequest keeps turn id stable for repeated dispatches in one gateway attempt', async () => {
   const state = new MemoryResponsesSnapshotState({ [CODEX_SESSION_METADATA_KEY]: 'stable-session' });
   const headers = new Headers({ 'session-id': 'stable-session' });
 
-  prepareCodexResponsesRequest({ headers, snapshotState: state });
+  await prepareCodexResponsesRequest({ headers, payload: stubPayload, snapshotState: state });
   const firstTurnId = headers.get(FLOWAY_CODEX_TURN_ID_HEADER);
   assert(firstTurnId !== null && UUID_V7_RE.test(firstTurnId), `expected UUIDv7 turn id, got ${firstTurnId}`);
 
   headers.set(FLOWAY_CODEX_TURN_ID_HEADER, 'forged-retry-turn');
-  prepareCodexResponsesRequest({ headers, snapshotState: state });
+  await prepareCodexResponsesRequest({ headers, payload: stubPayload, snapshotState: state });
 
   assertEquals(headers.get(FLOWAY_CODEX_TURN_ID_HEADER), firstTurnId);
   assertEquals(state.committedSnapshotMetadata(), {
@@ -100,13 +108,13 @@ test('prepareCodexResponsesRequest keeps turn id stable for repeated dispatches 
   });
 });
 
-test('prepareCodexResponsesRequest advances window generation when a loaded snapshot was already continued', () => {
+test('prepareCodexResponsesRequest advances window generation when a loaded snapshot was already continued', async () => {
   const parentMetadata = {
     [CODEX_SESSION_METADATA_KEY]: 'session-a',
     [CODEX_WINDOW_METADATA_KEY]: 'session-a:0',
   };
   const continuedParent = new MemoryResponsesSnapshotState(parentMetadata);
-  prepareCodexResponsesRequest({ headers: new Headers(), snapshotState: continuedParent });
+  await prepareCodexResponsesRequest({ headers: new Headers(), payload: stubPayload, snapshotState: continuedParent });
   beforeCodexResponsesSnapshotCommit({ snapshotState: continuedParent, snapshotMode: 'append', responseId: 'resp_turn_2' });
 
   assertEquals(continuedParent.loadedUpdates, {
@@ -120,7 +128,7 @@ test('prepareCodexResponsesRequest advances window generation when a loaded snap
     [CODEX_NEXT_WINDOW_GENERATION_METADATA_KEY]: 1,
   });
   const firstForkHeaders = new Headers();
-  prepareCodexResponsesRequest({ headers: firstForkHeaders, snapshotState: firstFork });
+  await prepareCodexResponsesRequest({ headers: firstForkHeaders, payload: stubPayload, snapshotState: firstFork });
   assertEquals(firstForkHeaders.get(FLOWAY_CODEX_WINDOW_ID_HEADER), 'session-a:1');
   beforeCodexResponsesSnapshotCommit({ snapshotState: firstFork, snapshotMode: 'append', responseId: 'resp_fork_1' });
 
@@ -130,18 +138,18 @@ test('prepareCodexResponsesRequest advances window generation when a loaded snap
     [CODEX_NEXT_WINDOW_GENERATION_METADATA_KEY]: 2,
   });
   const secondForkHeaders = new Headers();
-  prepareCodexResponsesRequest({ headers: secondForkHeaders, snapshotState: secondFork });
+  await prepareCodexResponsesRequest({ headers: secondForkHeaders, payload: stubPayload, snapshotState: secondFork });
   assertEquals(secondForkHeaders.get(FLOWAY_CODEX_WINDOW_ID_HEADER), 'session-a:2');
 });
 
-test('beforeCodexResponsesSnapshotCommit advances stored window scope for replacement snapshots', () => {
+test('beforeCodexResponsesSnapshotCommit advances stored window scope for replacement snapshots', async () => {
   const state = new MemoryResponsesSnapshotState({
     [CODEX_SESSION_METADATA_KEY]: 'session-a',
     [CODEX_WINDOW_METADATA_KEY]: 'session-a:0',
     [CODEX_DOWNSTREAM_WINDOW_METADATA_KEY]: 'session-a:0',
   });
   const headers = new Headers({ 'session-id': 'session-a', 'x-codex-window-id': 'session-a:0' });
-  prepareCodexResponsesRequest({ headers, snapshotState: state });
+  await prepareCodexResponsesRequest({ headers, payload: stubPayload, snapshotState: state });
 
   beforeCodexResponsesSnapshotCommit({ snapshotState: state, snapshotMode: 'replace', responseId: 'resp_compact' });
 
@@ -155,4 +163,94 @@ test('beforeCodexResponsesSnapshotCommit advances stored window scope for replac
     [CODEX_CHILD_RESPONSE_ID_METADATA_KEY]: 'resp_compact',
     [CODEX_NEXT_WINDOW_GENERATION_METADATA_KEY]: 2,
   });
+});
+
+test('prepareCodexResponsesRequest derives a stable session-id from instructions + first input item when neither header nor snapshot has one', async () => {
+  // Two turns of the same conversation: the second carries the original
+  // first user message plus more tail items. The derived id must stay put
+  // so chatgpt.com's prompt cache continues to hit across turns.
+  const turn1State = new MemoryResponsesSnapshotState();
+  const turn1Headers = new Headers();
+  await prepareCodexResponsesRequest({
+    headers: turn1Headers,
+    payload: {
+      model: 'gpt-test',
+      instructions: 'You are helpful.',
+      input: [{ type: 'message', role: 'user', content: 'hello' }],
+    },
+    snapshotState: turn1State,
+  });
+
+  const turn2State = new MemoryResponsesSnapshotState();
+  const turn2Headers = new Headers();
+  await prepareCodexResponsesRequest({
+    headers: turn2Headers,
+    payload: {
+      model: 'gpt-test',
+      instructions: 'You are helpful.',
+      input: [
+        { type: 'message', role: 'user', content: 'hello' },
+        { type: 'message', role: 'assistant', content: 'hi' },
+        { type: 'message', role: 'user', content: 'continue' },
+      ],
+    },
+    snapshotState: turn2State,
+  });
+
+  const sessionId = turn1Headers.get(FLOWAY_CODEX_SESSION_ID_HEADER);
+  assert(sessionId !== null && UUID_RE.test(sessionId), `expected UUID, got ${sessionId}`);
+  assertEquals(turn2Headers.get(FLOWAY_CODEX_SESSION_ID_HEADER), sessionId);
+});
+
+test('prepareCodexResponsesRequest derive seed is type-agnostic — post-compaction snapshots stay stable too', async () => {
+  // Post-compaction stateful flow: the snapshot's compaction blob lands at
+  // position 0 with no preceding user message. firstStableSeed must still
+  // pick the compaction item so the new window's cache scope stays.
+  const compactionItem = { type: 'compaction', id: 'cmp_a', encrypted_content: 'ENC' } as unknown as ResponsesPayload['input'] extends Array<infer X> ? X : never;
+  const turn1Headers = new Headers();
+  await prepareCodexResponsesRequest({
+    headers: turn1Headers,
+    payload: {
+      model: 'gpt-test',
+      instructions: 'Sys.',
+      input: [
+        compactionItem,
+        { type: 'message', role: 'assistant', content: 'retained' },
+        { type: 'message', role: 'user', content: 'first post-compact turn' },
+      ],
+    },
+    snapshotState: new MemoryResponsesSnapshotState(),
+  });
+  const turn2Headers = new Headers();
+  await prepareCodexResponsesRequest({
+    headers: turn2Headers,
+    payload: {
+      model: 'gpt-test',
+      instructions: 'Sys.',
+      input: [
+        compactionItem,
+        { type: 'message', role: 'assistant', content: 'retained' },
+        { type: 'message', role: 'user', content: 'first post-compact turn' },
+        { type: 'message', role: 'assistant', content: 'reply' },
+        { type: 'message', role: 'user', content: 'second post-compact turn' },
+      ],
+    },
+    snapshotState: new MemoryResponsesSnapshotState(),
+  });
+
+  const sessionId = turn1Headers.get(FLOWAY_CODEX_SESSION_ID_HEADER);
+  assert(sessionId !== null && UUID_RE.test(sessionId), `expected UUID, got ${sessionId}`);
+  assertEquals(turn2Headers.get(FLOWAY_CODEX_SESSION_ID_HEADER), sessionId);
+});
+
+test('prepareCodexResponsesRequest falls back to UUIDv7 when the input array is empty', async () => {
+  const headersA = new Headers();
+  const headersB = new Headers();
+  await prepareCodexResponsesRequest({ headers: headersA, payload: { model: 'gpt-test', input: [] }, snapshotState: new MemoryResponsesSnapshotState() });
+  await prepareCodexResponsesRequest({ headers: headersB, payload: { model: 'gpt-test', input: [] }, snapshotState: new MemoryResponsesSnapshotState() });
+  const a = headersA.get(FLOWAY_CODEX_SESSION_ID_HEADER);
+  const b = headersB.get(FLOWAY_CODEX_SESSION_ID_HEADER);
+  assert(a !== null && UUID_V7_RE.test(a), `expected UUIDv7, got ${a}`);
+  assert(b !== null && UUID_V7_RE.test(b), `expected UUIDv7, got ${b}`);
+  assert(a !== b, 'expected fresh fallback ids to differ between requests');
 });

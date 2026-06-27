@@ -115,6 +115,7 @@ export interface ResponsesSnapshotState {
 
 export interface ProviderResponsesRequestContext {
   readonly headers: Headers;
+  readonly payload: ResponsesPayload;
   readonly snapshotState: ResponsesSnapshotState;
 }
 
