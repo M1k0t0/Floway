@@ -104,6 +104,7 @@ interface CodexRequestIdentity {
   installationId: string;
   sessionId: string;
   threadId: string;
+  clientRequestId: string;
   turnId: string;
   windowId: string;
 }
@@ -137,19 +138,87 @@ const trimHeader = (headers: Headers, name: string): string | null => {
   return value.length > 0 ? value : null;
 };
 
-const buildCodexRequestIdentity = async (opts: CodexBackendCallBase): Promise<CodexRequestIdentity> => {
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const stringField = (record: Record<string, unknown> | null, key: string): string | null => {
+  if (record === null) return null;
+  const value = record[key];
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const clientCodexClientMetadata = (body: unknown): Record<string, unknown> => {
+  if (!isPlainObject(body)) return {};
+  const candidate = body.client_metadata;
+  return isPlainObject(candidate) ? candidate : {};
+};
+
+const parseClientTurnMetadataJson = (raw: string | null): Record<string, unknown> | null => {
+  if (raw === null) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return isPlainObject(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+// Identity-mirror keys live on `identity` and are projected onto every
+// surface (headers, body's `client_metadata`, body's `x-codex-turn-metadata`
+// blob). Drop them from caller spreads so a caller that supplies the same
+// key on a different surface than identity already absorbed can't force the
+// three projections to disagree.
+const IDENTITY_MIRRORED_TURN_METADATA_KEYS = new Set<string>([
+  'installation_id', 'session_id', 'thread_id', 'turn_id', 'window_id',
+]);
+
+const IDENTITY_MIRRORED_CLIENT_METADATA_KEYS = new Set<string>([
+  'x-codex-installation-id', 'session_id', 'thread_id', 'x-codex-window-id', 'turn_id', 'x-codex-turn-metadata',
+]);
+
+const buildCodexRequestIdentity = (
+  opts: CodexBackendCallBase,
+  clientMetadata: Record<string, unknown>,
+  clientTurnMetadata: Record<string, unknown> | null,
+): CodexRequestIdentity => {
+  // Identity priority for every mirrored id: dedicated header → caller body
+  // `client_metadata` key → parsed `x-codex-turn-metadata` key → gateway
+  // default. So a caller can split its identity across surfaces and we still
+  // emit consistent values everywhere.
   const sessionId = trimHeader(opts.headers, FLOWAY_CODEX_SESSION_ID_HEADER)
     ?? trimHeader(opts.headers, 'session-id')
     ?? trimHeader(opts.headers, 'session_id')
+    ?? stringField(clientMetadata, 'session_id')
+    ?? stringField(clientTurnMetadata, 'session_id')
     ?? uuidV7();
-  const installationId = opts.account.openaiDeviceId;
-  const turnId = trimHeader(opts.headers, FLOWAY_CODEX_TURN_ID_HEADER) ?? uuidV7();
-  const windowId = trimHeader(opts.headers, FLOWAY_CODEX_WINDOW_ID_HEADER) ?? `${sessionId}:0`;
-  return { installationId, sessionId, threadId: sessionId, turnId, windowId };
+  const threadId = trimHeader(opts.headers, 'thread-id')
+    ?? stringField(clientMetadata, 'thread_id')
+    ?? stringField(clientTurnMetadata, 'thread_id')
+    ?? sessionId;
+  const clientRequestId = trimHeader(opts.headers, 'x-client-request-id') ?? threadId;
+  const installationId = stringField(clientMetadata, 'x-codex-installation-id')
+    ?? stringField(clientTurnMetadata, 'installation_id')
+    ?? opts.account.openaiDeviceId;
+  const windowId = trimHeader(opts.headers, FLOWAY_CODEX_WINDOW_ID_HEADER)
+    ?? trimHeader(opts.headers, 'x-codex-window-id')
+    ?? stringField(clientMetadata, 'x-codex-window-id')
+    ?? stringField(clientTurnMetadata, 'window_id')
+    ?? `${sessionId}:0`;
+  const turnId = trimHeader(opts.headers, FLOWAY_CODEX_TURN_ID_HEADER)
+    ?? stringField(clientMetadata, 'turn_id')
+    ?? stringField(clientTurnMetadata, 'turn_id')
+    ?? uuidV7();
+  return { installationId, sessionId, threadId, clientRequestId, turnId, windowId };
 };
 
-const buildCodexTurnMetadata = (identity: CodexRequestIdentity, options: CodexTurnMetadataOptions): Record<string, unknown> => {
-  const metadata: Record<string, unknown> = {
+const buildCodexTurnMetadata = (
+  identity: CodexRequestIdentity,
+  options: CodexTurnMetadataOptions,
+  clientOverrides: Record<string, unknown> | null,
+): Record<string, unknown> => {
+  const base: Record<string, unknown> = {
     installation_id: identity.installationId,
     session_id: identity.sessionId,
     thread_id: identity.threadId,
@@ -157,12 +226,23 @@ const buildCodexTurnMetadata = (identity: CodexRequestIdentity, options: CodexTu
     window_id: identity.windowId,
     request_kind: options.requestKind,
   };
-  if (options.compaction !== undefined) metadata.compaction = options.compaction;
-  return metadata;
+  if (options.compaction !== undefined) base.compaction = options.compaction;
+  if (clientOverrides === null) return base;
+  // Identity-mirror keys already came from `identity`; only carry the
+  // caller's extras (turn_started_at_unix_ms, sandbox, workspaces,
+  // parent_thread_id, …) into the outgoing blob.
+  for (const [k, v] of Object.entries(clientOverrides)) {
+    if (!IDENTITY_MIRRORED_TURN_METADATA_KEYS.has(k)) base[k] = v;
+  }
+  return base;
 };
 
-const buildCodexTurnMetadataJson = (identity: CodexRequestIdentity, options: CodexTurnMetadataOptions): string =>
-  JSON.stringify(buildCodexTurnMetadata(identity, options));
+const buildCodexTurnMetadataJson = (
+  identity: CodexRequestIdentity,
+  options: CodexTurnMetadataOptions,
+  clientOverrides: Record<string, unknown> | null,
+): string =>
+  JSON.stringify(buildCodexTurnMetadata(identity, options, clientOverrides));
 
 const buildCodexClientMetadata = (identity: CodexRequestIdentity, turnMetadataJson: string): Record<string, string> => ({
   'x-codex-installation-id': identity.installationId,
@@ -178,12 +258,19 @@ const buildCodexResponsesBody = (
   identity: CodexRequestIdentity,
   turnMetadataJson: string,
 ): Record<string, unknown> => {
+  const callerExtras: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(clientCodexClientMetadata(opts.body))) {
+    if (!IDENTITY_MIRRORED_CLIENT_METADATA_KEYS.has(k)) callerExtras[k] = v;
+  }
   const body: Record<string, unknown> = {
     ...(opts.body as unknown as Record<string, unknown>),
     model: opts.model.id,
     store: false,
     stream: true,
-    client_metadata: buildCodexClientMetadata(identity, turnMetadataJson),
+    client_metadata: {
+      ...buildCodexClientMetadata(identity, turnMetadataJson),
+      ...callerExtras,
+    },
   };
   if (body.prompt_cache_key === undefined) body.prompt_cache_key = identity.threadId;
   return body;
@@ -211,8 +298,9 @@ const dispatchCodexHttpCall = async (
   body: Record<string, unknown>,
   identity: CodexRequestIdentity,
   metadata: CodexTurnMetadataOptions,
+  clientTurnMetadata: Record<string, unknown> | null,
 ): Promise<Response> => {
-  const turnMetadataJson = buildCodexTurnMetadataJson(identity, metadata);
+  const turnMetadataJson = buildCodexTurnMetadataJson(identity, metadata, clientTurnMetadata);
   const headers = new Headers();
   headers.set('authorization', `Bearer ${accessToken}`);
   headers.set('chatgpt-account-id', opts.account.chatgptAccountId);
@@ -222,7 +310,7 @@ const dispatchCodexHttpCall = async (
   headers.set('content-type', 'application/json');
   headers.set('session-id', identity.sessionId);
   headers.set('thread-id', identity.threadId);
-  headers.set('x-client-request-id', identity.threadId);
+  headers.set('x-client-request-id', identity.clientRequestId);
   headers.set('x-codex-window-id', identity.windowId);
   headers.set('x-codex-turn-metadata', turnMetadataJson);
 
@@ -290,9 +378,11 @@ const performStreamingResponsesCall = async (
   accessToken: string,
   alreadyRetried: boolean,
 ): Promise<ProviderStreamResult<ResponsesStreamEvent>> => {
-  const identity = await buildCodexRequestIdentity(opts);
+  const clientTurnMetadata = parseClientTurnMetadataJson(trimHeader(opts.headers, 'x-codex-turn-metadata'));
+  const clientMetadata = clientCodexClientMetadata(opts.body);
+  const identity = buildCodexRequestIdentity(opts, clientMetadata, clientTurnMetadata);
   const metadata = codexTurnMetadataOptions(opts);
-  const turnMetadataJson = buildCodexTurnMetadataJson(identity, metadata);
+  const turnMetadataJson = buildCodexTurnMetadataJson(identity, metadata, clientTurnMetadata);
   const upstreamFetch = dispatchCodexHttpCall(
     opts,
     accessToken,
@@ -301,6 +391,7 @@ const performStreamingResponsesCall = async (
     buildCodexResponsesBody(opts, identity, turnMetadataJson),
     identity,
     metadata,
+    clientTurnMetadata,
   ).then(ensureSseContentType);
 
   const result = await streamingProviderCall(upstreamFetch, parseResponsesStream, opts.model.id, opts.signal);
@@ -319,7 +410,9 @@ const performUnaryCompactCall = async (
   accessToken: string,
   alreadyRetried: boolean,
 ): Promise<ProviderCompactionResult> => {
-  const identity = await buildCodexRequestIdentity(opts);
+  const clientTurnMetadata = parseClientTurnMetadataJson(trimHeader(opts.headers, 'x-codex-turn-metadata'));
+  const clientMetadata = clientCodexClientMetadata(opts.body);
+  const identity = buildCodexRequestIdentity(opts, clientMetadata, clientTurnMetadata);
   const metadata = opts.turnMetadata ?? { requestKind: 'compaction' };
   const response = await dispatchCodexHttpCall(
     opts,
@@ -329,6 +422,7 @@ const performUnaryCompactCall = async (
     { ...opts.body, model: opts.model.id },
     identity,
     metadata,
+    clientTurnMetadata,
   );
 
   if (response.status === 401 && !alreadyRetried) {
