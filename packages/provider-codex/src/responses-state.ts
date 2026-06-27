@@ -62,7 +62,7 @@ const deriveSessionIdFromInput = async (payload: ResponsesPayload): Promise<stri
   const instructions = typeof payload.instructions === 'string' ? payload.instructions : '';
   // U+0001 separates the two seed components so an empty instructions can't
   // collide with the input prefix via string concatenation.
-  return await sha256Uuid(`${instructions}${JSON.stringify(firstItem)}`);
+  return await sha256Uuid(`${instructions}\u0001${JSON.stringify(firstItem)}`);
 };
 
 // First non-trivial input item — type-agnostic so post-compaction snapshots

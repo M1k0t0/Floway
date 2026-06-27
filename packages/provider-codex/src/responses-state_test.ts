@@ -202,6 +202,44 @@ test('prepareCodexResponsesRequest derives a stable session-id from instructions
   assertEquals(turn2Headers.get(FLOWAY_CODEX_SESSION_ID_HEADER), sessionId);
 });
 
+test('prepareCodexResponsesRequest derives different session-ids for different instructions', async () => {
+  const headersA = new Headers();
+  const headersB = new Headers();
+  await prepareCodexResponsesRequest({
+    headers: headersA,
+    payload: { model: 'gpt-test', instructions: 'You are pirate.', input: 'hello' },
+    snapshotState: new MemoryResponsesSnapshotState(),
+  });
+  await prepareCodexResponsesRequest({
+    headers: headersB,
+    payload: { model: 'gpt-test', instructions: 'You are scientist.', input: 'hello' },
+    snapshotState: new MemoryResponsesSnapshotState(),
+  });
+  assert(
+    headersA.get(FLOWAY_CODEX_SESSION_ID_HEADER) !== headersB.get(FLOWAY_CODEX_SESSION_ID_HEADER),
+    'expected distinct session-ids — instructions must feed into the seed',
+  );
+});
+
+test('prepareCodexResponsesRequest derives different session-ids for different first input items', async () => {
+  const headersA = new Headers();
+  const headersB = new Headers();
+  await prepareCodexResponsesRequest({
+    headers: headersA,
+    payload: { model: 'gpt-test', instructions: 'Sys.', input: 'topic A' },
+    snapshotState: new MemoryResponsesSnapshotState(),
+  });
+  await prepareCodexResponsesRequest({
+    headers: headersB,
+    payload: { model: 'gpt-test', instructions: 'Sys.', input: 'topic B' },
+    snapshotState: new MemoryResponsesSnapshotState(),
+  });
+  assert(
+    headersA.get(FLOWAY_CODEX_SESSION_ID_HEADER) !== headersB.get(FLOWAY_CODEX_SESSION_ID_HEADER),
+    'expected distinct session-ids — first input item must feed into the seed',
+  );
+});
+
 test('prepareCodexResponsesRequest derive seed is type-agnostic — post-compaction snapshots stay stable too', async () => {
   // Post-compaction stateful flow: the snapshot's compaction blob lands at
   // position 0 with no preceding user message. firstStableSeed must still
