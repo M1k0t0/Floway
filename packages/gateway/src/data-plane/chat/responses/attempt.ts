@@ -189,8 +189,9 @@ const prepareProviderResponsesRequest = async (
   candidate: ProviderCandidate,
   store: StatefulResponsesStore,
   headers: Headers,
+  payload: ResponsesPayload,
 ): Promise<void> => {
-  await candidate.provider.provider.prepareResponsesRequest?.({ snapshotState: store, headers });
+  await candidate.provider.provider.prepareResponsesRequest?.({ snapshotState: store, headers, payload });
 };
 
 type RewriteOutcome =
@@ -240,7 +241,7 @@ const dispatchResponses = async (
   const { candidate, targetApi, store } = invocation;
   switch (targetApi) {
   case 'responses': {
-    await prepareProviderResponsesRequest(candidate, store, invocation.headers);
+    await prepareProviderResponsesRequest(candidate, store, invocation.headers, invocation.payload);
     const recorder = createUpstreamLatencyRecorder();
     if (invocation.action === 'compact') {
       // The compact wire body drops `stream` and `store` — `store` is a

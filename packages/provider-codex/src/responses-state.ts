@@ -1,3 +1,5 @@
+import { sha256Uuid } from './ids.ts';
+import type { ResponsesPayload } from '@floway-dev/protocols/responses';
 import { uuidV7, type ProviderResponsesRequestContext, type ProviderResponsesSnapshotCommitContext, type ResponsesSnapshotState } from '@floway-dev/provider';
 
 export const FLOWAY_CODEX_SESSION_ID_HEADER = 'x-floway-codex-session-id';
@@ -13,7 +15,7 @@ export const CODEX_NEXT_WINDOW_GENERATION_METADATA_KEY = 'codex_next_window_gene
 
 const turnIdsBySnapshotState = new WeakMap<ResponsesSnapshotState, string>();
 
-export const prepareCodexResponsesRequest = ({ headers, snapshotState }: ProviderResponsesRequestContext): void => {
+export const prepareCodexResponsesRequest = async ({ headers, payload, snapshotState }: ProviderResponsesRequestContext): Promise<void> => {
   const downstreamWindowId = trimHeader(headers, 'x-codex-window-id');
   const downstreamSessionId = trimHeader(headers, 'session-id') ?? trimHeader(headers, 'session_id');
   headers.delete(FLOWAY_CODEX_SESSION_ID_HEADER);
@@ -21,7 +23,7 @@ export const prepareCodexResponsesRequest = ({ headers, snapshotState }: Provide
   headers.delete(FLOWAY_CODEX_WINDOW_ID_HEADER);
   headers.delete('x-codex-window-id');
 
-  const sessionId = ensureCodexSessionId(snapshotState, downstreamSessionId);
+  const sessionId = await ensureCodexSessionId(snapshotState, downstreamSessionId, payload);
   headers.set(FLOWAY_CODEX_SESSION_ID_HEADER, sessionId);
   headers.set(FLOWAY_CODEX_TURN_ID_HEADER, ensureCodexTurnId(snapshotState));
   headers.set(FLOWAY_CODEX_WINDOW_ID_HEADER, ensureCodexWindowId(snapshotState, sessionId, downstreamWindowId));
@@ -32,16 +34,50 @@ export const beforeCodexResponsesSnapshotCommit = ({ snapshotState, snapshotMode
   markCodexSnapshotContinued(snapshotState, responseId);
 };
 
-const ensureCodexSessionId = (state: ResponsesSnapshotState, downstreamSessionId: string | null): string => {
+const ensureCodexSessionId = async (state: ResponsesSnapshotState, downstreamSessionId: string | null, payload: ResponsesPayload): Promise<string> => {
   if (downstreamSessionId !== null) {
     state.setSnapshotMetadata(CODEX_SESSION_METADATA_KEY, downstreamSessionId);
     return downstreamSessionId;
   }
   const existing = stringMetadata(state, CODEX_SESSION_METADATA_KEY);
   if (existing !== null) return existing;
-  const sessionId = uuidV7();
+  // A stateless caller that re-sends the full conversation every turn would
+  // otherwise mint a fresh UUIDv7 per request and never hit chatgpt.com's
+  // prompt cache. Derive a stable id from `instructions + first input item`:
+  // the first item is the conversation's first user message pre-compaction
+  // and the snapshot's compaction blob post-compaction, both stable inside
+  // their respective context windows. Stateful callers using
+  // `previous_response_id` reach this code path with input already expanded
+  // from the snapshot in attempt.ts, so they pass the same first item across
+  // turns and hash to the same id without needing the snapshot metadata
+  // lookup above to fire.
+  const sessionId = await deriveSessionIdFromInput(payload) ?? uuidV7();
   state.setSnapshotMetadata(CODEX_SESSION_METADATA_KEY, sessionId);
   return sessionId;
+};
+
+const deriveSessionIdFromInput = async (payload: ResponsesPayload): Promise<string | null> => {
+  const firstItem = firstStableSeed(payload.input);
+  if (firstItem === null) return null;
+  const instructions = typeof payload.instructions === 'string' ? payload.instructions : '';
+  // U+0001 separates the two seed components so an empty instructions can't
+  // collide with the input prefix via string concatenation.
+  return await sha256Uuid(`${instructions}${JSON.stringify(firstItem)}`);
+};
+
+// First non-trivial input item — type-agnostic so post-compaction snapshots
+// (where the leading item is a `type: 'compaction'` blob with no preceding
+// user message) still produce a stable seed. Pre-compaction this is the
+// conversation's first user message verbatim; after compaction it is the
+// compaction blob, which is itself stable per snapshot.
+const firstStableSeed = (input: ResponsesPayload['input']): unknown => {
+  if (typeof input === 'string') return input;
+  if (!Array.isArray(input)) return null;
+  for (const item of input) {
+    if (typeof item !== 'object' || item === null) continue;
+    return item;
+  }
+  return null;
 };
 
 const ensureCodexTurnId = (state: ResponsesSnapshotState): string => {
