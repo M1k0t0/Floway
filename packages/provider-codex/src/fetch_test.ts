@@ -242,21 +242,24 @@ describe('callCodexResponses — upstream classification', () => {
     expect(headers.get('content-type')).toBe('application/json');
     expect(headers.get('session-id')).toBe('downstream-session');
     expect(headers.get('session_id')).toBeNull();
-    expect(headers.get('x-client-request-id')).toBe('downstream-session');
+    // Caller-supplied identity fields pass through; noise headers (cf-*,
+    // forwarded, x-real-ip, openai-beta, x-codex-beta-features) are dropped.
+    expect(headers.get('x-client-request-id')).toBe('req-123');
     expect(headers.get('thread-id')).toBe('downstream-session');
     expect(headers.get('x-codex-beta-features')).toBeNull();
-    expect(headers.get('x-codex-window-id')).toBe('downstream-session:0');
-    expect(headers.get('x-codex-window-id')).not.toBe('downstream-window');
+    expect(headers.get('x-codex-window-id')).toBe('downstream-window');
     const turnMetadataJson = headers.get('x-codex-turn-metadata');
     const turnMetadata = JSON.parse(turnMetadataJson ?? 'null') as Record<string, unknown>;
     expect(turnMetadata).toEqual({
-      installation_id: expect.stringMatching(UUID_V4_RE),
+      installation_id: 'downstream-installation',
       session_id: 'downstream-session',
       thread_id: 'downstream-session',
       turn_id: expect.stringMatching(UUID_V7_RE),
-      window_id: headers.get('x-codex-window-id'),
+      window_id: 'downstream-window',
       request_kind: 'turn',
     });
+    // 'turn-meta' is not valid JSON; the unparseable blob is dropped and we
+    // synthesize from identity instead.
     expect(headers.get('x-codex-turn-metadata')).not.toBe('turn-meta');
     expect(headers.get('cf-connecting-ip')).toBeNull();
     expect(headers.get('forwarded')).toBeNull();
@@ -266,7 +269,7 @@ describe('callCodexResponses — upstream classification', () => {
     const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string) as Record<string, unknown>;
     expect(body.prompt_cache_key).toBe('downstream-session');
     expect(body.client_metadata).toEqual({
-      'x-codex-installation-id': turnMetadata.installation_id,
+      'x-codex-installation-id': 'downstream-installation',
       session_id: turnMetadata.session_id,
       thread_id: turnMetadata.thread_id,
       'x-codex-window-id': turnMetadata.window_id,
@@ -529,6 +532,110 @@ describe('callCodexResponses — upstream classification', () => {
     expect(turnMetadata.installation_id).toBe(deviceId);
     const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string) as Record<string, unknown>;
     expect((body.client_metadata as Record<string, unknown>)['x-codex-installation-id']).toBe(deviceId);
+  });
+
+  test('prefers a caller-supplied installation id from client_metadata over the account device id', async () => {
+    seedFreshAccessToken();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
+    await callCodexResponses({
+      upstreamId, account: { ...activeAccount, openaiDeviceId: 'account-device-id' },
+      model,
+      body: {
+        input: [], stream: true,
+        client_metadata: { 'x-codex-installation-id': 'caller-installation-id' },
+      } as unknown as Parameters<typeof callCodexResponses>[0]['body'],
+      headers: new Headers(),
+      effects: makeEffects(),
+      call: noopUpstreamCallOptions(),
+    });
+
+    const headers = new Headers((fetchSpy.mock.calls[0][1] as RequestInit).headers);
+    const turnMetadata = JSON.parse(headers.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
+    expect(turnMetadata.installation_id).toBe('caller-installation-id');
+    const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string) as Record<string, unknown>;
+    expect((body.client_metadata as Record<string, unknown>)['x-codex-installation-id']).toBe('caller-installation-id');
+  });
+
+  test('passes through caller thread-id and x-client-request-id when distinct from session-id', async () => {
+    seedFreshAccessToken();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
+    await callCodexResponses({
+      upstreamId, account: activeAccount, model,
+      body: { input: [], stream: true },
+      headers: new Headers({
+        'session-id': 'sess',
+        'thread-id': 'parent-thread',
+        'x-client-request-id': 'req-xyz',
+      }),
+      effects: makeEffects(),
+      call: noopUpstreamCallOptions(),
+    });
+
+    const headers = new Headers((fetchSpy.mock.calls[0][1] as RequestInit).headers);
+    expect(headers.get('session-id')).toBe('sess');
+    expect(headers.get('thread-id')).toBe('parent-thread');
+    expect(headers.get('x-client-request-id')).toBe('req-xyz');
+    const turnMetadata = JSON.parse(headers.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
+    expect(turnMetadata.session_id).toBe('sess');
+    expect(turnMetadata.thread_id).toBe('parent-thread');
+  });
+
+  test('merges caller-supplied x-codex-turn-metadata extras over the synthesized blob', async () => {
+    seedFreshAccessToken();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
+    await callCodexResponses({
+      upstreamId, account: activeAccount, model,
+      body: { input: [], stream: true },
+      headers: new Headers({
+        'session-id': 'sess',
+        'x-codex-turn-metadata': JSON.stringify({
+          turn_started_at_unix_ms: 1700000000000,
+          thread_source: 'user',
+          parent_thread_id: 'parent-thread',
+          turn_id: 'caller-turn',
+        }),
+      }),
+      effects: makeEffects(),
+      call: noopUpstreamCallOptions(),
+    });
+
+    const headers = new Headers((fetchSpy.mock.calls[0][1] as RequestInit).headers);
+    const turnMetadata = JSON.parse(headers.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
+    expect(turnMetadata.session_id).toBe('sess');
+    expect(turnMetadata.turn_started_at_unix_ms).toBe(1700000000000);
+    expect(turnMetadata.thread_source).toBe('user');
+    expect(turnMetadata.parent_thread_id).toBe('parent-thread');
+    expect(turnMetadata.turn_id).toBe('caller-turn');
+    expect(turnMetadata.request_kind).toBe('turn');
+    // turn_id propagates to body's client_metadata as well so the three
+    // surfaces (header turn_metadata, body client_metadata, body
+    // client_metadata.x-codex-turn-metadata) stay consistent.
+    const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string) as Record<string, unknown>;
+    expect((body.client_metadata as Record<string, unknown>).turn_id).toBe('caller-turn');
+  });
+
+  test('preserves caller client_metadata extras while keeping identity-mirror keys gateway-owned', async () => {
+    seedFreshAccessToken();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
+    await callCodexResponses({
+      upstreamId, account: activeAccount, model,
+      body: {
+        input: [], stream: true,
+        client_metadata: { 'x-extra-key': 'caller-supplied', session_id: 'caller-override' },
+      } as unknown as Parameters<typeof callCodexResponses>[0]['body'],
+      headers: new Headers({ 'session-id': 'sess' }),
+      effects: makeEffects(),
+      call: noopUpstreamCallOptions(),
+    });
+
+    const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string) as Record<string, unknown>;
+    const clientMetadata = body.client_metadata as Record<string, unknown>;
+    // Non-identity extras pass through verbatim.
+    expect(clientMetadata['x-extra-key']).toBe('caller-supplied');
+    // Identity-mirror keys come from identity (header beats body), so the
+    // three surfaces never disagree.
+    expect(clientMetadata.session_id).toBe('sess');
+    expect(clientMetadata.thread_id).toBe('sess');
   });
 
   test('401 token_invalidated → persistTerminalState session_terminated, return 503', async () => {
