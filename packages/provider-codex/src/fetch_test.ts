@@ -13,7 +13,7 @@ const makeEffects = (): CodexCallEffects => ({
   persistTerminalState: vi.fn(async () => {}),
 });
 
-const activeAccount: CodexAccountCredential = { chatgptAccountId: 'acc', refresh_token: 'rt_v1', state: 'active', state_updated_at: '2026-01-01T00:00:00Z', accessToken: null, quotaSnapshot: null };
+const activeAccount: CodexAccountCredential = { chatgptAccountId: 'acc', refresh_token: 'rt_v1', state: 'active', state_updated_at: '2026-01-01T00:00:00Z', openaiDeviceId: '11111111-2222-4333-8444-555555555555', accessToken: null, quotaSnapshot: null };
 const model: UpstreamModel = {
   id: 'gpt-5.4', display_name: 'gpt-5.4', kind: 'chat', limits: {}, endpoints: { responses: {} }, enabledFlags: new Set(),
 };
@@ -513,6 +513,22 @@ describe('callCodexResponses — upstream classification', () => {
     expect(headers.get('session-id')).toMatch(UUID_V7_RE);
     expect(headers.get('thread-id')).toBe(headers.get('session-id'));
     expect(headers.get('session_id')).toBeNull();
+  });
+
+  test('uses account.openaiDeviceId as the installation id', async () => {
+    seedFreshAccessToken();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
+    const deviceId = '22222222-3333-4444-9555-666666666666';
+    await callCodexResponses({
+      upstreamId, account: { ...activeAccount, openaiDeviceId: deviceId },
+      model, body: { input: [], stream: true }, headers: new Headers(), effects: makeEffects(), call: noopUpstreamCallOptions(),
+    });
+
+    const headers = new Headers((fetchSpy.mock.calls[0][1] as RequestInit).headers);
+    const turnMetadata = JSON.parse(headers.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
+    expect(turnMetadata.installation_id).toBe(deviceId);
+    const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string) as Record<string, unknown>;
+    expect((body.client_metadata as Record<string, unknown>)['x-codex-installation-id']).toBe(deviceId);
   });
 
   test('401 token_invalidated → persistTerminalState session_terminated, return 503', async () => {

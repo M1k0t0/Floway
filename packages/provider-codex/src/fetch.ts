@@ -7,7 +7,6 @@ import {
   CODEX_RESPONSES_PATH,
   CODEX_USER_AGENT,
 } from './constants.ts';
-import { sha256Uuid } from './ids.ts';
 import {
   getCodexQuota,
   isCodexRateLimited,
@@ -147,7 +146,7 @@ const buildCodexRequestIdentity = async (opts: CodexBackendCallBase): Promise<Co
     ?? trimHeader(opts.headers, 'session-id')
     ?? trimHeader(opts.headers, 'session_id')
     ?? uuidV7();
-  const installationId = await sha256Uuid(`codex-installation:${opts.upstreamId}:${opts.account.chatgptAccountId}`);
+  const installationId = opts.account.openaiDeviceId;
   const turnId = trimHeader(opts.headers, FLOWAY_CODEX_TURN_ID_HEADER) ?? uuidV7();
   const windowId = trimHeader(opts.headers, FLOWAY_CODEX_WINDOW_ID_HEADER) ?? `${sessionId}:0`;
   return { installationId, sessionId, threadId: sessionId, turnId, windowId };
