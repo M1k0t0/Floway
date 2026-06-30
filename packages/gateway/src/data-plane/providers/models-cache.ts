@@ -1,6 +1,6 @@
 import { getRepo } from '../../repo/index.ts';
 import type { BackgroundScheduler } from '@floway-dev/platform';
-import { defaultsForProvider, resolveEffectiveFlags, type Fetcher, type ModelProviderInstance, type UpstreamModel } from '@floway-dev/provider';
+import type { Fetcher, ModelProviderInstance, UpstreamModel } from '@floway-dev/provider';
 
 // Soft TTL: a fetched row is served verbatim within this window with no
 // upstream call. Past SOFT but within HARD, the stored row is still served
@@ -44,20 +44,11 @@ const memoInFlight = (
 
 const errorMessage = (err: unknown): string => err instanceof Error ? err.message : String(err);
 
-const sameSet = (left: ReadonlySet<string>, right: ReadonlySet<string>): boolean =>
-  left.size === right.size && [...left].every(value => right.has(value));
-
-const modelsWithCurrentCodexFlags = async (
+const rehydrateCachedModels = (
   instance: ModelProviderInstance,
   models: UpstreamModel[],
-): Promise<UpstreamModel[]> => {
-  if (instance.providerKind !== 'codex') return models;
-  const record = await getRepo().upstreams.getById(instance.upstream);
-  if (record?.provider !== 'codex') return models;
-  const enabledFlags = resolveEffectiveFlags(defaultsForProvider('codex'), [record.flagOverrides]);
-  if (models.every(model => sameSet(model.enabledFlags, enabledFlags))) return models;
-  return models.map(model => ({ ...model, enabledFlags }));
-};
+): UpstreamModel[] =>
+  [...(instance.provider.rehydrateCachedModels?.(models) ?? models)];
 
 const runFetch = async (
   instance: ModelProviderInstance,
@@ -90,7 +81,7 @@ export const fetchUpstreamModelsCached = async (
   }
 
   const cached = await getRepo().modelsCache.get(key);
-  const cachedModels = cached ? await modelsWithCurrentCodexFlags(instance, cached.models) : null;
+  const cachedModels = cached ? rehydrateCachedModels(instance, cached.models) : null;
 
   if (cached && now - cached.fetchedAt < SOFT_MS) {
     return cachedModels!;

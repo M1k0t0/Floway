@@ -13,6 +13,7 @@
 // standard and no vendor rewrite runs.
 
 import type { UpstreamProviderKind } from './model.ts';
+import type { UpstreamModel } from './model.ts';
 import { ALL_PROVIDER_KINDS } from './model.ts';
 
 export interface Flag {
@@ -175,6 +176,23 @@ const EXCLUSIVE_FLAGS: Readonly<Record<string, readonly string[]>> = {
 const enableFlag = (effective: Set<string>, id: string): void => {
   for (const conflicting of EXCLUSIVE_FLAGS[id] ?? []) effective.delete(conflicting);
   effective.add(id);
+};
+
+const sameSet = (left: ReadonlySet<string>, right: ReadonlySet<string>): boolean =>
+  left.size === right.size && [...left].every(value => right.has(value));
+
+export const rehydrateModelFlags = (
+  models: readonly UpstreamModel[],
+  resolveEnabledFlags: (model: UpstreamModel) => ReadonlySet<string>,
+): readonly UpstreamModel[] => {
+  let changed = false;
+  const next = models.map(model => {
+    const enabledFlags = resolveEnabledFlags(model);
+    if (sameSet(model.enabledFlags, enabledFlags)) return model;
+    changed = true;
+    return { ...model, enabledFlags };
+  });
+  return changed ? next : models;
 };
 
 // Reduce a sequence of override layers atop the provider defaults to the

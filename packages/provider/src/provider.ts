@@ -112,6 +112,11 @@ export interface ModelProvider {
   // latency budget, so it takes the per-upstream fetcher directly instead of
   // the broader `UpstreamCallOptions` bag the data-plane `call*` methods use.
   getProvidedModels(fetcher: Fetcher): Promise<readonly UpstreamModel[]>;
+  // Re-stamp config-derived model metadata on a SOFT/HARD cache hit without
+  // forcing an upstream catalog fetch. Provider instances are built from the
+  // current UpstreamRecord, so this gives routing the latest flag defaults and
+  // operator overrides while preserving the cached catalog shape.
+  rehydrateCachedModels?(models: readonly UpstreamModel[]): readonly UpstreamModel[];
   // Resolve pricing for a usage record's `model_key` (the raw upstream model id).
   getPricingForModelKey(modelKey: string): ModelPricing | null;
   // /v1/completions text completions. Passthrough. Providers whose

@@ -1,6 +1,6 @@
 import { test } from 'vitest';
 
-import type { UpstreamRecord } from '@floway-dev/provider';
+import type { UpstreamModel, UpstreamRecord } from '@floway-dev/provider';
 import { directFetcher } from '@floway-dev/provider';
 import { createAzureProvider } from '@floway-dev/provider-azure';
 import { assertEquals, noopUpstreamCallOptions, sseResponse, withMockedFetch } from '@floway-dev/test-utils';
@@ -295,6 +295,39 @@ test('createAzureProvider applies per-model flag overrides on top of the upstrea
   assertEquals(d1.enabledFlags.has('vendor-kimi'), false);
   assertEquals(d2.enabledFlags.has('vendor-deepseek'), false);
   assertEquals(d2.enabledFlags.has('vendor-kimi'), true);
+});
+
+test('createAzureProvider rehydrates cached model flags from current per-model config', () => {
+  const instance = createAzureProvider(
+    azureRecord({
+      flagOverrides: { 'vendor-deepseek': true },
+      disabledPublicModelIds: [],
+      config: {
+        endpoint: 'https://example.openai.azure.com/openai/v1',
+        apiKey: 'az-key',
+        models: [
+          { upstreamModelId: 'd1', endpoints: { chatCompletions: {} } },
+          {
+            upstreamModelId: 'd2',
+            endpoints: { chatCompletions: {} },
+            flagOverrides: { enabled: true, values: { 'vendor-deepseek': false, 'vendor-kimi': true } },
+          },
+        ],
+      },
+    }),
+  );
+  const cached: UpstreamModel[] = [
+    { id: 'd1', limits: {}, kind: 'chat', endpoints: { chatCompletions: {} }, providerData: { upstreamModelId: 'd1' }, enabledFlags: new Set() },
+    { id: 'd2', limits: {}, kind: 'chat', endpoints: { chatCompletions: {} }, providerData: { upstreamModelId: 'd2' }, enabledFlags: new Set(['vendor-deepseek']) },
+  ];
+
+  const rehydrated = instance.provider.rehydrateCachedModels?.(cached);
+  if (!rehydrated) throw new Error('expected rehydrateCachedModels hook');
+
+  assertEquals(rehydrated[0]!.enabledFlags.has('vendor-deepseek'), true);
+  assertEquals(rehydrated[0]!.enabledFlags.has('vendor-kimi'), false);
+  assertEquals(rehydrated[1]!.enabledFlags.has('vendor-deepseek'), false);
+  assertEquals(rehydrated[1]!.enabledFlags.has('vendor-kimi'), true);
 });
 
 test('createAzureProvider skips the per-model layer when flagOverrides.enabled is false', async () => {

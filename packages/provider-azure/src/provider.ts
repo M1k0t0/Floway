@@ -4,7 +4,7 @@ import { parseChatCompletionsStream } from '@floway-dev/protocols/chat-completio
 import { kindForEndpoints } from '@floway-dev/protocols/common';
 import { parseMessagesStream } from '@floway-dev/protocols/messages';
 import { parseResponsesStream, type ResponsesResult, toCompactPayloadShape } from '@floway-dev/protocols/responses';
-import { type ModelProvider, type ModelProviderInstance, type ProviderStreamParser, type UpstreamCallOptions, type UpstreamFetchOptions, type UpstreamModel, type UpstreamRecord, defaultsForProvider, publicModelId, resolveEffectiveFlags, streamingProviderCall } from '@floway-dev/provider';
+import { type ModelProvider, type ModelProviderInstance, type ProviderStreamParser, type UpstreamCallOptions, type UpstreamFetchOptions, type UpstreamModel, type UpstreamRecord, defaultsForProvider, publicModelId, rehydrateModelFlags, resolveEffectiveFlags, streamingProviderCall } from '@floway-dev/provider';
 
 const providerData = (model: UpstreamModel): { upstreamModelId: string } => model.providerData as { upstreamModelId: string };
 
@@ -12,6 +12,10 @@ type AzureTypedFetch = (config: ReturnType<typeof assertAzureUpstreamRecord>['co
 
 export const createAzureProvider = (record: UpstreamRecord): ModelProviderInstance => {
   const azure = assertAzureUpstreamRecord(record);
+  const enabledFlagsByUpstreamModelId = new Map(azure.config.models.map(model => {
+    const modelLayer = model.flagOverrides?.enabled ? model.flagOverrides.values : undefined;
+    return [model.upstreamModelId, resolveEffectiveFlags(defaultsForProvider('azure'), [azure.flagOverrides, modelLayer])] as const;
+  }));
 
   const callStreaming = <TEvent>(
     transport: AzureTypedFetch,
@@ -44,8 +48,6 @@ export const createAzureProvider = (record: UpstreamRecord): ModelProviderInstan
   const provider: ModelProvider = {
     getProvidedModels() {
       return Promise.resolve(azure.config.models.map(model => {
-        const modelLayer = model.flagOverrides?.enabled ? model.flagOverrides.values : undefined;
-        const effective = resolveEffectiveFlags(defaultsForProvider('azure'), [azure.flagOverrides, modelLayer]);
         const endpoints = model.endpoints;
         return {
           id: publicModelId(model),
@@ -56,10 +58,14 @@ export const createAzureProvider = (record: UpstreamRecord): ModelProviderInstan
           kind: kindForEndpoints(endpoints),
           endpoints,
           providerData: { upstreamModelId: model.upstreamModelId },
-          enabledFlags: effective,
+          enabledFlags: enabledFlagsByUpstreamModelId.get(model.upstreamModelId)!,
         };
       }));
     },
+    rehydrateCachedModels: models => rehydrateModelFlags(
+      models,
+      model => enabledFlagsByUpstreamModelId.get(providerData(model).upstreamModelId) ?? model.enabledFlags,
+    ),
     getPricingForModelKey(modelKey) {
       return azure.config.models.find(model => model.upstreamModelId === modelKey)?.cost ?? null;
     },

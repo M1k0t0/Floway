@@ -46,6 +46,7 @@ const autoWrap = <T>(impl: T | undefined): T | undefined => {
 
 export const stubProvider = (overrides: Partial<ModelProvider> = {}): ModelProvider => ({
   getProvidedModels: overrides.getProvidedModels ?? (() => Promise.resolve([])),
+  ...(overrides.rehydrateCachedModels ? { rehydrateCachedModels: overrides.rehydrateCachedModels } : {}),
   getPricingForModelKey: overrides.getPricingForModelKey ?? (() => null),
   callCompletions: autoWrap(overrides.callCompletions) ?? (() => Promise.reject(new Error('stubProvider.callCompletions was called'))),
   callChatCompletions: autoWrap(overrides.callChatCompletions) ?? (() => Promise.reject(new Error('stubProvider.callChatCompletions was called'))),

@@ -69,6 +69,7 @@ export {
   getFlagCatalog,
   isKnownFlagId,
   parseFlagOverridesWire,
+  rehydrateModelFlags,
   resolveEffectiveFlags,
 } from './flags.ts';
 

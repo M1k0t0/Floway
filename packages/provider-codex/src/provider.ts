@@ -9,7 +9,7 @@ import { pricingForCodexModelKey } from './pricing.ts';
 import { assertCodexUpstreamState, type CodexUpstreamState } from './state.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
 import { toCompactPayloadShape } from '@floway-dev/protocols/responses';
-import { defaultsForProvider, getProviderRepo, resolveEffectiveFlags, type ModelProvider, type ModelProviderInstance, type ProviderCallResult, type ProviderResponsesResult, type ProviderStreamResult, type UpstreamCallOptions, type UpstreamRecord } from '@floway-dev/provider';
+import { defaultsForProvider, getProviderRepo, rehydrateModelFlags, resolveEffectiveFlags, type ModelProvider, type ModelProviderInstance, type ProviderCallResult, type ProviderResponsesResult, type ProviderStreamResult, type UpstreamCallOptions, type UpstreamRecord } from '@floway-dev/provider';
 
 export const createCodexProvider = async (record: UpstreamRecord): Promise<ModelProviderInstance> => {
   assertCodexUpstreamRecord(record);
@@ -95,6 +95,7 @@ export const createCodexProvider = async (record: UpstreamRecord): Promise<Model
       // toggles them per-upstream when needed.
       return raw.map(r => codexRawToUpstreamModel(r, enabledFlags));
     },
+    rehydrateCachedModels: models => rehydrateModelFlags(models, () => enabledFlags),
 
     // Codex itself is a flat-fee subscription, but the dashboard reports
     // notional cost per request as if the operator were paying OpenAI's

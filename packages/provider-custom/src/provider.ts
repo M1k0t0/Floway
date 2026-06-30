@@ -6,7 +6,7 @@ import { parseChatCompletionsStream } from '@floway-dev/protocols/chat-completio
 import { type ModelEndpoints, type ModelPricing, kindForEndpoints } from '@floway-dev/protocols/common';
 import { parseMessagesStream } from '@floway-dev/protocols/messages';
 import { parseResponsesStream, type ResponsesResult, toCompactPayloadShape } from '@floway-dev/protocols/responses';
-import { publicModelId, resolveEffectiveFlags, defaultsForProvider, streamingProviderCall, type ModelProvider, type ModelProviderInstance, type ProviderCallResult, type ProviderStreamParser, type UpstreamCallOptions, type UpstreamFetchOptions, type UpstreamModel, type UpstreamRecord } from '@floway-dev/provider';
+import { publicModelId, resolveEffectiveFlags, defaultsForProvider, rehydrateModelFlags, streamingProviderCall, type ModelProvider, type ModelProviderInstance, type ProviderCallResult, type ProviderStreamParser, type UpstreamCallOptions, type UpstreamFetchOptions, type UpstreamModel, type UpstreamRecord } from '@floway-dev/provider';
 
 const rawModelIdOf = (model: UpstreamModel): string => model.providerData as string;
 
@@ -94,6 +94,7 @@ export const createCustomProvider = (record: UpstreamRecord): ModelProviderInsta
     if (model.chat) internal.chat = model.chat;
     return internal;
   });
+  const manualFlagsByUpstreamId = new Map(manualModels.map(model => [rawModelIdOf(model), model.enabledFlags] as const));
   const manualPricingByUpstreamId = new Map<string, ModelPricing>(
     config.models.flatMap(m => (m.cost ? [[m.upstreamModelId, m.cost] as const] : [])),
   );
@@ -177,6 +178,10 @@ export const createCustomProvider = (record: UpstreamRecord): ModelProviderInsta
       rememberPricingFromResponse(response);
       return withManual(autoFromResponse(response));
     },
+    rehydrateCachedModels: models => rehydrateModelFlags(
+      models,
+      model => manualFlagsByUpstreamId.get(rawModelIdOf(model)) ?? upstreamFlags,
+    ),
     getPricingForModelKey: modelKey => manualPricingByUpstreamId.get(modelKey) ?? pricingByRawId.get(modelKey) ?? null,
     callCompletions: (model, body, signal, opts) => call(customFetchCompletions, model, body, signal, opts.headers, opts),
     callChatCompletions: (model, body, signal, opts) => callStreaming(customFetchChatCompletions, model, body, signal, opts.headers, parseChatCompletionsStream, opts),

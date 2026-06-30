@@ -11,6 +11,7 @@ import type { MessagesStreamEvent } from '@floway-dev/protocols/messages';
 import {
   defaultsForProvider,
   getProviderRepo,
+  rehydrateModelFlags,
   resolveEffectiveFlags,
   type ModelProvider,
   type ModelProviderInstance,
@@ -39,6 +40,7 @@ export const createClaudeCodeProvider = async (record: UpstreamRecord): Promise<
       const apiModels = await fetchClaudeCodeModelsList(access.entry.token, fetcher);
       return buildClaudeCodeCatalog(apiModels, enabledFlags);
     },
+    rehydrateCachedModels: models => rehydrateModelFlags(models, () => enabledFlags),
 
     getPricingForModelKey: pricingForClaudeCodeModelKey,
 
