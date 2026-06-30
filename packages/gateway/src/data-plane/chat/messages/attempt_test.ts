@@ -8,9 +8,10 @@ import type { ChatGatewayCtx } from '../shared/gateway-ctx.ts';
 import type { ChatCompletionsStreamEvent } from '@floway-dev/protocols/chat-completions';
 import { doneFrame, eventFrame, type ModelEndpoints, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { MessagesPayload, MessagesStreamEvent } from '@floway-dev/protocols/messages';
-import type { ResponsesResult } from '@floway-dev/protocols/responses';
+import type { ResponsesPayload, ResponsesResult } from '@floway-dev/protocols/responses';
 import { type ModelCandidate, directFetcher, type ProviderCallResult, type ProviderResponsesResult, type ProviderStreamResult, type ResponsesAction, type UpstreamCallOptions } from '@floway-dev/provider';
-import { assertEquals, assertExists, stubProvider, stubInternalModel } from '@floway-dev/test-utils';
+import type { FlagId } from '@floway-dev/provider/flags';
+import { assertEquals, assertExists, stubProvider, stubInternalModel, stubProviderModel } from '@floway-dev/test-utils';
 
 const API_KEY_ID = 'key_messages_attempt_test';
 
@@ -67,8 +68,10 @@ const makeCandidate = (overrides: {
   callResponses?: (model: unknown, body: unknown, action: ResponsesAction, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderResponsesResult>;
   callChatCompletions?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderStreamResult<ChatCompletionsStreamEvent>>;
   callMessagesCountTokens?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderCallResult>;
+  enabledFlags?: ReadonlySet<FlagId>;
 } = {}): ModelCandidate => {
   const upstream = overrides.upstream ?? 'up_test';
+  const endpoints = overrides.endpoints ?? { chatCompletions: {}, responses: {}, messages: {} };
   const provider = stubProvider({
     callMessages: overrides.callMessages,
     callResponses: overrides.callResponses,
@@ -80,7 +83,12 @@ const makeCandidate = (overrides: {
       upstream, kind: 'custom', name: upstream,
       disabledPublicModelIds: [], modelPrefix: null, instance: provider, supportsResponsesItemReference: true,
     },
-    model: stubInternalModel(overrides.endpoints ? { endpoints: overrides.endpoints } : {}, upstream),
+    model: stubInternalModel({
+      endpoints,
+      providerModels: {
+        [upstream]: stubProviderModel({ endpoints, enabledFlags: new Set<FlagId>(overrides.enabledFlags ?? []) }),
+      },
+    }, upstream),
     fetcher: directFetcher,
   };
 };
@@ -144,6 +152,122 @@ test('generate translate-to-responses branch routes through responsesAttempt', a
   if (result.type !== 'events') throw new Error('unreachable');
   await collectEvents(result.events);
   assertEquals(callResponses.mock.calls.length, 1);
+});
+
+test('generate translate-to-responses branch runs target role promotion after Messages translation', async () => {
+  installRepo();
+  const observedBodies: Omit<ResponsesPayload, 'model'>[] = [];
+  const callResponses = vi.fn(async (_model, body): Promise<ProviderResponsesResult> => {
+    observedBodies.push(body as Omit<ResponsesPayload, 'model'>);
+    return {
+      action: 'generate',
+      ok: true,
+      events: makeProtocolFrames([{
+        type: 'response.completed',
+        sequence_number: 0,
+        response: {
+          id: 'resp_x',
+          object: 'response',
+          model: 'test-model',
+          status: 'completed',
+          output: [],
+          output_text: '',
+          error: null,
+          incomplete_details: null,
+        },
+      }]),
+      modelKey: 'k',
+      headers: new Headers(),
+    };
+  });
+
+  const result = await messagesAttempt.generate({
+    payload: makePayload({
+      messages: [
+        { role: 'user', content: 'hello' },
+        { role: 'system', content: 'inline instructions' },
+      ],
+    }),
+    ctx: makeGatewayCtx(),
+    candidate: makeCandidate({
+      callResponses,
+      endpoints: { responses: {} },
+      enabledFlags: new Set<FlagId>(['promote-system-to-developer']),
+    }),
+    headers: new Headers(),
+  });
+
+  assertEquals(result.type, 'events');
+  if (result.type !== 'events') throw new Error('unreachable');
+  await collectEvents(result.events);
+  assertEquals(callResponses.mock.calls.length, 1);
+  const observedBody = observedBodies[0];
+  if (!observedBody) throw new Error('expected observed Responses body');
+  const input = observedBody.input;
+  if (!Array.isArray(input)) throw new Error('expected Responses input array');
+  assertEquals(input[0], { type: 'message', role: 'user', content: 'hello' });
+  assertEquals(input[1], { type: 'message', role: 'developer', content: 'inline instructions' });
+});
+
+test('generate translate-to-responses branch promotes multi-block system prefix', async () => {
+  installRepo();
+  const observedBodies: Omit<ResponsesPayload, 'model'>[] = [];
+  const callResponses = vi.fn(async (_model, body): Promise<ProviderResponsesResult> => {
+    observedBodies.push(body as Omit<ResponsesPayload, 'model'>);
+    return {
+      action: 'generate',
+      ok: true,
+      events: makeProtocolFrames([{
+        type: 'response.completed',
+        sequence_number: 0,
+        response: {
+          id: 'resp_x',
+          object: 'response',
+          model: 'test-model',
+          status: 'completed',
+          output: [],
+          output_text: '',
+          error: null,
+          incomplete_details: null,
+        },
+      }]),
+      modelKey: 'k',
+      headers: new Headers(),
+    };
+  });
+
+  const result = await messagesAttempt.generate({
+    payload: makePayload({
+      system: [{ type: 'text', text: 'base A' }, { type: 'text', text: 'base B' }],
+      messages: [
+        { role: 'user', content: 'hello' },
+        { role: 'system', content: 'inline instructions' },
+      ],
+    }),
+    ctx: makeGatewayCtx(),
+    candidate: makeCandidate({
+      callResponses,
+      endpoints: { responses: {} },
+      enabledFlags: new Set<FlagId>(['promote-system-to-developer']),
+    }),
+    headers: new Headers(),
+  });
+
+  assertEquals(result.type, 'events');
+  if (result.type !== 'events') throw new Error('unreachable');
+  await collectEvents(result.events);
+  assertEquals(callResponses.mock.calls.length, 1);
+  const observedBody = observedBodies[0];
+  if (!observedBody) throw new Error('expected observed Responses body');
+  const input = observedBody.input;
+  if (!Array.isArray(input)) throw new Error('expected Responses input array');
+  assertEquals(input[0], {
+    type: 'message',
+    role: 'developer',
+    content: [{ type: 'input_text', text: 'base A' }, { type: 'input_text', text: 'base B' }],
+  });
+  assertEquals(input[1], { type: 'message', role: 'user', content: 'hello' });
+  assertEquals(input[2], { type: 'message', role: 'developer', content: 'inline instructions' });
 });
 
 test('countTokens proxies the upstream response as a plain result', async () => {

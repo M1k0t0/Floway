@@ -87,6 +87,11 @@ export const OPTIONAL_FLAGS = [
     description: "Rewrite messages with role 'developer' to role 'system' for upstreams that do not recognise the developer role.",
   },
   {
+    id: 'promote-system-to-developer',
+    label: 'Promote system role to developer',
+    description: "Rewrite inline messages with role 'system' to role 'developer' for upstreams, such as Codex, that receive base system instructions through a top-level field and expect in-history instruction messages as developer role. Reference: https://github.com/openai/codex/blob/1f17e7512f0e47625f2cad416f14870688a99814/codex-rs/core/src/client.rs#L829-L849",
+  },
+  {
     id: 'strip-billing-attribution',
     label: 'Strip Claude Code billing attribution from system prompt',
     description: "Remove `x-anthropic-billing-header:` lines from the request's system prompt before forwarding upstream. The block is irrelevant to non-Anthropic upstreams and only pollutes their prompt-cache key. On `claude-code`, the same block is the input Anthropic uses to bill the request against the user's plan and must be preserved.",

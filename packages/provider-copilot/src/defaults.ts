@@ -22,6 +22,7 @@ export const COPILOT_DEFAULT_FLAGS: FlagDefaults = {
   // basis.
   'demote-interleaved-system-to-user': false,
   'demote-developer-to-system': false,
+  'promote-system-to-developer': false,
   'strip-billing-attribution': true,
   'strip-prompt-cache-key': false,
 };

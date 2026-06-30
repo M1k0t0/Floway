@@ -3,6 +3,7 @@ import { withResponsesCompactShim } from './compact-shim.ts';
 import { withDemoteDeveloperToSystem } from './demote-developer-to-system.ts';
 import { withInterleavedSystemDemotedToUser } from './demote-interleaved-system-to-user.ts';
 import { withReasoningDisabledOnForcedToolChoice } from './disable-reasoning-on-forced-tool-choice.ts';
+import { withPromoteSystemToDeveloper } from './promote-system-to-developer.ts';
 import { withCyberPolicyRetried } from './retry-cyber-policy.ts';
 import { withResponsesServerToolShim } from './server-tool-shim.ts';
 import { imageGenerationServerTool } from './server-tools/image-generation.ts';
@@ -27,6 +28,11 @@ import { withVendorQwenResponsesNormalize } from './vendor-qwen-normalize.ts';
 //   - withCyberPolicyRetried: gated by `retry-cyber-policy`.
 //   - withReasoningDisabledOnForcedToolChoice: gated by
 //     `disable-reasoning-on-forced-tool-choice`.
+//   - withPromoteSystemToDeveloper: gated by `promote-system-to-developer`.
+//     Runs before interleaved-system demotion so Codex-shaped system items
+//     become developer messages rather than user text. Provider boundaries that
+//     need top-level instruction placement (Codex) can hoist the leading
+//     developer prefix after this generic role conversion.
 //   - withDemoteDeveloperToSystem: gated by `demote-developer-to-system`.
 //     Runs before withInterleavedSystemDemotedToUser so when both flags are
 //     on, a `developer` role first lands as `system`, then any system that
@@ -60,6 +66,7 @@ export const responsesInterceptors: readonly ResponsesInterceptor[] = [
   ]),
   withCyberPolicyRetried,
   withReasoningDisabledOnForcedToolChoice,
+  withPromoteSystemToDeveloper,
   withDemoteDeveloperToSystem,
   withInterleavedSystemDemotedToUser,
   withPromptCacheKeyStripped,
