@@ -7,7 +7,7 @@ import { computed, reactive, ref, watch } from 'vue';
 import ModelEditor from './ModelEditor.vue';
 import { newUiId, type Row, seedFromAuto } from './modelRows.ts';
 import ModelsGrid from './ModelsGrid.vue';
-import type { UpstreamModelConfig } from '../../api/types.ts';
+import type { UpstreamModelConfig, UpstreamProviderKind } from '../../api/types.ts';
 import type { Flag, FlagDefaults, FlagOverrides } from '@floway-dev/provider/flags';
 import { Button } from '@floway-dev/ui';
 
@@ -23,6 +23,7 @@ const props = withDefaults(defineProps<{
   flags: Flag[];
   upstreamFlagOverrides: FlagOverrides;
   providerFlagDefaults: FlagDefaults;
+  providerKind: UpstreamProviderKind;
   upstreamIdLabel: string;
   // Fully read-only: no add, no mode switch, no editing.
   readOnly?: boolean;
@@ -310,6 +311,7 @@ watch(manualModels, () => {
         :flags="flags"
         :upstream-flag-overrides="upstreamFlagOverrides"
         :provider-flag-defaults="providerFlagDefaults"
+        :provider-kind="providerKind"
         :upstream-id-label="upstreamIdLabel"
         :is-upstream-id-locked="selectedRow !== null && lockedUpstreamId.has(selectedRow.uiId)"
         :has-auto-counterpart="selectedRow !== null && hasAutoCounterpart(selectedRow)"

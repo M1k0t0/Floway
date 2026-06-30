@@ -4,7 +4,7 @@ import { computed, ref, watch } from 'vue';
 import EndpointsField from './EndpointsField.vue';
 import FlagOverridesEditor from './FlagOverridesEditor.vue';
 import { defaultEndpointsForKind, publicIdOf, titleFor, type Row } from './modelRows.ts';
-import type { AnnouncedMetadata, BillingDimension, ModelKind, ModelPricing, UpstreamChatConfig, UpstreamModelConfig } from '../../api/types.ts';
+import type { AnnouncedMetadata, BillingDimension, ModelKind, ModelPricing, UpstreamChatConfig, UpstreamModelConfig, UpstreamProviderKind } from '../../api/types.ts';
 import { parseOptionalNumber } from '../../utils/parse-optional-number.ts';
 import ChatMetadataEditor from '../shared/ChatMetadataEditor.vue';
 import type { Flag, FlagDefaults, FlagOverrides } from '@floway-dev/provider/flags';
@@ -15,6 +15,7 @@ const props = defineProps<{
   flags: Flag[];
   upstreamFlagOverrides: FlagOverrides;
   providerFlagDefaults: FlagDefaults;
+  providerKind: UpstreamProviderKind;
   // "Upstream Model ID" for custom/copilot, "Deployment" for azure.
   upstreamIdLabel: string;
   // True when this manual row's upstream id is fixed (seeded from an auto
@@ -547,6 +548,7 @@ watch(isReasoningValid, valid => { emit('validity-change', valid); }, { immediat
             :model-value="config.flagOverrides ?? {}"
             :flags="flags"
             :provider-defaults="providerFlagDefaults"
+            :provider-kind="providerKind"
             :inherited-overrides="upstreamFlagOverrides"
             :name-prefix="`${row.uiId}-flag`"
             :read-only="!editable"

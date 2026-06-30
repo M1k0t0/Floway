@@ -87,6 +87,11 @@ export const OPTIONAL_FLAGS = [
     description: "Rewrite messages with role 'developer' to role 'system' for upstreams that do not recognise the developer role.",
   },
   {
+    id: 'promote-system-to-developer',
+    label: 'Promote system role to developer',
+    description: "Rewrite inline messages with role 'system' to role 'developer' for upstreams, such as Codex, that receive base system instructions through a top-level field and expect in-history instruction messages as developer role.",
+  },
+  {
     id: 'strip-billing-attribution',
     label: 'Strip Claude Code billing attribution from system prompt',
     description: "Remove `x-anthropic-billing-header:` lines from the request's system prompt before forwarding upstream. The block is irrelevant to non-Anthropic upstreams and only pollutes their prompt-cache key. On `claude-code`, the same block is the input Anthropic uses to bill the request against the user's plan and must be preserved.",
@@ -163,10 +168,35 @@ export const parseFlagOverridesWire = (value: unknown): FlagOverrides =>
     unknownIds: ids => `Unknown flag_overrides ids: ${ids.join(', ')}`,
   });
 
+const EXCLUSIVE_FLAGS: Readonly<Record<FlagId, readonly FlagId[]>> = {
+  'demote-developer-to-system': ['promote-system-to-developer'],
+  'promote-system-to-developer': ['demote-developer-to-system'],
+  'vendor-deepseek': [],
+  'vendor-qwen': [],
+  'vendor-kimi': [],
+  'retry-cyber-policy': [],
+  'messages-web-search-shim': [],
+  'responses-web-search-shim': [],
+  'responses-image-generation-shim': [],
+  'responses-compact-shim': [],
+  'disable-reasoning-on-forced-tool-choice': [],
+  'demote-interleaved-system-to-user': [],
+  'strip-billing-attribution': [],
+  'strip-prompt-cache-key': [],
+};
+
+const enableFlag = (effective: Set<FlagId>, id: FlagId): void => {
+  for (const conflicting of EXCLUSIVE_FLAGS[id]) effective.delete(conflicting);
+  effective.add(id);
+};
+
 // Reduce ordered flag layers to the effective enabled set. Layers apply
 // left-to-right; a later layer's explicit `true` re-enables a previously-off
 // flag, an explicit `false` overrides any earlier `true`, and an absent key
-// inherits the previous layer's decision. `undefined` layers are skipped.
+// inherits the previous layer's decision. A later explicit `true` for either
+// role-conversion direction disables its opposite so the effective set never
+// rewrites `developer` and `system` in both directions. `undefined` layers are
+// skipped.
 //
 // Canonical layer order across every provider:
 //   1. Provider upstream default (per-kind constant)
@@ -190,8 +220,8 @@ export const resolveEffectiveFlags = (
   const effective = new Set<FlagId>();
   for (const layer of layers) {
     if (!layer) continue;
-    for (const [id, on] of Object.entries(layer) as [FlagId, boolean][]) {
-      if (on) effective.add(id);
+    for (const [id, on] of Object.entries(layer).sort(([a], [b]) => a.localeCompare(b)) as [FlagId, boolean][]) {
+      if (on) enableFlag(effective, id);
       else effective.delete(id);
     }
   }

@@ -42,3 +42,4 @@ test('provider flags: every catalog entry has id, label, description string fiel
     assertEquals(entry.description.length > 0, true);
   }
 });
+
