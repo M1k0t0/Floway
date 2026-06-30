@@ -5,6 +5,7 @@
 // upstream level that's the flag's defaultFor; at the model level that's the
 // upstream's effective value for the flag.
 
+import { computed, watch } from 'vue';
 import type { HTMLAttributes } from 'vue';
 
 import type { FlagDef, UpstreamProviderKind } from '../../api/types.ts';
@@ -25,6 +26,33 @@ const props = withDefaults(defineProps<{
 
 type TriState = 'inherit' | 'on' | 'off';
 
+const CONFLICTING_FLAGS: Record<string, readonly string[]> = {
+  'demote-developer-to-system': ['promote-system-to-developer'],
+  'promote-system-to-developer': ['demote-developer-to-system'],
+};
+
+const hiddenFlagIds = computed(() => new Set(
+  props.providerKind === 'codex' ? ['demote-developer-to-system'] : [],
+));
+
+const visibleFlags = computed(() => props.flags.filter(flag => !hiddenFlagIds.value.has(flag.id)));
+
+const scrubHiddenOverrides = () => {
+  const hidden = hiddenFlagIds.value;
+  if (hidden.size === 0) return;
+  const copy = { ...overrides.value };
+  let changed = false;
+  for (const id of hidden) {
+    if (id in copy) {
+      delete copy[id];
+      changed = true;
+    }
+  }
+  if (changed) overrides.value = copy;
+};
+
+watch([() => props.providerKind, overrides], scrubHiddenOverrides, { immediate: true, deep: true });
+
 const stateFor = (flagId: string): TriState => {
   if (flagId in overrides.value) return overrides.value[flagId] ? 'on' : 'off';
   return 'inherit';
@@ -33,7 +61,12 @@ const stateFor = (flagId: string): TriState => {
 const setState = (flagId: string, next: TriState) => {
   const copy = { ...overrides.value };
   if (next === 'inherit') delete copy[flagId];
-  else copy[flagId] = next === 'on';
+  else {
+    copy[flagId] = next === 'on';
+    if (next === 'on') {
+      for (const conflicting of CONFLICTING_FLAGS[flagId] ?? []) delete copy[conflicting];
+    }
+  }
   overrides.value = copy;
 };
 
@@ -60,10 +93,10 @@ const pillClass = (state: TriState, selected: boolean, inheritedTo: 'on' | 'off'
 
 <template>
   <OverlayScrollbars :class="cn(props.class)" no-tabindex :v-scrollbar-offset="{ x: 2 }">
-    <p v-if="flags.length === 0" class="text-[11px] text-gray-600">No flags are registered.</p>
+    <p v-if="visibleFlags.length === 0" class="text-[11px] text-gray-600">No flags are registered.</p>
     <div v-else class="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))]">
       <div
-        v-for="flag in flags"
+        v-for="flag in visibleFlags"
         :key="flag.id"
         class="flex min-w-0 items-start justify-between gap-3 border-t border-white/[0.06] px-1 py-2.5"
       >

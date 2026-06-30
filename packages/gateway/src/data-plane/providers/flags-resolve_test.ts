@@ -54,3 +54,23 @@ test('flags-resolve: undefined layers are skipped', () => {
   const set = resolveEffectiveFlags(new Set(['retry-cyber-policy']), [undefined, undefined]);
   assertEquals([...set].sort(), ['retry-cyber-policy']);
 });
+
+test('flags-resolve: role conversion flags are mutually exclusive', () => {
+  const set = resolveEffectiveFlags(
+    new Set(['promote-system-to-developer']),
+    [{ 'demote-developer-to-system': true }],
+  );
+  assertEquals([...set].sort(), ['demote-developer-to-system']);
+});
+
+test('flags-resolve: a later role conversion layer wins over an earlier one', () => {
+  const set = resolveEffectiveFlags(
+    new Set(),
+    [
+      { 'promote-system-to-developer': true },
+      { 'demote-developer-to-system': true },
+      { 'promote-system-to-developer': true },
+    ],
+  );
+  assertEquals([...set].sort(), ['promote-system-to-developer']);
+});

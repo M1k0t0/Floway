@@ -96,6 +96,12 @@ export const OPTIONAL_FLAGS = [
     description: "Rewrite messages with role 'developer' to role 'system' for upstreams that do not recognise the developer role.",
     defaultFor: [],
   },
+  {
+    id: 'promote-system-to-developer',
+    label: 'Promote system role to developer',
+    description: "Rewrite inline messages with role 'system' to role 'developer' for upstreams, such as Codex, that receive base system instructions through a top-level field and expect in-history instruction messages as developer role.",
+    defaultFor: ['codex'],
+  },
   // The `x-anthropic-billing-header:` line the Claude Code CLI injects is a
   // literal `cch=00000;` placeholder, not a per-request hash — Anthropic's
   // subscription endpoint reads the placeholder block itself to attribute
@@ -160,20 +166,33 @@ export const parseFlagOverridesWire = (value: unknown): Record<string, boolean> 
 // flags seeded by provider defaults — admins explicitly toggled Off to opt out).
 export type FlagOverrides = Record<string, boolean>;
 
+const EXCLUSIVE_FLAGS: Readonly<Record<string, readonly string[]>> = {
+  'demote-developer-to-system': ['promote-system-to-developer'],
+  'promote-system-to-developer': ['demote-developer-to-system'],
+};
+
+const enableFlag = (effective: Set<string>, id: string): void => {
+  for (const conflicting of EXCLUSIVE_FLAGS[id] ?? []) effective.delete(conflicting);
+  effective.add(id);
+};
+
 // Reduce a sequence of override layers atop the provider defaults to the
 // effective enabled set. Layers are applied left-to-right; a later layer's
 // explicit `true` re-enables a previously-off flag, and an explicit `false`
-// overrides any earlier `true` (and any default seed). An `undefined` layer
-// is skipped entirely.
+// overrides any earlier `true` (and any default seed). A later explicit
+// `true` for either role-conversion direction disables its opposite so the
+// effective set never rewrites `developer` and `system` in both directions.
+// An `undefined` layer is skipped entirely.
 export const resolveEffectiveFlags = (
   providerDefaults: ReadonlySet<string>,
   layers: readonly (FlagOverrides | undefined)[],
 ): ReadonlySet<string> => {
-  const effective = new Set<string>(providerDefaults);
+  const effective = new Set<string>();
+  for (const id of providerDefaults) enableFlag(effective, id);
   for (const layer of layers) {
     if (!layer) continue;
-    for (const [id, on] of Object.entries(layer)) {
-      if (on) effective.add(id);
+    for (const [id, on] of Object.entries(layer).sort(([a], [b]) => a.localeCompare(b))) {
+      if (on) enableFlag(effective, id);
       else effective.delete(id);
     }
   }

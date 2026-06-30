@@ -130,11 +130,10 @@ describe('createCodexProvider', () => {
   });
 
   test('getProvidedModels resolves operator flag overrides into every UpstreamModel', async () => {
-    // The codex provider has no provider-default flags, so an operator
-    // toggling `responses-web-search-shim` on at the upstream layer is the
-    // only signal downstream interceptors get. A previous regression
-    // hardcoded `enabledFlags: new Set()` in the catalog mapper, dropping
-    // the override on the floor — this test guards against that.
+    // Provider defaults and operator overrides are resolved once, then
+    // threaded through every model. A previous regression hardcoded
+    // `enabledFlags: new Set()` in the catalog mapper, dropping the resolved
+    // set on the floor — this test guards against that.
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(modelsResponse());
     const recordWithOverride: UpstreamRecord = {
       ...baseRecord,
@@ -143,6 +142,7 @@ describe('createCodexProvider', () => {
     const instance = await createCodexProvider(recordWithOverride);
     const models = await instance.provider.getProvidedModels(directFetcher);
     for (const m of models) {
+      expect(m.enabledFlags.has('promote-system-to-developer')).toBe(true);
       expect(m.enabledFlags.has('responses-web-search-shim')).toBe(true);
     }
   });
