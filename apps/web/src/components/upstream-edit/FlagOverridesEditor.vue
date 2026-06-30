@@ -32,48 +32,20 @@ type TriState = 'inherit' | 'on' | 'off';
 
 const CONFLICTING_FLAGS: Partial<Record<FlagId, readonly FlagId[]>> = {
   'demote-developer-to-system': ['promote-system-to-developer'],
-  'promote-system-to-developer': ['demote-developer-to-system'],
+  'demote-interleaved-system-to-user': ['promote-system-to-developer'],
+  'promote-system-to-developer': ['demote-developer-to-system', 'demote-interleaved-system-to-user'],
 };
 
-const hiddenFlagIds = computed(() => new Set(
-  props.providerKind === 'codex' ? (['demote-developer-to-system'] as FlagId[]) : [],
+const hiddenFlagIds = computed(() => new Set<FlagId>(
+  props.providerKind === 'codex' ? ['demote-developer-to-system'] : [],
 ));
 
-const visibleFlags = computed(() => props.flags.filter(flag => !hiddenFlagIds.value.has(flag.id)));
-
-const scrubHiddenOverrides = () => {
-  const hidden = hiddenFlagIds.value;
-  if (hidden.size === 0) return;
-  const copy = { ...overrides.value };
-  let changed = false;
-  for (const id of hidden) {
-    if (id in copy) {
-      delete copy[id];
-      changed = true;
-    }
-  }
-  if (changed) overrides.value = copy;
-};
-
-watch([() => props.providerKind, overrides], scrubHiddenOverrides, { immediate: true, deep: true });
+const visibleFlags = computed(() => props.flags.filter(flag => !hiddenFlagIds.value.has(flag.id as FlagId)));
 
 const stateFor = (flagId: string): TriState => {
   const id = flagId as FlagId;
   if (id in overrides.value) return overrides.value[id] ? 'on' : 'off';
   return 'inherit';
-};
-
-const setState = (flagId: string, next: TriState) => {
-  const id = flagId as FlagId;
-  const copy = { ...overrides.value };
-  if (next === 'inherit') delete copy[id];
-  else {
-    copy[id] = next === 'on';
-    if (next === 'on') {
-      for (const conflicting of CONFLICTING_FLAGS[id] ?? []) delete copy[conflicting];
-    }
-  }
-  overrides.value = copy;
 };
 
 const inheritedLabel = (flag: Flag): 'on' | 'off' => {
@@ -82,6 +54,73 @@ const inheritedLabel = (flag: Flag): 'on' | 'off' => {
   if (typeof inherited === 'boolean') return inherited ? 'on' : 'off';
   return props.providerDefaults[id] ? 'on' : 'off';
 };
+
+const enableFlag = (effective: Set<FlagId>, flagId: FlagId): void => {
+  for (const conflicting of CONFLICTING_FLAGS[flagId] ?? []) effective.delete(conflicting);
+  effective.add(flagId);
+};
+
+const effectiveFlagsFor = (values: FlagOverrides): ReadonlySet<FlagId> => {
+  const effective = new Set<FlagId>();
+  for (const flag of props.flags) {
+    const id = flag.id as FlagId;
+    if (inheritedLabel(flag) === 'on') enableFlag(effective, id);
+  }
+  for (const [id, on] of Object.entries(values).sort(([a], [b]) => a.localeCompare(b)) as [FlagId, boolean][]) {
+    if (on) enableFlag(effective, id);
+    else effective.delete(id);
+  }
+  return effective;
+};
+
+const withConflictsForcedOff = (values: FlagOverrides): FlagOverrides => {
+  const effective = effectiveFlagsFor(values);
+  const copy = { ...values };
+  let changed = false;
+  for (const flag of props.flags) {
+    const id = flag.id as FlagId;
+    if (effective.has(id)) continue;
+    if (values[id] !== true && inheritedLabel(flag) !== 'on') continue;
+    if (copy[id] !== false) {
+      copy[id] = false;
+      changed = true;
+    }
+  }
+  return changed ? copy : values;
+};
+
+const withHiddenOverridesScrubbed = (values: FlagOverrides): FlagOverrides => {
+  const hidden = hiddenFlagIds.value;
+  if (hidden.size === 0) return values;
+  const copy = { ...values };
+  let changed = false;
+  for (const id of hidden) {
+    if (id in copy) {
+      delete copy[id];
+      changed = true;
+    }
+  }
+  return changed ? copy : values;
+};
+
+const normalizeOverrides = (values: FlagOverrides): FlagOverrides =>
+  withConflictsForcedOff(withHiddenOverridesScrubbed(values));
+
+const setState = (flag: Flag, next: TriState) => {
+  const id = flag.id as FlagId;
+  const copy = { ...overrides.value };
+  if (next === 'inherit') delete copy[id];
+  else copy[id] = next === 'on';
+  if (next === 'on' || (next === 'inherit' && inheritedLabel(flag) === 'on')) {
+    for (const conflicting of CONFLICTING_FLAGS[id] ?? []) copy[conflicting] = false;
+  }
+  overrides.value = normalizeOverrides(copy);
+};
+
+watch([overrides, () => props.providerKind, () => props.inheritedOverrides, () => props.providerDefaults, () => props.flags], () => {
+  const normalized = normalizeOverrides(overrides.value);
+  if (normalized !== overrides.value) overrides.value = normalized;
+}, { immediate: true, deep: true });
 
 const stateLabel = (state: TriState, flag: Flag) => {
   if (state === 'inherit') return `Inherit: ${inheritedLabel(flag)}`;
@@ -125,7 +164,7 @@ const pillClass = (state: TriState, selected: boolean, inheritedTo: 'on' | 'off'
               :name="`${namePrefix}-${flag.id}`"
               :checked="stateFor(flag.id) === state"
               class="sr-only"
-              @change="setState(flag.id, state)"
+              @change="setState(flag, state)"
             >
             <span>{{ stateLabel(state, flag) }}</span>
           </label>

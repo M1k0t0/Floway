@@ -168,34 +168,23 @@ export const parseFlagOverridesWire = (value: unknown): FlagOverrides =>
     unknownIds: ids => `Unknown flag_overrides ids: ${ids.join(', ')}`,
   });
 
-const EXCLUSIVE_FLAGS: Readonly<Record<FlagId, readonly FlagId[]>> = {
+const EXCLUSIVE_FLAGS: Readonly<Partial<Record<FlagId, readonly FlagId[]>>> = {
   'demote-developer-to-system': ['promote-system-to-developer'],
-  'promote-system-to-developer': ['demote-developer-to-system'],
-  'vendor-deepseek': [],
-  'vendor-qwen': [],
-  'vendor-kimi': [],
-  'retry-cyber-policy': [],
-  'messages-web-search-shim': [],
-  'responses-web-search-shim': [],
-  'responses-image-generation-shim': [],
-  'responses-compact-shim': [],
-  'disable-reasoning-on-forced-tool-choice': [],
-  'demote-interleaved-system-to-user': [],
-  'strip-billing-attribution': [],
-  'strip-prompt-cache-key': [],
+  'demote-interleaved-system-to-user': ['promote-system-to-developer'],
+  'promote-system-to-developer': ['demote-developer-to-system', 'demote-interleaved-system-to-user'],
 };
 
 const enableFlag = (effective: Set<FlagId>, id: FlagId): void => {
-  for (const conflicting of EXCLUSIVE_FLAGS[id]) effective.delete(conflicting);
+  for (const conflicting of EXCLUSIVE_FLAGS[id] ?? []) effective.delete(conflicting);
   effective.add(id);
 };
 
 // Reduce ordered flag layers to the effective enabled set. Layers apply
 // left-to-right; a later layer's explicit `true` re-enables a previously-off
 // flag, an explicit `false` overrides any earlier `true`, and an absent key
-// inherits the previous layer's decision. A later explicit `true` for either
-// role-conversion direction disables its opposite so the effective set never
-// rewrites `developer` and `system` in both directions. `undefined` layers are
+// inherits the previous layer's decision. A later explicit `true` for a
+// role-conversion direction disables incompatible direction flags so the
+// effective set never contains a no-op conversion pair. `undefined` layers are
 // skipped.
 //
 // Canonical layer order across every provider:
