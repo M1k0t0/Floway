@@ -22,9 +22,9 @@ import { withVendorQwenChatCompletionsNormalize } from './vendor-qwen-normalize.
 //     `disable-reasoning-on-forced-tool-choice`. Emits the gateway's canonical
 //     "no reasoning" sentinel only; vendor wire form is the vendor's job.
 //   - withPromoteSystemToDeveloper: gated by `promote-system-to-developer`
-//     and mutually exclusive with `demote-developer-to-system` at flag
-//     resolution. Runs before interleaved-system demotion so Codex-shaped
-//     inline system messages become developer messages rather than user text.
+//     and mutually exclusive with the role-demotion flags at flag resolution.
+//     Runs before interleaved-system demotion so Codex-shaped inline system
+//     messages become developer messages rather than user text.
 //   - withDemoteDeveloperToSystem: gated by `demote-developer-to-system`.
 //     Runs before withInterleavedSystemDemotedToUser so when both flags are
 //     on, a `developer` role first lands as `system`, then any system that

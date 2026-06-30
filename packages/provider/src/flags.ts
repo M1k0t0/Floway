@@ -168,7 +168,8 @@ export type FlagOverrides = Record<string, boolean>;
 
 const EXCLUSIVE_FLAGS: Readonly<Record<string, readonly string[]>> = {
   'demote-developer-to-system': ['promote-system-to-developer'],
-  'promote-system-to-developer': ['demote-developer-to-system'],
+  'demote-interleaved-system-to-user': ['promote-system-to-developer'],
+  'promote-system-to-developer': ['demote-developer-to-system', 'demote-interleaved-system-to-user'],
 };
 
 const enableFlag = (effective: Set<string>, id: string): void => {
@@ -180,8 +181,8 @@ const enableFlag = (effective: Set<string>, id: string): void => {
 // effective enabled set. Layers are applied left-to-right; a later layer's
 // explicit `true` re-enables a previously-off flag, and an explicit `false`
 // overrides any earlier `true` (and any default seed). A later explicit
-// `true` for either role-conversion direction disables its opposite so the
-// effective set never rewrites `developer` and `system` in both directions.
+// `true` for a role-conversion direction disables incompatible direction
+// flags so the effective set never contains a no-op conversion pair.
 // An `undefined` layer is skipped entirely.
 export const resolveEffectiveFlags = (
   providerDefaults: ReadonlySet<string>,

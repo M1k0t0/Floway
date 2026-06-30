@@ -28,9 +28,9 @@ import { withVendorQwenResponsesNormalize } from './vendor-qwen-normalize.ts';
 //   - withReasoningDisabledOnForcedToolChoice: gated by
 //     `disable-reasoning-on-forced-tool-choice`.
 //   - withPromoteSystemToDeveloper: gated by `promote-system-to-developer`
-//     and mutually exclusive with `demote-developer-to-system` at flag
-//     resolution. Runs before interleaved-system demotion so Codex-shaped
-//     inline system items become developer messages rather than user text.
+//     and mutually exclusive with the role-demotion flags at flag resolution.
+//     Runs before interleaved-system demotion so Codex-shaped inline system
+//     items become developer messages rather than user text.
 //   - withDemoteDeveloperToSystem: gated by `demote-developer-to-system`.
 //     Runs before withInterleavedSystemDemotedToUser so when both flags are
 //     on, a `developer` role first lands as `system`, then any system that

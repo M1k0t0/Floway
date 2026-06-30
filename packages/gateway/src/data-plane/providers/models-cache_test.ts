@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { clearInFlightForTesting, fetchUpstreamModelsCached } from './models-cache.ts';
 import { initRepo } from '../../repo/index.ts';
 import { InMemoryRepo } from '../../repo/memory.ts';
-import { directFetcher, type ModelProviderInstance, type UpstreamModel } from '@floway-dev/provider';
+import { directFetcher, type ModelProviderInstance, type UpstreamModel, type UpstreamProviderKind, type UpstreamRecord } from '@floway-dev/provider';
 import { stubProvider, stubUpstreamModel } from '@floway-dev/test-utils';
 
 const aModel = (id: string): UpstreamModel => stubUpstreamModel({ id });
@@ -11,9 +11,10 @@ const aModel = (id: string): UpstreamModel => stubUpstreamModel({ id });
 const stubInstance = (
   upstreamId: string,
   fetchFn: () => Promise<UpstreamModel[]>,
+  providerKind: UpstreamProviderKind = 'custom',
 ): ModelProviderInstance => ({
   upstream: upstreamId,
-  providerKind: 'custom',
+  providerKind,
   name: upstreamId,
   disabledPublicModelIds: [],
   modelPrefix: null,
@@ -26,6 +27,22 @@ const setupRepo = (): InMemoryRepo => {
   initRepo(repo);
   return repo;
 };
+
+const codexRecord = (flagOverrides: Record<string, boolean> = {}): UpstreamRecord => ({
+  id: 'up_codex',
+  provider: 'codex',
+  name: 'Codex',
+  enabled: true,
+  sortOrder: 0,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+  config: {},
+  state: null,
+  flagOverrides,
+  disabledPublicModelIds: [],
+  proxyFallbackList: [],
+  modelPrefix: null,
+});
 
 beforeEach(() => {
   clearInFlightForTesting();
@@ -58,6 +75,44 @@ describe('fetchUpstreamModelsCached', () => {
     );
 
     expect(result.map(m => m.id)).toEqual(['cached']);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  test('within SOFT: codex cached models are rehydrated with current default flags', async () => {
+    const repo = setupRepo();
+    await repo.upstreams.save(codexRecord());
+    await repo.modelsCache.put('up_codex', { fetchedAt: Date.now() - 1000, models: [aModel('cached')] });
+    const fetchFn = vi.fn(async () => [aModel('fresh')]);
+
+    const result = await fetchUpstreamModelsCached(
+      stubInstance('up_codex', fetchFn, 'codex'),
+      { scheduler: () => {}, fetcher: directFetcher },
+    );
+
+    expect(result.map(m => m.id)).toEqual(['cached']);
+    expect([...result[0]!.enabledFlags].sort()).toEqual(['promote-system-to-developer', 'strip-billing-attribution']);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  test('within SOFT: codex cached model flags honor current operator opt-out', async () => {
+    const repo = setupRepo();
+    await repo.upstreams.save(codexRecord({ 'promote-system-to-developer': false }));
+    await repo.modelsCache.put('up_codex', {
+      fetchedAt: Date.now() - 1000,
+      models: [stubUpstreamModel({
+        id: 'cached',
+        enabledFlags: new Set(['promote-system-to-developer', 'strip-billing-attribution']),
+      })],
+    });
+    const fetchFn = vi.fn(async () => [aModel('fresh')]);
+
+    const result = await fetchUpstreamModelsCached(
+      stubInstance('up_codex', fetchFn, 'codex'),
+      { scheduler: () => {}, fetcher: directFetcher },
+    );
+
+    expect(result.map(m => m.id)).toEqual(['cached']);
+    expect([...result[0]!.enabledFlags].sort()).toEqual(['strip-billing-attribution']);
     expect(fetchFn).not.toHaveBeenCalled();
   });
 

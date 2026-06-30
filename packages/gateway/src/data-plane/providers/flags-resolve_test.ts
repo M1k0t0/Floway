@@ -55,12 +55,28 @@ test('flags-resolve: undefined layers are skipped', () => {
   assertEquals([...set].sort(), ['retry-cyber-policy']);
 });
 
-test('flags-resolve: role conversion flags are mutually exclusive', () => {
+test('flags-resolve: developer/system conversion flags are mutually exclusive', () => {
   const set = resolveEffectiveFlags(
     new Set(['promote-system-to-developer']),
     [{ 'demote-developer-to-system': true }],
   );
   assertEquals([...set].sort(), ['demote-developer-to-system']);
+});
+
+test('flags-resolve: promote-system-to-developer disables interleaved system demotion', () => {
+  const set = resolveEffectiveFlags(
+    new Set(['demote-interleaved-system-to-user']),
+    [{ 'promote-system-to-developer': true }],
+  );
+  assertEquals([...set].sort(), ['promote-system-to-developer']);
+});
+
+test('flags-resolve: interleaved system demotion disables promote-system-to-developer', () => {
+  const set = resolveEffectiveFlags(
+    new Set(['promote-system-to-developer']),
+    [{ 'demote-interleaved-system-to-user': true }],
+  );
+  assertEquals([...set].sort(), ['demote-interleaved-system-to-user']);
 });
 
 test('flags-resolve: a later role conversion layer wins over an earlier one', () => {
