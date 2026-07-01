@@ -6,7 +6,6 @@ import { CODEX_RESPONSES_BOUNDARY } from './interceptors/responses/index.ts';
 import type { ResponsesBoundaryCtx } from './interceptors/responses/types.ts';
 import { codexRawToUpstreamModel, fetchCodexCatalog } from './models.ts';
 import { pricingForCodexModelKey } from './pricing.ts';
-import { beforeCodexResponsesSnapshotCommit, prepareCodexResponsesRequest } from './responses-state.ts';
 import { assertCodexUpstreamState, type CodexUpstreamState } from './state.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
 import { toCompactPayloadShape } from '@floway-dev/protocols/responses';
@@ -101,9 +100,6 @@ export const createCodexProvider = async (record: UpstreamRecord): Promise<Model
     // notional cost per request as if the operator were paying OpenAI's
     // public API rates. The table lives in ./pricing.ts.
     getPricingForModelKey: pricingForCodexModelKey,
-
-    prepareResponsesRequest: prepareCodexResponsesRequest,
-    beforeResponsesSnapshotCommit: beforeCodexResponsesSnapshotCommit,
 
     callResponses: async (model, body, action, signal, opts) => {
       const ctx: ResponsesBoundaryCtx = {

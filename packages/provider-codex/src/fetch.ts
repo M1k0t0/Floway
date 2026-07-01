@@ -7,13 +7,13 @@ import {
   CODEX_RESPONSES_PATH,
   CODEX_USER_AGENT,
 } from './constants.ts';
+import { sha256Uuid } from './ids.ts';
 import {
   getCodexQuota,
   isCodexRateLimited,
   parseCodexQuotaHeaders,
   putCodexQuota,
 } from './quota.ts';
-import { FLOWAY_CODEX_SESSION_ID_HEADER, FLOWAY_CODEX_TURN_ID_HEADER, FLOWAY_CODEX_WINDOW_ID_HEADER } from './responses-state.ts';
 import type { CodexAccountCredential } from './state.ts';
 import type { ResponsesCompactPayload, ResponsesPayload, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 import { parseResponsesStream } from '@floway-dev/protocols/responses';
@@ -182,20 +182,21 @@ const IDENTITY_MIRRORED_CLIENT_METADATA_KEYS = new Set<string>([
   'x-codex-installation-id', 'session_id', 'thread_id', 'x-codex-window-id', 'turn_id', 'x-codex-turn-metadata',
 ]);
 
-const buildCodexRequestIdentity = (
+const buildCodexRequestIdentity = async (
   opts: CodexBackendCallBase,
+  body: unknown,
   clientMetadata: Record<string, unknown>,
   clientTurnMetadata: Record<string, unknown> | null,
-): CodexRequestIdentity => {
-  // Identity priority for every mirrored id: dedicated header → caller body
-  // `client_metadata` key → parsed `x-codex-turn-metadata` key → gateway
+): Promise<CodexRequestIdentity> => {
+  // Identity priority for every mirrored id: caller-supplied header → caller
+  // body `client_metadata` key → parsed `x-codex-turn-metadata` key → gateway
   // default. So a caller can split its identity across surfaces and we still
   // emit consistent values everywhere.
-  const sessionId = trimHeader(opts.headers, FLOWAY_CODEX_SESSION_ID_HEADER)
-    ?? trimHeader(opts.headers, 'session-id')
+  const sessionId = trimHeader(opts.headers, 'session-id')
     ?? trimHeader(opts.headers, 'session_id')
     ?? stringField(clientMetadata, 'session_id')
     ?? stringField(clientTurnMetadata, 'session_id')
+    ?? await deriveSessionIdFromInput(body)
     ?? uuidV7();
   const threadId = trimHeader(opts.headers, 'thread-id')
     ?? stringField(clientMetadata, 'thread_id')
@@ -205,16 +206,54 @@ const buildCodexRequestIdentity = (
   const installationId = stringField(clientMetadata, 'x-codex-installation-id')
     ?? stringField(clientTurnMetadata, 'installation_id')
     ?? opts.account.openaiDeviceId;
-  const windowId = trimHeader(opts.headers, FLOWAY_CODEX_WINDOW_ID_HEADER)
-    ?? trimHeader(opts.headers, 'x-codex-window-id')
+  const windowId = trimHeader(opts.headers, 'x-codex-window-id')
     ?? stringField(clientMetadata, 'x-codex-window-id')
     ?? stringField(clientTurnMetadata, 'window_id')
     ?? `${sessionId}:0`;
-  const turnId = trimHeader(opts.headers, FLOWAY_CODEX_TURN_ID_HEADER)
-    ?? stringField(clientMetadata, 'turn_id')
+  const turnId = stringField(clientMetadata, 'turn_id')
     ?? stringField(clientTurnMetadata, 'turn_id')
     ?? uuidV7();
   return { installationId, sessionId, threadId, clientRequestId, turnId, windowId };
+};
+
+// A stateless caller that re-sends the full conversation every turn would
+// otherwise mint a fresh UUIDv7 per request and never hit chatgpt.com's
+// prompt cache. Hash `instructions` + every item up to and including the
+// first user message so the id is stable across turns of the same
+// conversation (subsequent turns append tail items after the first user
+// message, so the seed shape is unchanged) and different conversations get
+// different ids. Stateful callers using `previous_response_id` reach this
+// code path with the input already expanded from the snapshot in
+// attempt.ts, so they hash the same prefix as the original turn and get
+// the same session id — no server-side session map required.
+const deriveSessionIdFromInput = async (body: unknown): Promise<string | null> => {
+  if (!isPlainObject(body)) return null;
+  const seed = seedUpToFirstUserMessage(body.input);
+  if (seed === null) return null;
+  const instructions = typeof body.instructions === 'string' ? body.instructions : '';
+  // U+0001 separates the two seed components so an empty instructions can't
+  // collide with the input prefix via string concatenation.
+  return await sha256Uuid(`${instructions}${JSON.stringify(seed)}`);
+};
+
+const seedUpToFirstUserMessage = (input: unknown): readonly unknown[] | null => {
+  if (typeof input === 'string') return [input];
+  if (!Array.isArray(input)) return null;
+  const collected: unknown[] = [];
+  for (const item of input) {
+    collected.push(item);
+    if (isUserMessageItem(item)) return collected;
+  }
+  return null;
+};
+
+const isUserMessageItem = (item: unknown): boolean => {
+  if (typeof item !== 'object' || item === null) return false;
+  const obj = item as { type?: unknown; role?: unknown };
+  // Implicit `type: "message"` is valid per the OpenAI Responses schema;
+  // explicit non-message items (tool results, reasoning, etc.) skip.
+  if (obj.type !== undefined && obj.type !== 'message') return false;
+  return obj.role === 'user';
 };
 
 const buildCodexTurnMetadata = (
@@ -384,7 +423,7 @@ const performStreamingResponsesCall = async (
 ): Promise<ProviderStreamResult<ResponsesStreamEvent>> => {
   const clientTurnMetadata = parseClientTurnMetadataJson(trimHeader(opts.headers, 'x-codex-turn-metadata'));
   const clientMetadata = clientCodexClientMetadata(opts.body);
-  const identity = buildCodexRequestIdentity(opts, clientMetadata, clientTurnMetadata);
+  const identity = await buildCodexRequestIdentity(opts, opts.body, clientMetadata, clientTurnMetadata);
   const metadata = codexTurnMetadataOptions(opts);
   const turnMetadataJson = buildCodexTurnMetadataJson(identity, metadata, clientTurnMetadata);
   const upstreamFetch = dispatchCodexHttpCall(
@@ -416,7 +455,7 @@ const performUnaryCompactCall = async (
 ): Promise<ProviderCompactionResult> => {
   const clientTurnMetadata = parseClientTurnMetadataJson(trimHeader(opts.headers, 'x-codex-turn-metadata'));
   const clientMetadata = clientCodexClientMetadata(opts.body);
-  const identity = buildCodexRequestIdentity(opts, clientMetadata, clientTurnMetadata);
+  const identity = await buildCodexRequestIdentity(opts, opts.body, clientMetadata, clientTurnMetadata);
   const metadata = opts.turnMetadata ?? { requestKind: 'compaction' };
   const response = await dispatchCodexHttpCall(
     opts,

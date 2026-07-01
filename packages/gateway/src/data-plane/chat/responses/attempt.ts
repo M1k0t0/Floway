@@ -4,7 +4,7 @@ import { createStoredResponseId } from './items/format.ts';
 import { normalizeAssistantInputText } from './items/normalize-assistant-content.ts';
 import { drainAsync, syntheticEventsFromResult, wrapResponsesOutputForStorage } from './items/output.ts';
 import { rewriteResponsesItemsForCandidate, type RewrittenResponsesPayload } from './items/rewrite.ts';
-import type { ResponsesSnapshotMode, StatefulResponsesStore } from './items/store.ts';
+import type { StatefulResponsesStore } from './items/store.ts';
 import { tokenUsageFromResponsesResult } from './usage.ts';
 import { recordPerformanceLatency, requireRecordedDurationMs } from '../../shared/telemetry/performance.ts';
 import { chatCompletionsAttempt } from '../chat-completions/attempt.ts';
@@ -126,7 +126,6 @@ export const responsesAttempt = {
         upstream: candidate.provider.upstream,
         targetApi: 'responses',
         responseId,
-        beforeCommitSnapshot: providerBeforeCommitSnapshot(candidate, store),
       }));
       return {
         type: 'result',
@@ -150,7 +149,6 @@ export const responsesAttempt = {
         upstream: candidate.provider.upstream,
         targetApi,
         responseId,
-        beforeCommitSnapshot: providerBeforeCommitSnapshot(candidate, store),
       }),
       chainResult.modelIdentity,
       {
@@ -174,24 +172,6 @@ export const responsesAttempt = {
     }
     return result;
   },
-};
-
-const providerBeforeCommitSnapshot = (
-  candidate: ProviderCandidate,
-  store: StatefulResponsesStore,
-): ((mode: ResponsesSnapshotMode, responseId: string) => void | Promise<void>) | undefined => {
-  const hook = candidate.provider.provider.beforeResponsesSnapshotCommit;
-  if (hook === undefined) return undefined;
-  return (snapshotMode, responseId) => hook({ snapshotState: store, snapshotMode, responseId });
-};
-
-const prepareProviderResponsesRequest = async (
-  candidate: ProviderCandidate,
-  store: StatefulResponsesStore,
-  headers: Headers,
-  payload: ResponsesPayload,
-): Promise<void> => {
-  await candidate.provider.provider.prepareResponsesRequest?.({ snapshotState: store, headers, payload });
 };
 
 type RewriteOutcome =
@@ -241,7 +221,6 @@ const dispatchResponses = async (
   const { candidate, targetApi, store } = invocation;
   switch (targetApi) {
   case 'responses': {
-    await prepareProviderResponsesRequest(candidate, store, invocation.headers, invocation.payload);
     const recorder = createUpstreamLatencyRecorder();
     if (invocation.action === 'compact') {
       // The compact wire body drops `stream` and `store` — `store` is a
