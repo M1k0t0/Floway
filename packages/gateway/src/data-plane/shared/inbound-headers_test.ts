@@ -20,7 +20,6 @@ describe('inboundHeadersForUpstream', () => {
         'Authorization': 'Bearer gateway-api-key',
         'api-key': 'azure-key',
         'x-api-key': 'gateway-api-key',
-        'x-floway-provider-private': 'forged-private-signal',
         'x-floway-session': 'sess-1',
         'x-goog-api-key': 'goog-key',
         'proxy-authorization': 'Basic abcdef',
@@ -39,7 +38,6 @@ describe('inboundHeadersForUpstream', () => {
     assertEquals(headers.has('authorization'), false);
     assertEquals(headers.has('api-key'), false);
     assertEquals(headers.has('x-api-key'), false);
-    assertEquals(headers.has('x-floway-provider-private'), false);
     assertEquals(headers.has('x-floway-session'), false);
     assertEquals(headers.has('x-goog-api-key'), false);
     assertEquals(headers.has('proxy-authorization'), false);

@@ -37,10 +37,6 @@ import type { Context } from 'hono';
 //   the same shape cubercsl reported for a Node deployment behind a
 //   Cloudflare reverse proxy.
 //
-// Gateway-private `x-floway-*` headers are also scrubbed by prefix so provider
-// packages can use private request-scoped signals without exposing those names
-// in the gateway boundary.
-//
 // Vendor business headers (`user-agent`, `anthropic-*` / `openai-*` betas,
 // `x-client-request-id`, and any other header the client legitimately
 // authored) still reach upstream. Providers that clone the bag before
@@ -68,6 +64,7 @@ const SCRUBBED_INBOUND_HEADER_NAMES = [
   'upgrade',
   'x-api-key',
   'x-client-ip',
+  'x-floway-session',
   'x-forwarded-for',
   'x-forwarded-host',
   'x-forwarded-proto',
@@ -75,7 +72,7 @@ const SCRUBBED_INBOUND_HEADER_NAMES = [
   'x-real-ip',
 ];
 
-const SCRUBBED_INBOUND_HEADER_PREFIXES = ['cf-', 'x-floway-'];
+const SCRUBBED_INBOUND_HEADER_PREFIXES = ['cf-'];
 
 // Build the unified inbound-headers bag the data plane threads to the
 // provider boundary. Copies the source request's headers and removes the
