@@ -44,13 +44,10 @@ export { MODEL_PREFIX_MAX_LENGTH, MODEL_PREFIX_REGEX, normalizeModelPrefix } fro
 export type {
   ModelProvider,
   ModelProviderInstance,
-  ProviderResponsesRequestContext,
-  ProviderResponsesSnapshotCommitContext,
   ProviderCallResult,
   ProviderResponsesResult,
   ProviderStreamResult,
   ResponsesAction,
-  ResponsesSnapshotState,
   UpstreamCallOptions,
 } from './provider.ts';
 export type { ProviderStreamParser } from './streaming.ts';

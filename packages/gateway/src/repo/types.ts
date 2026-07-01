@@ -306,7 +306,6 @@ export interface StoredResponsesSnapshot {
   id: string;
   apiKeyId: string | null;
   itemIds: string[];
-  metadata: Record<string, unknown>;
   createdAt: number;
   refreshedAt: number;
 }

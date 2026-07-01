@@ -156,7 +156,6 @@ test('memory responses snapshots refresh debounces writes within 24h', async () 
     id: 'resp_dbnc',
     apiKeyId: 'key_a',
     itemIds: ['msg_a'],
-    metadata: {},
     createdAt: base,
     refreshedAt: base,
   });
@@ -465,30 +464,6 @@ test('migration 0026 adds Responses state snapshots and content hash index', asy
     assert(
       sqlJsRows<{ detail: string }>(db, 'EXPLAIN QUERY PLAN DELETE FROM responses_snapshots WHERE refreshed_at < 10')
         .some(row => row.detail.includes('idx_responses_snapshots_refreshed_at')),
-    );
-  } finally {
-    db.close();
-  }
-});
-
-test('migration 0046 adds Responses snapshot metadata', async () => {
-  const SQL = await initSqlJs();
-  const db = new SQL.Database();
-  try {
-    applySqlJsFile(db, '0023_responses_items.sql');
-    applySqlJsFile(db, '0025_responses_item_metadata.sql');
-    applySqlJsFile(db, '0026_responses_state.sql');
-    db.run("INSERT INTO responses_snapshots (id, api_key_id, item_ids_json, created_at, refreshed_at) VALUES ('resp_a', 'key_a', '[\"msg_a\"]', 1, 1)");
-
-    applySqlJsFile(db, '0046_responses_snapshot_metadata.sql');
-
-    assertEquals(
-      sqlJsRows<{ name: string }>(db, 'PRAGMA table_info(responses_snapshots)').map(row => row.name).filter(name => name === 'metadata_json'),
-      ['metadata_json'],
-    );
-    assertEquals(
-      sqlJsRows<{ metadata_json: string }>(db, "SELECT metadata_json FROM responses_snapshots WHERE id = 'resp_a'")[0],
-      { metadata_json: '{}' },
     );
   } finally {
     db.close();

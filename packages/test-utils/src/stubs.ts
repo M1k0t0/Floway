@@ -48,8 +48,6 @@ export const stubProvider = (overrides: Partial<ModelProvider> = {}): ModelProvi
   getProvidedModels: overrides.getProvidedModels ?? (() => Promise.resolve([])),
   getPricingForModelKey: overrides.getPricingForModelKey ?? (() => null),
   callCompletions: autoWrap(overrides.callCompletions) ?? (() => Promise.reject(new Error('stubProvider.callCompletions was called'))),
-  ...(overrides.prepareResponsesRequest !== undefined ? { prepareResponsesRequest: overrides.prepareResponsesRequest } : {}),
-  ...(overrides.beforeResponsesSnapshotCommit !== undefined ? { beforeResponsesSnapshotCommit: overrides.beforeResponsesSnapshotCommit } : {}),
   callChatCompletions: autoWrap(overrides.callChatCompletions) ?? (() => Promise.reject(new Error('stubProvider.callChatCompletions was called'))),
   callResponses: autoWrap(overrides.callResponses) ?? (() => Promise.reject(new Error('stubProvider.callResponses was called'))),
   callMessages: autoWrap(overrides.callMessages) ?? (() => Promise.reject(new Error('stubProvider.callMessages was called'))),

@@ -403,7 +403,6 @@ test('expandPreviousResponseId prepends snapshot items and strips the previous_r
     id: 'resp_prev',
     apiKeyId: API_KEY_ID,
     itemIds: [previousMessageId],
-    metadata: {},
     createdAt: 1_000,
     refreshedAt: 1_000,
   };
@@ -462,7 +461,6 @@ test('expandPreviousResponseId resolves snapshots from a non-repo-backed store',
     id: 'resp_mem',
     apiKeyId: API_KEY_ID,
     itemIds: [id],
-    metadata: {},
     createdAt: 1_000,
     refreshedAt: 1_000,
   };
@@ -633,7 +631,6 @@ test('generate treats compaction_trigger-bearing input as compaction: snapshot r
     id: 'resp_before_compact',
     apiKeyId: API_KEY_ID,
     itemIds: [priorMessageId],
-    metadata: {},
     createdAt: 1_000,
     refreshedAt: 1_000,
   });

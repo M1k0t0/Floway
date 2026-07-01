@@ -8,7 +8,6 @@ export const cloneStoredResponsesItem = (item: StoredResponsesItem): StoredRespo
 export const cloneStoredResponsesSnapshot = (snapshot: StoredResponsesSnapshot): StoredResponsesSnapshot => ({
   ...snapshot,
   itemIds: [...snapshot.itemIds],
-  metadata: structuredClone(snapshot.metadata),
 });
 
 export const responsesItemStoreKey = (apiKeyId: string | null, id: string): string =>
