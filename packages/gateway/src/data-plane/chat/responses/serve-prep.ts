@@ -6,9 +6,9 @@ import { enumerateModelCandidates } from '../../providers/registry.ts';
 import { noViableCandidateFailure } from '../shared/errors.ts';
 import type { ChatGatewayCtx } from '../shared/gateway-ctx.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
-import type { ResponsesInputItem, ResponsesPayload, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 import type { ModelCandidate, ExecuteResult } from '@floway-dev/provider';
-import { responsesItemsView } from '@floway-dev/translate/via-responses/responses-items';
+import { responsesItemsView, type CanonicalResponsesPayload } from '@floway-dev/translate/via-responses/responses-items';
 
 // Thrown when a request names a `previous_response_id` that the store cannot
 // resolve. The HTTP/WS entry layer catches this and renders the OpenAI-shaped
@@ -38,43 +38,28 @@ export class PreviousResponseNotFoundError extends Error {
 // translated payloads coming in from another protocol's attempt never carry
 // `previous_response_id`, so this prep runs in serve and not in attempt.
 export const expandPreviousResponseId = async (
-  payload: ResponsesPayload,
+  payload: CanonicalResponsesPayload,
   store: StatefulResponsesStore,
-): Promise<ResponsesPayload> => {
+): Promise<CanonicalResponsesPayload> => {
   const previousResponseId = payload.previous_response_id;
   if (previousResponseId === undefined || previousResponseId === null) return payload;
 
   const snapshot = await store.loadSnapshot(previousResponseId);
   if (snapshot === null) throw new PreviousResponseNotFoundError(previousResponseId);
 
-  const currentInput = typeof payload.input === 'string'
-    ? [{ type: 'message' as const, role: 'user' as const, content: payload.input }]
-    : [...payload.input];
-
   const { previous_response_id: _previous, ...rest } = payload;
   return {
     ...rest,
     input: [
       ...snapshot.itemIds.map(id => ({ type: 'item_reference' as const, id })),
-      ...currentInput,
+      ...payload.input,
     ],
   };
 };
 
-// A bare-string Responses `input` is wrapped into a synthetic user message
-// so staging and the affinity walk both see it as a real item. The affinity
-// walk still receives an empty `sourceItems` array since a string carries no
-// item references — only the staged form matters.
-const materializeInput = (input: ResponsesPayload['input']): {
-  readonly sourceItems: readonly ResponsesInputItem[];
-  readonly items: readonly ResponsesInputItem[];
-} => typeof input === 'string'
-  ? { sourceItems: [], items: [{ type: 'message', role: 'user', content: input }] }
-  : { sourceItems: input, items: input };
-
 export type ResponsesServePlan =
   | { readonly kind: 'failure'; readonly result: ExecuteResult<ProtocolFrame<ResponsesStreamEvent>> }
-  | { readonly kind: 'ready'; readonly prepared: ResponsesPayload; readonly candidate: ModelCandidate };
+  | { readonly kind: 'ready'; readonly prepared: CanonicalResponsesPayload; readonly candidate: ModelCandidate };
 
 // Runs the shared serve-side prep both `responsesServe.generate` and
 // `responsesServe.compact` need before dispatching to `responsesAttempt`:
@@ -83,7 +68,7 @@ export type ResponsesServePlan =
 // rendered failure result when no candidate is viable so the caller can
 // surface it directly without re-deriving the model-error branch.
 export const prepareResponsesServePlan = async (args: {
-  readonly payload: ResponsesPayload;
+  readonly payload: CanonicalResponsesPayload;
   readonly ctx: ChatGatewayCtx;
 }): Promise<ResponsesServePlan> => {
   const { payload, ctx } = args;
@@ -97,13 +82,16 @@ export const prepareResponsesServePlan = async (args: {
     currentColo: ctx.currentColo,
   });
   const viable = enumerated.filter(c => responsesTarget.canServe(c.model.endpoints));
-  const { sourceItems, items: inputItemsToStage } = materializeInput(prepared.input);
   const decision = await classifyResponsesItemAffinity({
-    sourceItems,
+    sourceItems: prepared.input,
     view: responsesItemsView,
     store,
     candidates: viable,
-    inputItemsToStage,
+    // Hash-preload covers any user item carried directly on this turn — once
+    // `expandPreviousResponseId` has run, those are the items after the
+    // snapshot's item_reference prefix, which IS `payload.input` (verbatim,
+    // pre-expansion).
+    inputItemsToStage: payload.input,
   });
   if (decision.kind === 'failure') return { kind: 'failure', result: renderResponsesFailure(decision.failure) };
   // Stage the user-supplied input from the original payload — not the
@@ -111,8 +99,7 @@ export const prepareResponsesServePlan = async (args: {
   // up the new user items in addition to the prior snapshot history.
   // Runs after the affinity walk so any `item_reference` in user-supplied
   // input has its target row loaded.
-  const { items: itemsToStage } = materializeInput(payload.input);
-  await store.stageInputItems(itemsToStage);
+  await store.stageInputItems(payload.input);
   await store.refreshTouchedItems();
 
   // Any non-throwing attempt result — events, api-error, or

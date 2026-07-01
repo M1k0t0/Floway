@@ -1,5 +1,5 @@
 import { responsesInterceptors } from './interceptors/index.ts';
-import type { ResponsesAttemptResult } from './interceptors/types.ts';
+import type { ResponsesAttemptResult, ResponsesInvocation } from './interceptors/types.ts';
 import { createStoredResponseId } from './items/format.ts';
 import { normalizeAssistantInputText } from './items/normalize-assistant-content.ts';
 import { drainAsync, syntheticEventsFromResult, wrapResponsesOutputForStorage } from './items/output.ts';
@@ -17,9 +17,10 @@ import { createUpstreamLatencyRecorder, recordUpstreamHttpFailure, upstreamPerfo
 import { runInterceptors } from '@floway-dev/interceptor';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import { collectResponsesProtocolEventsToResult } from '@floway-dev/protocols/responses';
-import { type ResponsesPayload, type ResponsesStreamEvent } from '@floway-dev/protocols/responses';
-import { type ModelCandidate, eventResult, readUpstreamApiError, type ChatTargetApi, type ExecuteResult, type ProviderResponsesResult, type ResponsesAction, type ResponsesInvocation } from '@floway-dev/provider';
+import { type ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import { type ModelCandidate, eventResult, readUpstreamApiError, type ChatTargetApi, type ExecuteResult, type ProviderResponsesResult, type ResponsesAction } from '@floway-dev/provider';
 import { translateResponsesViaChatCompletions, translateResponsesViaMessages } from '@floway-dev/translate';
+import type { CanonicalResponsesPayload } from '@floway-dev/translate/via-responses/responses-items';
 
 // `/v1/responses` generate prefers the native Responses target, then the
 // translated Messages path, then the translated Chat Completions path. The
@@ -29,7 +30,7 @@ import { translateResponsesViaChatCompletions, translateResponsesViaMessages } f
 export const responsesTarget = chatTargetPicker(['responses', 'messages', 'chat-completions']);
 
 export interface ResponsesAttemptInvokeArgs {
-  readonly payload: ResponsesPayload;
+  readonly payload: CanonicalResponsesPayload;
   readonly action: ResponsesAction;
   readonly ctx: ChatGatewayCtx;
   readonly candidate: ModelCandidate;
@@ -95,7 +96,7 @@ export const responsesAttempt = {
     // here, after the rewrite has expanded any `item_reference` items
     // from the snapshot store, catches both the direct-echo and
     // store-replay paths in one place.
-    const normalized: ResponsesPayload = { ...rewritten.payload, input: normalizeAssistantInputText(rewritten.payload.input) };
+    const normalized: CanonicalResponsesPayload = { ...rewritten.payload, input: normalizeAssistantInputText(rewritten.payload.input) };
 
     const invocation: ResponsesInvocation = {
       payload: normalized,
@@ -178,7 +179,7 @@ type RewriteOutcome =
   | { readonly failure: ExecuteResult<ProtocolFrame<ResponsesStreamEvent>> };
 
 const rewriteOrRenderFailure = async (
-  payload: ResponsesPayload,
+  payload: CanonicalResponsesPayload,
   store: StatefulResponsesStore,
   candidate: ModelCandidate,
 ): Promise<RewriteOutcome> => {

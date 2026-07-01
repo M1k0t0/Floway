@@ -9,9 +9,10 @@ import type { ChatGatewayCtx } from '../shared/gateway-ctx.ts';
 import type { ChatCompletionsStreamEvent } from '@floway-dev/protocols/chat-completions';
 import { doneFrame, eventFrame, type ModelEndpoints, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { MessagesStreamEvent } from '@floway-dev/protocols/messages';
-import type { ResponsesPayload, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 import { type ModelCandidate, directFetcher, type ProviderResponsesResult, type ProviderStreamResult, type ResponsesAction, type UpstreamCallOptions } from '@floway-dev/provider';
 import { assert, assertEquals, stubProvider, stubUpstreamModel } from '@floway-dev/test-utils';
+import type { CanonicalResponsesPayload } from '@floway-dev/translate/via-responses/responses-items';
 
 // `enumerateModelCandidates` is the only seam between serve and the
 // provider registry — mocking it directly keeps the serve tests narrow
@@ -62,9 +63,9 @@ const makeGatewayCtx = (store?: ChatGatewayCtx['store']): ChatGatewayCtx => ({
   store: store ?? createResponsesHttpStore(API_KEY_ID, true),
 });
 
-const makePayload = (overrides: Partial<ResponsesPayload> = {}): ResponsesPayload => ({
+const makePayload = (overrides: Partial<CanonicalResponsesPayload> = {}): CanonicalResponsesPayload => ({
   model: 'test-model',
-  input: 'hello',
+  input: [{ type: 'message', role: 'user', content: 'hello' }],
   ...overrides,
 });
 
@@ -72,7 +73,7 @@ const makePayload = (overrides: Partial<ResponsesPayload> = {}): ResponsesPayloa
 // compaction trigger or item_reference shapes the routing layer cares
 // about). Default to the kept-user-message the existing happy-path test
 // uses; override `input` when a test needs a different shape.
-const compactPayload = (overrides: Partial<ResponsesPayload> = {}): ResponsesPayload =>
+const compactPayload = (overrides: Partial<CanonicalResponsesPayload> = {}): CanonicalResponsesPayload =>
   makePayload({ input: [{ type: 'message', role: 'user', content: 'kept' }], ...overrides });
 
 const makeResponsesResult = (id = 'resp_test'): ResponsesResult => ({
@@ -406,7 +407,6 @@ test('expandPreviousResponseId prepends snapshot items and strips the previous_r
   );
 
   assertEquals(expanded.previous_response_id, undefined);
-  if (!Array.isArray(expanded.input)) throw new Error('expected expanded input array');
   assertEquals(expanded.input.length, 2);
   assertEquals(expanded.input[0], { type: 'item_reference', id: previousMessageId });
   assertEquals(expanded.input[1], { type: 'message', role: 'user', content: 'second turn' });
@@ -459,7 +459,6 @@ test('expandPreviousResponseId resolves snapshots from a non-repo-backed store',
     store,
   );
 
-  if (!Array.isArray(expanded.input)) throw new Error('expected expanded input array');
   assertEquals(expanded.input.length, 2);
   assertEquals(expanded.input[0], { type: 'item_reference', id });
 });

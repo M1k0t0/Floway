@@ -12,6 +12,7 @@ import { providerModelsUnavailableResponse } from '../shared/upstream-models-err
 import type { ResponsesPayload } from '@floway-dev/protocols/responses';
 import { internalErrorResult, toInternalDebugError } from '@floway-dev/provider';
 import { TranslatorInputError } from '@floway-dev/translate';
+import { canonicalizeResponsesPayload, type CanonicalResponsesPayload } from '@floway-dev/translate/via-responses/responses-items';
 
 // Codex sends auto-review requests over the Responses wire API as a
 // `codex-auto-review` model id; rewrite at the entry so downstream routing,
@@ -79,8 +80,10 @@ const respondToThrow = async (c: AuthedContext, error: unknown, requestBody: Req
   return await respondWithInternalError(c, error, requestBody, ctx);
 };
 
-const parsePayload = (requestBody: RequestBody, stampReasoningEffort: boolean): ResponsesPayload =>
-  rewriteResponsesEntryModelAlias(JSON.parse(new TextDecoder().decode(requestBody.bytes)) as ResponsesPayload, stampReasoningEffort);
+const parsePayload = (requestBody: RequestBody, stampReasoningEffort: boolean): CanonicalResponsesPayload =>
+  canonicalizeResponsesPayload(
+    rewriteResponsesEntryModelAlias(JSON.parse(new TextDecoder().decode(requestBody.bytes)) as ResponsesPayload, stampReasoningEffort),
+  );
 
 export const responsesHttp = {
   generate: async (c: AuthedContext): Promise<Response> => {

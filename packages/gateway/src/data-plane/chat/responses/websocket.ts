@@ -14,6 +14,7 @@ import { RESPONSES_MISSING_TERMINAL_MESSAGE } from '@floway-dev/protocols/respon
 import { isResponsesTerminalEvent, type ResponsesPayload, type ResponsesResult, type ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 import type { ExecuteResult } from '@floway-dev/provider';
 import { toInternalDebugError } from '@floway-dev/provider';
+import { canonicalizeResponsesPayload, type CanonicalResponsesPayload } from '@floway-dev/translate/via-responses/responses-items';
 
 interface WorkerWebSocket extends WebSocket {
   accept(): void;
@@ -230,7 +231,7 @@ const validateClientMessage = (parsed: unknown): ResponsesWebSocketClientEvent =
   return parsed as ResponsesWebSocketClientEvent;
 };
 
-const responsesPayloadFromClientSource = (source: object): ResponsesPayload => {
+const responsesPayloadFromClientSource = (source: object): CanonicalResponsesPayload => {
   const candidate = source as { model?: unknown; input?: unknown };
   if (typeof candidate.model !== 'string' || candidate.model.length === 0) {
     throw new WebSocketClientMessageError('response.create requires response.model to be a non-empty string.');
@@ -238,7 +239,9 @@ const responsesPayloadFromClientSource = (source: object): ResponsesPayload => {
   if (typeof candidate.input !== 'string' && !Array.isArray(candidate.input)) {
     throw new WebSocketClientMessageError('response.create requires response.input to be a string or an array.');
   }
-  return { ...source, stream: true } as ResponsesPayload;
+  // Feed the wire shape through the same canonicalization the HTTP entry uses,
+  // then stamp `stream: true` — the WS transport streams every turn.
+  return { ...canonicalizeResponsesPayload(source as ResponsesPayload), stream: true };
 };
 
 const respondResponsesWebSocket = async (input: {

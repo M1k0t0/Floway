@@ -1,12 +1,13 @@
 import { test } from 'vitest';
 
 import { withDemoteDeveloperToSystem } from './demote-developer-to-system.ts';
+import type { ResponsesInvocation } from './types.ts';
 import type { ChatGatewayCtx } from '../../shared/gateway-ctx.ts';
 import { createNonResponsesSourceStore } from '../items/store.ts';
 import { doneFrame } from '@floway-dev/protocols/common';
-import type { ResponsesPayload } from '@floway-dev/protocols/responses';
-import { eventResult, type ResponsesInvocation } from '@floway-dev/provider';
+import { eventResult } from '@floway-dev/provider';
 import { assertEquals, stubModelCandidate, testTelemetryModelIdentity } from '@floway-dev/test-utils';
+import type { CanonicalResponsesPayload } from '@floway-dev/translate/via-responses/responses-items';
 
 const stubCtx: ChatGatewayCtx = {
   apiKeyId: 'test-key',
@@ -30,7 +31,7 @@ const okEvents = () =>
     ),
   );
 
-const invocation = (payload: ResponsesPayload, enabledFlags: ReadonlySet<string> = new Set(['demote-developer-to-system'])): ResponsesInvocation => ({
+const invocation = (payload: CanonicalResponsesPayload, enabledFlags: ReadonlySet<string> = new Set(['demote-developer-to-system'])): ResponsesInvocation => ({
   payload,
   candidate: stubModelCandidate({ model: { enabledFlags } }),
   targetApi: 'responses',
@@ -86,18 +87,6 @@ test('leaves non-message input items untouched', async () => {
   assertEquals(items[0].role, 'user');
   assertEquals(items[1].type, 'function_call_output');
   assertEquals(items[2].role, 'system');
-});
-
-test('passes string input through unchanged', async () => {
-  const input = invocation({
-    model: 'deepseek-chat',
-    input: 'hello world',
-  });
-
-  const original = input.payload;
-  await withDemoteDeveloperToSystem(input, stubCtx, okEvents);
-
-  assertEquals(input.payload, original);
 });
 
 test('early-returns when flag is not set', async () => {

@@ -13,7 +13,7 @@ import {
   type UpstreamTerminal,
 } from './server-tool-shim.ts';
 import { SHIM_TOOL_NAME, webSearchServerTool } from './server-tools/web-search.ts';
-import type { ResponsesInterceptor } from './types.ts';
+import type { ResponsesInterceptor, ResponsesInvocation } from './types.ts';
 import { initRepo } from '../../../../repo/index.ts';
 import { InMemoryRepo } from '../../../../repo/memory.ts';
 import { resolveConfiguredWebSearchProvider } from '../../../tools/web-search/provider.ts';
@@ -42,8 +42,9 @@ import type {
   ResponsesToolChoice,
   ResponsesWebSearchAction,
 } from '@floway-dev/protocols/responses';
-import { directFetcher, type EventResult, type ExecuteResult, type ResponsesInvocation } from '@floway-dev/provider';
+import { directFetcher, type EventResult, type ExecuteResult } from '@floway-dev/provider';
 import { assert, assertEquals, assertFalse } from '@floway-dev/test-utils';
+import type { CanonicalResponsesPayload } from '@floway-dev/translate/via-responses/responses-items';
 
 const withResponsesWebSearchShim = withResponsesServerToolShim([webSearchServerTool]);
 
@@ -336,7 +337,7 @@ const makeInvocation = (overrides: InvocationOverrides = {}): ResponsesInvocatio
     // assert the wire-item shape without `results`.
     include: ['web_search_call.results'],
     ...overrides.payload,
-  } as ResponsesPayload,
+  } as CanonicalResponsesPayload,
   headers: new Headers(),
   action: 'generate',
 });

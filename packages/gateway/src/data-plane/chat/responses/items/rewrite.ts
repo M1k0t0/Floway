@@ -2,9 +2,9 @@ import { createTemporaryResponsesItemId, hashResponsesItemEncryptedContent, resp
 import type { StatefulResponsesStore } from './store.ts';
 import type { StoredResponsesItem } from '../../../../repo/types.ts';
 import { throwChatServeFailure } from '../../shared/errors.ts';
-import type { ResponsesInputItem, ResponsesPayload } from '@floway-dev/protocols/responses';
+import type { ResponsesInputItem } from '@floway-dev/protocols/responses';
 import type { ModelCandidate } from '@floway-dev/provider';
-import type { ResponsesItemsView } from '@floway-dev/translate/via-responses/responses-items';
+import type { CanonicalResponsesPayload, ResponsesItemsView } from '@floway-dev/translate/via-responses/responses-items';
 
 const isUpstreamOwned = (row: StoredResponsesItem): row is StoredResponsesItem & { upstreamId: string } =>
   row.upstreamId !== null;
@@ -79,7 +79,7 @@ export interface RewrittenResponsesReference {
 }
 
 export interface RewrittenResponsesPayload {
-  readonly payload: ResponsesPayload;
+  readonly payload: CanonicalResponsesPayload;
   readonly references: ReadonlyArray<RewrittenResponsesReference>;
 }
 
@@ -103,12 +103,10 @@ const rewriteOneItemAgainstStore = (
 };
 
 export const rewriteResponsesItemsForCandidate = async (
-  payload: ResponsesPayload,
+  payload: CanonicalResponsesPayload,
   store: StatefulResponsesStore,
   candidate: ModelCandidate,
 ): Promise<RewrittenResponsesPayload> => {
-  if (typeof payload.input === 'string') return { payload, references: [] };
-
   // Pre-compute encrypted_content hashes so each item lookup is a single
   // synchronous map access rather than a fresh hash per item.
   const hashByEncryptedContent = await collectEncryptedContents(payload.input);

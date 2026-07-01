@@ -1,16 +1,18 @@
 import { test } from 'vitest';
 
 import { withCyberPolicyRetried } from './retry-cyber-policy.ts';
+import type { ResponsesInvocation } from './types.ts';
 import type { ChatGatewayCtx } from '../../shared/gateway-ctx.ts';
 import { createNonResponsesSourceStore } from '../items/store.ts';
 import { eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
-import type { ResponsesPayload, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
-import { eventResult, type ExecuteResult, type ResponsesInvocation } from '@floway-dev/provider';
+import type { ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import { eventResult, type ExecuteResult } from '@floway-dev/provider';
 import { assertEquals, stubModelCandidate, testTelemetryModelIdentity } from '@floway-dev/test-utils';
+import type { CanonicalResponsesPayload } from '@floway-dev/translate/via-responses/responses-items';
 
-const makePayload = (): ResponsesPayload => ({
+const makePayload = (): CanonicalResponsesPayload => ({
   model: 'gpt-test',
-  input: 'hi',
+  input: [{ type: 'message', role: 'user', content: 'hi' }],
   instructions: null,
   temperature: 1,
   top_p: null,
@@ -23,7 +25,7 @@ const makePayload = (): ResponsesPayload => ({
   parallel_tool_calls: true,
 });
 
-const makeInvocation = (payload: ResponsesPayload): ResponsesInvocation => ({
+const makeInvocation = (payload: CanonicalResponsesPayload): ResponsesInvocation => ({
   payload,
   candidate: stubModelCandidate({ model: { enabledFlags: new Set(['retry-cyber-policy']) } }),
   targetApi: 'responses',

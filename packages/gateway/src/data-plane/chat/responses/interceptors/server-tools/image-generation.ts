@@ -15,7 +15,6 @@ import type {
   ResponsesInputImageGenerationCall,
   ResponsesInputItem,
   ResponsesOutputImageGenerationCall,
-  ResponsesPayload,
   ResponsesTool,
 } from '@floway-dev/protocols/responses';
 import type { Fetcher, Provider, PerformanceTelemetryContext, ModelCandidate, UpstreamModel } from '@floway-dev/provider';
@@ -346,8 +345,7 @@ export const synthesizeImageGenerationCallId = (): string =>
 // against the order received — and native flattens every image across messages
 // and tool results into this same forward order. Preserving declaration order
 // therefore makes "the Nth image" mean the same thing here as it does natively.
-export const collectImageSources = (input: ResponsesPayload['input']): ImageSource[] => {
-  if (!Array.isArray(input)) return [];
+export const collectImageSources = (input: readonly ResponsesInputItem[]): ImageSource[] => {
   const sources: ImageSource[] = [];
   const collectFromContent = (content: string | ResponsesInputContent[]): void => {
     if (!Array.isArray(content)) return;
@@ -924,7 +922,7 @@ export const imageGenerationServerTool: ServerToolRegistration = (invocation, ga
 
   const tools = Array.isArray(invocation.payload.tools) ? invocation.payload.tools : [];
   const hasHostedTool = tools.some(isHostedImageGenerationTool);
-  const hasReplayInput = Array.isArray(invocation.payload.input) && invocation.payload.input.some(i => i.type === 'image_generation_call');
+  const hasReplayInput = invocation.payload.input.some(i => i.type === 'image_generation_call');
   if (!hasHostedTool && !hasReplayInput) return { type: 'inactive' };
 
   if (!hasHostedTool) {

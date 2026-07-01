@@ -3,7 +3,12 @@ import type { ChatGatewayCtx } from '../../shared/gateway-ctx.ts';
 import type { Interceptor } from '@floway-dev/interceptor';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
-import type { ExecuteResult, ResponsesInvocation, TelemetryModelIdentity } from '@floway-dev/provider';
+import type { ExecuteResult, ResponsesInvocation as WireResponsesInvocation, TelemetryModelIdentity } from '@floway-dev/provider';
+import type { CanonicalResponsesPayload } from '@floway-dev/translate/via-responses/responses-items';
+
+export interface ResponsesInvocation extends Omit<WireResponsesInvocation, 'payload'> {
+  payload: CanonicalResponsesPayload;
+}
 
 // The chain runner produces an event stream for both actions — the attempt
 // post-processes it into a single `response.compaction` envelope when the
