@@ -447,6 +447,74 @@ describe('callCodexResponses — upstream classification', () => {
     expect(headers.get('session_id')).toBeNull();
   });
 
+  test('derives the same session id across turns of a stateless conversation', async () => {
+    seedFreshAccessToken();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
+    const turn = {
+      upstreamId, account: activeAccount, model,
+      body: {
+        instructions: 'You are helpful.',
+        input: [{ type: 'message', role: 'user', content: 'hello' }],
+        stream: true,
+      } as unknown as Parameters<typeof callCodexResponses>[0]['body'],
+      headers: new Headers(),
+      effects: makeEffects(),
+      call: noopUpstreamCallOptions(),
+    } satisfies Parameters<typeof callCodexResponses>[0];
+    await callCodexResponses(turn);
+    await callCodexResponses(turn);
+
+    const first = new Headers((fetchSpy.mock.calls[0][1] as RequestInit).headers).get('session-id');
+    const second = new Headers((fetchSpy.mock.calls[1][1] as RequestInit).headers).get('session-id');
+    expect(first).not.toBeNull();
+    expect(first).not.toMatch(UUID_V7_RE);
+    expect(second).toBe(first);
+  });
+
+  test('derives distinct session ids when only the instructions differ', async () => {
+    seedFreshAccessToken();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
+    const call = (instructions: string) => callCodexResponses({
+      upstreamId, account: activeAccount, model,
+      body: {
+        instructions,
+        input: [{ type: 'message', role: 'user', content: 'hello' }],
+        stream: true,
+      } as unknown as Parameters<typeof callCodexResponses>[0]['body'],
+      headers: new Headers(),
+      effects: makeEffects(),
+      call: noopUpstreamCallOptions(),
+    });
+    await call('You are a pirate.');
+    await call('You are a scientist.');
+
+    const first = new Headers((fetchSpy.mock.calls[0][1] as RequestInit).headers).get('session-id');
+    const second = new Headers((fetchSpy.mock.calls[1][1] as RequestInit).headers).get('session-id');
+    expect(first).not.toBe(second);
+  });
+
+  test('derives distinct session ids when only the first user message differs', async () => {
+    seedFreshAccessToken();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
+    const call = (content: string) => callCodexResponses({
+      upstreamId, account: activeAccount, model,
+      body: {
+        instructions: 'System.',
+        input: [{ type: 'message', role: 'user', content }],
+        stream: true,
+      } as unknown as Parameters<typeof callCodexResponses>[0]['body'],
+      headers: new Headers(),
+      effects: makeEffects(),
+      call: noopUpstreamCallOptions(),
+    });
+    await call('topic A');
+    await call('topic B');
+
+    const first = new Headers((fetchSpy.mock.calls[0][1] as RequestInit).headers).get('session-id');
+    const second = new Headers((fetchSpy.mock.calls[1][1] as RequestInit).headers).get('session-id');
+    expect(first).not.toBe(second);
+  });
+
   test('uses account.openaiDeviceId as the installation id', async () => {
     seedFreshAccessToken();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
