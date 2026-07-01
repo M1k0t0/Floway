@@ -1,8 +1,8 @@
 import { responsesAttempt } from './attempt.ts';
 import type { ResponsesAttemptResult } from './interceptors/types.ts';
 import { prepareResponsesServePlan } from './serve-prep.ts';
+import { iterateCandidates } from '../../shared/iterate-candidates.ts';
 import type { ChatGatewayCtx } from '../shared/gateway-ctx.ts';
-import { iterateChatCandidates } from '../shared/iterate-candidates.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 import type { ExecuteResult } from '@floway-dev/provider';
@@ -29,7 +29,7 @@ export const responsesServe = {
     // final answer; per-candidate failures fall through so a transient
     // 5xx/429/network does not become the request's verdict when another
     // candidate can serve. The last failure surfaces verbatim on exhaustion.
-    return await iterateChatCandidates(
+    return await iterateCandidates(
       plan.candidates,
       'responsesServe.generate',
       candidate => responsesAttempt.generate({ payload: plan.prepared, ctx, candidate, headers }),
@@ -48,7 +48,7 @@ export const responsesServe = {
     // re-tags the result as compact on the way out.
     const plan = await prepareResponsesServePlan({ payload, ctx });
     if (plan.kind === 'failure') return plan.result;
-    return await iterateChatCandidates(
+    return await iterateCandidates(
       plan.candidates,
       'responsesServe.compact',
       candidate => responsesAttempt.invoke({ payload: plan.prepared, action: 'compact', ctx, candidate, headers }),

@@ -15,9 +15,10 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import type { PassthroughServeApiName } from './api-names.ts';
 import { appendFailedUpstreams } from './failed-upstreams.ts';
-import { inboundHeadersForUpstream } from './inbound-headers.ts';
+import { iterateCandidates } from './iterate-candidates.ts';
+import { passthroughAttempt } from './passthrough-attempt.ts';
 import type { PerformanceTelemetryContext } from './telemetry/performance.ts';
-import { createUpstreamLatencyRecorder, recordPerformanceError, recordPerformanceLatency, recordRequestPerformance, requireRecordedDurationMs } from './telemetry/performance.ts';
+import { recordRequestPerformance } from './telemetry/performance.ts';
 import { recordTokenUsage } from './telemetry/usage.ts';
 import type { AuthedContext } from '../../middleware/auth.ts';
 import type { TokenUsage } from '../../repo/types.ts';
@@ -58,15 +59,6 @@ const stageForwardedResponseHeaders = (c: Context, resp: Response): void => {
   for (const [name, value] of resp.headers.entries()) {
     if (isForwardedResponseHeader(name)) c.header(name, value);
   }
-};
-
-const recordUpstreamPerformance = (
-  scheduler: BackgroundScheduler,
-  context: PerformanceTelemetryContext,
-  failed: boolean,
-  durationMs: number,
-): void => {
-  scheduler(failed ? recordPerformanceError(context, 'upstream_success') : recordPerformanceLatency(context, 'upstream_success', durationMs));
 };
 
 // Fire-and-forget the usage record. A transient D1/KV failure here must not
@@ -124,6 +116,10 @@ export const passthroughApiError = (c: Context, message: string, status: Content
 export const passthroughServe = async (input: PassthroughServeContext): Promise<Response> => {
   const { c, ctx, sourceApi, model, kind, modelServesEndpoint, call, response: responseHandling } = input;
   const requestStartedAt = performance.now();
+  // Populated as attempts land so a throw from `passthroughAttempt` (or
+  // the response handling below) can still attribute request-perf to the
+  // most recent candidate the loop touched. A throw before any candidate
+  // fired leaves this undefined; the outer catch below is happy with that.
   let lastPerformance: PerformanceTelemetryContext | undefined;
 
   try {
@@ -134,8 +130,6 @@ export const passthroughServe = async (input: PassthroughServeContext): Promise<
     // family before they reach `modelServesEndpoint`. Iteration order
     // follows configured sort_order across upstreams, with the unprefixed
     // branch pushed before the prefixed one within a single upstream.
-    // Candidates are tried in turn; the first 2xx wins, transient
-    // failures (5xx/429/network) on one upstream roll over to the next.
     const { candidates, sawModel, failedUpstreams } = await enumerateModelCandidates({
       upstreamIds: ctx.upstreamIds,
       model,
@@ -148,165 +142,133 @@ export const passthroughServe = async (input: PassthroughServeContext): Promise<
       // `sawModel === false` means no upstream catalog knew the inbound id
       // at all (404); `sawModel === true` with zero candidates means the
       // id is known but every match was the wrong kind for this endpoint
-      // (400), which mirrors the per-candidate-endpoint-miss case below.
+      // (400), which mirrors the empty-viable case below.
       return sawModel
         ? passthroughApiError(c, appendFailedUpstreams(`Model ${model} does not support the ${sourceApi} endpoint.`, failedUpstreams), 400)
         : passthroughApiError(c, appendFailedUpstreams(`Model ${model} is not available on any configured upstream.`, failedUpstreams), 404);
     }
 
-    // Track the most recent candidate that produced a non-2xx response so
-    // it can be forwarded verbatim once the candidate list is exhausted.
-    // `lastFailedUpstream` is the upstream id attributed to the request in
-    // the dump and the request-perf record.
-    let lastFailedResponse: Response | undefined;
-    let lastFailedPerformance: PerformanceTelemetryContext | undefined;
-    let lastFailedUpstream: string | undefined;
-    let anyCandidateServedEndpoint = false;
-
-    for (const candidate of candidates) {
-      if (!modelServesEndpoint(candidate.model)) continue;
-      anyCandidateServedEndpoint = true;
-
-      const recorder = createUpstreamLatencyRecorder();
-      const { response, modelKey } = await call(candidate.provider, candidate.model, {
-        fetcher: candidate.fetcher,
-        recordUpstreamLatency: recorder.record,
-        waitUntil: ctx.backgroundScheduler,
-        headers: inboundHeadersForUpstream(c),
-      });
-      const upstreamDurationMs = requireRecordedDurationMs(recorder, 'passthrough upstream call');
-      // Telemetry keys on the upstream's bare catalog id (`model.id`);
-      // user-facing error bodies echo the inbound `model`.
-      const identity = {
-        model: candidate.model.id,
-        upstream: candidate.provider.upstream,
-        modelKey,
-        cost: candidate.provider.instance.getPricingForModelKey(modelKey),
-      };
-      const performanceContext: PerformanceTelemetryContext = {
-        keyId: ctx.apiKeyId,
-        ...identity,
-        stream: responseHandling.format === 'sse',
-        runtimeLocation: ctx.runtimeLocation,
-      };
-      lastPerformance = performanceContext;
-
-      if (!response.ok) {
-        // Non-2xx (4xx including 429, 5xx) — let the next candidate try.
-        // Upstream-perf is recorded per failed attempt so the dashboard
-        // shows each attempted upstream; request-perf and the dump's
-        // upstream attribution wait until the final candidate is chosen
-        // (success or the last failure).
-        recordUpstreamPerformance(ctx.backgroundScheduler, performanceContext, true, upstreamDurationMs);
-        lastFailedResponse = response;
-        lastFailedPerformance = performanceContext;
-        lastFailedUpstream = candidate.provider.upstream;
-        continue;
-      }
-
-      recordUpstreamPerformance(ctx.backgroundScheduler, performanceContext, false, upstreamDurationMs);
-
-      if (responseHandling.format === 'json') {
-        // A 2xx body that fails to parse must not 502 a client whose
-        // upstream call already succeeded; we skip usage extraction and
-        // log so missing rows stay traceable.
-        let parsed: unknown;
-        try {
-          parsed = await response.clone().json();
-        } catch (e) {
-          console.warn(`passthrough-serve: failed to parse 2xx upstream body for ${sourceApi}; usage row will be skipped`, e instanceof Error ? e.message : String(e));
-          parsed = undefined;
-        }
-        const usage = parsed !== undefined ? responseHandling.extractBilling(parsed) : null;
-        ctx.dump?.success(identity, usage);
-        if (usage) {
-          scheduleUsageRecord(ctx.backgroundScheduler, recordTokenUsage(ctx.apiKeyId, identity, usage));
-        }
-        recordRequestPerformance(ctx.backgroundScheduler, performanceContext, false, performance.now() - requestStartedAt);
-        return forwardUpstreamResponse(response);
-      }
-
-      // Hono's streamSSE owns the response — forwardable upstream
-      // headers must be staged on `c` *before* the streamSSE call so
-      // they survive its internal newResponse.
-      const upstreamBody = response.body;
-      if (!upstreamBody) {
-        ctx.dump?.failed(`${sourceApi} streaming upstream returned no body`);
-        recordRequestPerformance(ctx.backgroundScheduler, performanceContext, true, performance.now() - requestStartedAt);
-        // Preserve upstream correlation headers (x-request-id, cf-ray, ...)
-        // on the synthesized 502 so this rare edge case is still traceable.
-        stageForwardedResponseHeaders(c, response);
-        return passthroughApiError(c, 'Upstream returned a streaming response with no body.', 502);
-      }
-      stageForwardedResponseHeaders(c, response);
-      return streamSSE(c, async stream => {
-        let completion: StreamCompletion = 'error';
-        let streamError: unknown;
-        // Tracks whether the upstream's terminal (`done`) frame arrived
-        // before the writer settled. A client cancel after the terminal
-        // frame is graceful (upstream already finished its work); a
-        // mid-stream cancel or EOF without terminal is a real failure.
-        // Mirrors SourceStreamState.failedAfter on the chat endpoints.
-        let terminalFrameSeen = false;
-        try {
-          const frames = (async function* () {
-            const sseFramesIn = parseSSEStream(upstreamBody, { signal: ctx.abortSignal });
-            for await (const parsed of parseTargetStreamFrames<unknown>(sseFramesIn, { protocol: sourceApi })) {
-              const inputFrame: ProtocolFrame<unknown> = parsed.type === 'done' ? doneFrame() : eventFrame(parsed.data);
-              // Dump pre-transform, so forensics see upstream truth even
-              // when the caller drops a frame from the client-facing stream.
-              ctx.dump?.frame(inputFrame);
-              if (inputFrame.type === 'done') terminalFrameSeen = true;
-              const outputFrame = responseHandling.transformFrame(inputFrame);
-              if (outputFrame === null) continue;
-              yield outputFrame.type === 'done' ? sseFrame('[DONE]') : sseFrame(JSON.stringify(outputFrame.event));
-            }
-          })();
-          completion = await writeSSEFrames(stream, frames, {
-            keepAlive: { frame: sseCommentFrame('keepalive') },
-            downstreamAbortController: ctx.downstreamAbortController,
-          });
-        } catch (e) {
-          streamError = e;
-        } finally {
-          const usage = responseHandling.settleUsage();
-          const failed = streamError !== undefined || completion === 'error' || !terminalFrameSeen;
-          if (failed) {
-            ctx.dump?.failed(streamError ?? `${sourceApi} stream ended with completion=${completion}`);
-          } else {
-            ctx.dump?.success(identity, usage);
-          }
-          // Record any accumulated usage regardless of the failed flag —
-          // tokens already metered upstream should bill even when the
-          // downstream half of the round-trip turned out badly. The chat
-          // streaming endpoints follow the same rule.
-          if (usage) {
-            scheduleUsageRecord(ctx.backgroundScheduler, recordTokenUsage(ctx.apiKeyId, identity, usage));
-          }
-          recordRequestPerformance(ctx.backgroundScheduler, performanceContext, failed, performance.now() - requestStartedAt);
-        }
-      });
-    }
-
-    // Candidate list exhausted. Two terminal states:
-    //   - At least one candidate replied non-2xx → surface the most recent
-    //     upstream response verbatim (its status, headers, body), and
-    //     attribute the request-perf + dump to that upstream.
-    //   - No candidate served the endpoint at all → 400 (the model exists
-    //     for chat dispatch but no enabled upstream offers this endpoint).
-    if (lastFailedResponse !== undefined) {
-      recordRequestPerformance(ctx.backgroundScheduler, lastFailedPerformance, true, performance.now() - requestStartedAt);
-      ctx.dump?.error('upstream', lastFailedUpstream);
-      return forwardUpstreamResponse(lastFailedResponse);
-    }
-    if (!anyCandidateServedEndpoint) {
+    // Endpoint-level pre-filter: drop candidates whose upstream model
+    // exists for the requested kind but doesn't expose this endpoint's
+    // specific capability (e.g. an embeddings-kind model on an upstream
+    // that only exposes chat). An empty viable set is the same "model
+    // exists but no upstream serves this endpoint" 400 the empty-candidate
+    // branch above surfaces.
+    const viable = candidates.filter(c => modelServesEndpoint(c.model));
+    if (viable.length === 0) {
       ctx.dump?.error('gateway');
       return passthroughApiError(c, appendFailedUpstreams(`Model ${model} does not support the ${sourceApi} endpoint.`, failedUpstreams), 400);
     }
-    // `anyCandidateServedEndpoint=true` means the loop dispatched at least
-    // one attempt; every attempt either returned via the 2xx path above or
-    // recorded `lastFailedResponse`. There is no third state.
-    throw new Error('invariant broken: passthroughServe exhausted candidates with neither success nor failure');
+
+    // Iterate the viable list. Each candidate's attempt runs the upstream
+    // HTTP call and records `upstream_success` telemetry; the shared
+    // iterator returns the first 2xx or, on exhaustion, the last non-2xx
+    // result. Request-perf and dump attribution wait until this point so
+    // they land against the terminal candidate.
+    const result = await iterateCandidates(
+      viable,
+      'passthroughServe',
+      async candidate => {
+        const attempted = await passthroughAttempt({
+          c, ctx, candidate,
+          stream: responseHandling.format === 'sse',
+          call,
+        });
+        lastPerformance = attempted.performance;
+        return attempted;
+      },
+    );
+    const { response, performance: performanceContext, identity } = result;
+
+    if (!response.ok) {
+      // Exhausted — forward the last upstream response verbatim so clients
+      // still see real upstream telemetry (status, retry-after, request-id,
+      // ...) rather than a synthetic gateway envelope.
+      recordRequestPerformance(ctx.backgroundScheduler, performanceContext, true, performance.now() - requestStartedAt);
+      ctx.dump?.error('upstream', identity.upstream);
+      return forwardUpstreamResponse(response);
+    }
+
+    if (responseHandling.format === 'json') {
+      // A 2xx body that fails to parse must not 502 a client whose
+      // upstream call already succeeded; we skip usage extraction and
+      // log so missing rows stay traceable.
+      let parsed: unknown;
+      try {
+        parsed = await response.clone().json();
+      } catch (e) {
+        console.warn(`passthrough-serve: failed to parse 2xx upstream body for ${sourceApi}; usage row will be skipped`, e instanceof Error ? e.message : String(e));
+        parsed = undefined;
+      }
+      const usage = parsed !== undefined ? responseHandling.extractBilling(parsed) : null;
+      ctx.dump?.success(identity, usage);
+      if (usage) {
+        scheduleUsageRecord(ctx.backgroundScheduler, recordTokenUsage(ctx.apiKeyId, identity, usage));
+      }
+      recordRequestPerformance(ctx.backgroundScheduler, performanceContext, false, performance.now() - requestStartedAt);
+      return forwardUpstreamResponse(response);
+    }
+
+    // Hono's streamSSE owns the response — forwardable upstream
+    // headers must be staged on `c` *before* the streamSSE call so
+    // they survive its internal newResponse.
+    const upstreamBody = response.body;
+    if (!upstreamBody) {
+      ctx.dump?.failed(`${sourceApi} streaming upstream returned no body`);
+      recordRequestPerformance(ctx.backgroundScheduler, performanceContext, true, performance.now() - requestStartedAt);
+      // Preserve upstream correlation headers (x-request-id, cf-ray, ...)
+      // on the synthesized 502 so this rare edge case is still traceable.
+      stageForwardedResponseHeaders(c, response);
+      return passthroughApiError(c, 'Upstream returned a streaming response with no body.', 502);
+    }
+    stageForwardedResponseHeaders(c, response);
+    return streamSSE(c, async stream => {
+      let completion: StreamCompletion = 'error';
+      let streamError: unknown;
+      // Tracks whether the upstream's terminal (`done`) frame arrived
+      // before the writer settled. A client cancel after the terminal
+      // frame is graceful (upstream already finished its work); a
+      // mid-stream cancel or EOF without terminal is a real failure.
+      // Mirrors SourceStreamState.failedAfter on the chat endpoints.
+      let terminalFrameSeen = false;
+      try {
+        const frames = (async function* () {
+          const sseFramesIn = parseSSEStream(upstreamBody, { signal: ctx.abortSignal });
+          for await (const parsed of parseTargetStreamFrames<unknown>(sseFramesIn, { protocol: sourceApi })) {
+            const inputFrame: ProtocolFrame<unknown> = parsed.type === 'done' ? doneFrame() : eventFrame(parsed.data);
+            // Dump pre-transform, so forensics see upstream truth even
+            // when the caller drops a frame from the client-facing stream.
+            ctx.dump?.frame(inputFrame);
+            if (inputFrame.type === 'done') terminalFrameSeen = true;
+            const outputFrame = responseHandling.transformFrame(inputFrame);
+            if (outputFrame === null) continue;
+            yield outputFrame.type === 'done' ? sseFrame('[DONE]') : sseFrame(JSON.stringify(outputFrame.event));
+          }
+        })();
+        completion = await writeSSEFrames(stream, frames, {
+          keepAlive: { frame: sseCommentFrame('keepalive') },
+          downstreamAbortController: ctx.downstreamAbortController,
+        });
+      } catch (e) {
+        streamError = e;
+      } finally {
+        const usage = responseHandling.settleUsage();
+        const failed = streamError !== undefined || completion === 'error' || !terminalFrameSeen;
+        if (failed) {
+          ctx.dump?.failed(streamError ?? `${sourceApi} stream ended with completion=${completion}`);
+        } else {
+          ctx.dump?.success(identity, usage);
+        }
+        // Record any accumulated usage regardless of the failed flag —
+        // tokens already metered upstream should bill even when the
+        // downstream half of the round-trip turned out badly. The chat
+        // streaming endpoints follow the same rule.
+        if (usage) {
+          scheduleUsageRecord(ctx.backgroundScheduler, recordTokenUsage(ctx.apiKeyId, identity, usage));
+        }
+        recordRequestPerformance(ctx.backgroundScheduler, performanceContext, failed, performance.now() - requestStartedAt);
+      }
+    });
   } catch (e) {
     if (e instanceof ProviderModelsUnavailableError) {
       const forwarded = httpResponseToResponse(e.httpResponse);

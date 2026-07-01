@@ -11,7 +11,9 @@ import type { ModelCandidate } from '@floway-dev/provider';
 // through to the next candidate. 4xx is on the failure side — 429
 // (rate-limit) is the responsibility of the upstream that issued it, and
 // the gateway's candidate ordering exists to absorb that kind of
-// transient.
+// transient. Passthrough serves feed in an enlarged `plain` shape that
+// carries the raw upstream Response plus per-attempt telemetry alongside
+// the status; the success discriminant is unchanged.
 type IterableAttemptResult =
   | { readonly type: 'events' }
   | { readonly type: 'result' }
@@ -35,12 +37,13 @@ const isAttemptSuccess = (result: IterableAttemptResult): boolean => {
 // Tries each narrowed candidate in order and returns the first success. A
 // per-candidate failure falls through so a transient 5xx/429/network on
 // one upstream rolls over to the next; when the list is exhausted the
-// most recent failure is forwarded verbatim so clients still see real
-// upstream telemetry rather than a synthetic gateway envelope. Callers
-// are contractually required to hand in a non-empty candidate list — the
-// empty-candidate branch renders `noViableCandidateFailure` at each
-// caller's own protocol-shaped rendering site.
-export const iterateChatCandidates = async <T extends IterableAttemptResult>(
+// most recent failure is returned so callers can forward it verbatim and
+// clients still see real upstream telemetry rather than a synthetic
+// gateway envelope. Callers are contractually required to hand in a
+// non-empty candidate list — the empty-candidate branch renders each
+// caller's own protocol-shaped "no viable candidate" envelope at the
+// serve site.
+export const iterateCandidates = async <T extends IterableAttemptResult>(
   candidates: readonly ModelCandidate[],
   invocationLabel: string,
   attempt: (candidate: ModelCandidate) => Promise<T>,

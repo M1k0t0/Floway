@@ -1,10 +1,10 @@
 import { messagesAttempt, messagesGenerateTarget, messagesCountTokensTarget } from './attempt.ts';
 import { renderMessagesFailure } from './errors.ts';
 import { enumerateModelCandidates } from '../../providers/registry.ts';
+import { iterateCandidates } from '../../shared/iterate-candidates.ts';
 import { classifyResponsesItemAffinity } from '../responses/items/affinity.ts';
 import { noViableCandidateFailure } from '../shared/errors.ts';
 import type { ChatGatewayCtx } from '../shared/gateway-ctx.ts';
-import { iterateChatCandidates } from '../shared/iterate-candidates.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { MessagesPayload, MessagesStreamEvent } from '@floway-dev/protocols/messages';
 import type { ExecuteResult, PlainResult } from '@floway-dev/provider';
@@ -47,7 +47,7 @@ export const messagesServe = {
     // from one candidate falls through to the next so the gateway absorbs
     // transient 5xx/429/network failures. When the list is exhausted, the
     // most recent failure is forwarded verbatim.
-    return await iterateChatCandidates(
+    return await iterateCandidates(
       decision.candidates,
       'messagesServe.generate',
       candidate => messagesAttempt.generate({ payload, ctx, candidate, headers }),
@@ -73,7 +73,7 @@ export const messagesServe = {
     if (decision.kind === 'failure') return renderMessagesFailure(decision.failure, 'countTokens');
     if (decision.candidates.length === 0) return renderMessagesFailure(noViableCandidateFailure(sawModel, payload.model, failedUpstreams), 'countTokens');
 
-    return await iterateChatCandidates(
+    return await iterateCandidates(
       decision.candidates,
       'messagesServe.countTokens',
       candidate => messagesAttempt.countTokens({ payload, ctx, candidate, headers }),

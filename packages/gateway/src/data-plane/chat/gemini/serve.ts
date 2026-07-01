@@ -1,10 +1,10 @@
 import { geminiAttempt, geminiCountTokensTarget, geminiGenerateTarget } from './attempt.ts';
 import { renderGeminiFailure } from './errors.ts';
 import { enumerateModelCandidates } from '../../providers/registry.ts';
+import { iterateCandidates } from '../../shared/iterate-candidates.ts';
 import { classifyResponsesItemAffinity } from '../responses/items/affinity.ts';
 import { noViableCandidateFailure } from '../shared/errors.ts';
 import type { ChatGatewayCtx } from '../shared/gateway-ctx.ts';
-import { iterateChatCandidates } from '../shared/iterate-candidates.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { GeminiPayload, GeminiStreamEvent } from '@floway-dev/protocols/gemini';
 import type { ExecuteResult, PlainResult } from '@floway-dev/provider';
@@ -47,7 +47,7 @@ export const geminiServe = {
     if (decision.kind === 'failure') return renderGeminiFailure(decision.failure, 'generate');
     if (decision.candidates.length === 0) return renderGeminiFailure(noViableCandidateFailure(sawModel, model, failedUpstreams), 'generate');
 
-    return await iterateChatCandidates(
+    return await iterateCandidates(
       decision.candidates,
       'geminiServe.generate',
       candidate => geminiAttempt.generate({ payload, ctx, candidate, headers }),
@@ -73,7 +73,7 @@ export const geminiServe = {
     if (decision.kind === 'failure') return renderGeminiFailure(decision.failure, 'countTokens');
     if (decision.candidates.length === 0) return renderGeminiFailure(noViableCandidateFailure(sawModel, model, failedUpstreams), 'countTokens');
 
-    return await iterateChatCandidates(
+    return await iterateCandidates(
       decision.candidates,
       'geminiServe.countTokens',
       candidate => geminiAttempt.countTokens({ payload, ctx, candidate, headers }),
