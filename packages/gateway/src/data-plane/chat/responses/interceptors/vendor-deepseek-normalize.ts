@@ -19,19 +19,19 @@
 // - https://api-docs.deepseek.com/zh-cn/guides/thinking_mode
 
 import type { ResponsesInterceptor } from './types.ts';
-import type { ResponsesPayload } from '@floway-dev/protocols/responses';
+import type { CanonicalResponsesPayload } from '@floway-dev/translate/via-responses/responses-items';
 
 interface DeepseekDisableField {
   thinking?: { type: 'disabled' };
 }
 
-type ResponsesPayloadWithDeepseekDisable = Omit<ResponsesPayload, 'reasoning'> & DeepseekDisableField;
+type CanonicalResponsesPayloadWithDeepseekDisable = Omit<CanonicalResponsesPayload, 'reasoning'> & DeepseekDisableField;
 
-const stripCanonicalReasoningSentinel = (payload: ResponsesPayload): ResponsesPayload => {
+const stripCanonicalReasoningSentinel = (payload: CanonicalResponsesPayload): CanonicalResponsesPayload => {
   if (payload.reasoning?.effort !== 'none') return payload;
   const { reasoning: _stripped, ...rest } = payload;
-  const out: ResponsesPayloadWithDeepseekDisable = { ...rest, thinking: { type: 'disabled' } };
-  return out as ResponsesPayload;
+  const out: CanonicalResponsesPayloadWithDeepseekDisable = { ...rest, thinking: { type: 'disabled' } };
+  return out as CanonicalResponsesPayload;
 };
 
 export const withVendorDeepseekResponsesNormalize: ResponsesInterceptor = async (ctx, _request, run) => {

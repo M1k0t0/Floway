@@ -1312,7 +1312,7 @@ export const webSearchServerTool: ServerToolRegistration = (invocation, gatewayC
 
   const tools = Array.isArray(invocation.payload.tools) ? invocation.payload.tools : [];
   const hasHostedWebSearch = tools.some(isHostedWebSearchTool);
-  const hasReplayInput = Array.isArray(invocation.payload.input) && invocation.payload.input.some(i => i.type === 'web_search_call');
+  const hasReplayInput = invocation.payload.input.some(i => i.type === 'web_search_call');
   if (!hasHostedWebSearch && !hasReplayInput) return { type: 'inactive' };
 
   const prepared = prepareToolsForShim(tools);
@@ -1343,7 +1343,7 @@ export const webSearchServerTool: ServerToolRegistration = (invocation, gatewayC
   return {
     type: 'active',
     baseToolName: SHIM_TOOL_NAME,
-    transformItems: (items, toolName) => transformInputItemsForWebSearch(items, toolName, id => invocation.store.getPrivatePayload(id)),
+    transformItems: (items, toolName) => transformInputItemsForWebSearch(items, toolName, id => gatewayCtx.store.getPrivatePayload(id)),
     ...(hasHostedWebSearch
       ? {
           hosted: {

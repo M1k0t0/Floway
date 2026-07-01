@@ -19,12 +19,13 @@ import {
 } from './image-generation.ts';
 import { initRepo } from '../../../../../repo/index.ts';
 import { InMemoryRepo } from '../../../../../repo/memory.ts';
-import type { GatewayCtx } from '../../../shared/gateway-ctx.ts';
-import { MemoryStatefulResponsesBacking, LayeredStatefulResponsesStore } from '../../items/store.ts';
+import type { ChatGatewayCtx } from '../../../shared/gateway-ctx.ts';
+import { createNonResponsesSourceStore } from '../../items/store.ts';
 import type { ResponsesInvocation } from '../types.ts';
 import type { ResponsesInputItem, ResponsesPayload, ResponsesTool } from '@floway-dev/protocols/responses';
 import { directFetcher } from '@floway-dev/provider';
 import { assert, assertEquals, assertFalse, assertStringIncludes } from '@floway-dev/test-utils';
+import type { CanonicalResponsesPayload } from '@floway-dev/translate/via-responses/responses-items';
 
 const PNG_B64 = 'aGVsbG8='; // "hello" — any decodable base64 works for source tests.
 
@@ -32,9 +33,9 @@ const PNG_B64 = 'aGVsbG8='; // "hello" — any decodable base64 works for source
 const makeCtx = (payload: Partial<ResponsesPayload>): ResponsesInvocation => ({
   candidate: {
     provider: {
-      upstream: 'test-upstream', providerKind: 'custom', name: 'test',
+      upstream: 'test-upstream', kind: 'custom', name: 'test',
       disabledPublicModelIds: [], modelPrefix: null,
-      provider: {} as never, supportsResponsesItemReference: false,
+      instance: {} as never, supportsResponsesItemReference: false,
     },
     model: {
       id: 'm', limits: {}, kind: 'chat',
@@ -44,18 +45,11 @@ const makeCtx = (payload: Partial<ResponsesPayload>): ResponsesInvocation => ({
     fetcher: directFetcher,
   },
   targetApi: 'responses',
-  store: new LayeredStatefulResponsesStore({
-    apiKeyId: 'test-key',
-    reads: [new MemoryStatefulResponsesBacking()],
-    itemWrites: [],
-    snapshotWrites: [],
-    stageInputs: false,
-  }),
-  payload: { model: 'm', input: [], ...payload } as ResponsesPayload,
+  payload: { model: 'm', input: [], ...payload } as CanonicalResponsesPayload,
   headers: new Headers(),
   action: 'generate',
 });
-const gatewayCtx = (): GatewayCtx => ({
+const gatewayCtx = (): ChatGatewayCtx => ({
   apiKeyId: 'test-key',
   upstreamIds: null,
   wantsStream: true,
@@ -64,6 +58,7 @@ const gatewayCtx = (): GatewayCtx => ({
   dump: null,
   backgroundScheduler: () => {},
   requestStartedAt: 0,
+  store: createNonResponsesSourceStore('test-key'),
 });
 
 beforeEach(() => {
@@ -250,10 +245,6 @@ test('collectImageSources skips http(s) image urls (remote fetch unsupported)', 
     },
   ];
   assertEquals(collectImageSources(input).length, 0);
-});
-
-test('collectImageSources returns empty for a plain string input', () => {
-  assertEquals(collectImageSources('just text').length, 0);
 });
 
 test('collectImageSources reads tool-result images and preserves forward order', () => {

@@ -2,8 +2,8 @@ import { beforeEach, test, vi } from 'vitest';
 
 import { initRepo } from '../../../../../repo/index.ts';
 import { InMemoryRepo } from '../../../../../repo/memory.ts';
-import type { GatewayCtx } from '../../../shared/gateway-ctx.ts';
-import { MemoryStatefulResponsesBacking, LayeredStatefulResponsesStore } from '../../items/store.ts';
+import type { ChatGatewayCtx } from '../../../shared/gateway-ctx.ts';
+import { createNonResponsesSourceStore } from '../../items/store.ts';
 import type { ResponsesInvocation } from '../types.ts';
 import { eventFrame } from '@floway-dev/protocols/common';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
@@ -36,12 +36,12 @@ const stub = vi.hoisted((): BackendStub => ({ generationsCalls: [], editsForms: 
 const defaultCandidates = vi.hoisted(() => () => [{
   provider: {
     upstream: 'u',
-    providerKind: 'custom',
+    kind: 'custom',
     name: 'mock-image',
     disabledPublicModelIds: [],
     modelPrefix: null,
     supportsResponsesItemReference: false,
-    provider: {
+    instance: {
       getPricingForModelKey: () => null,
       callImagesGenerations: async (_model: unknown, body: Record<string, unknown>, _signal: unknown, opts: { recordUpstreamLatency: <T>(p: Promise<T>) => Promise<T> }) => {
         stub.generationsCalls.push(body);
@@ -134,9 +134,9 @@ const scriptedRun = (turns: ProtocolFrame<ResponsesStreamEvent>[][]) => {
 const makeCtx = (input: unknown[], action: 'generate' | 'edit' | 'auto' = 'auto', extraTool: Record<string, unknown> = {}): ResponsesInvocation => ({
   candidate: {
     provider: {
-      upstream: 'test-upstream', providerKind: 'custom', name: 'test',
+      upstream: 'test-upstream', kind: 'custom', name: 'test',
       disabledPublicModelIds: [], modelPrefix: null,
-      provider: {} as never, supportsResponsesItemReference: false,
+      instance: {} as never, supportsResponsesItemReference: false,
     },
     model: {
       id: 'm', limits: {}, kind: 'chat',
@@ -146,18 +146,11 @@ const makeCtx = (input: unknown[], action: 'generate' | 'edit' | 'auto' = 'auto'
     fetcher: directFetcher,
   },
   targetApi: 'responses',
-  store: new LayeredStatefulResponsesStore({
-    apiKeyId: 'test-key',
-    reads: [new MemoryStatefulResponsesBacking()],
-    itemWrites: [],
-    snapshotWrites: [],
-    stageInputs: false,
-  }),
   payload: { model: 'orchestrator', input, tools: [{ type: 'image_generation', action, ...extraTool }] } as never,
   headers: new Headers(),
   action: 'generate',
 });
-const gatewayCtx = (): GatewayCtx => ({
+const gatewayCtx = (): ChatGatewayCtx => ({
   apiKeyId: 'test-key',
   upstreamIds: null,
   wantsStream: true,
@@ -166,6 +159,7 @@ const gatewayCtx = (): GatewayCtx => ({
   dump: null,
   backgroundScheduler: () => {},
   requestStartedAt: 0,
+  store: createNonResponsesSourceStore('test-key'),
 });
 
 const drain = async (result: ExecuteResult<ProtocolFrame<ResponsesStreamEvent>>): Promise<ResponsesStreamEvent[]> => {
@@ -183,7 +177,7 @@ beforeEach(async () => {
   // "unknown upstream id: u".
   await repo.upstreams.save({
     id: 'u',
-    provider: 'custom',
+    kind: 'custom',
     name: 'mock-image',
     enabled: true,
     sortOrder: 0,
@@ -383,7 +377,7 @@ test('resolveImageCandidate renders model_not_supported when image-kind candidat
   stub.nextResolutionOverride = {
     candidates: [{
       provider: {
-        upstream: 'u', providerKind: 'custom', name: 'wrong-endpoint',
+        upstream: 'u', kind: 'custom', name: 'wrong-endpoint',
         disabledPublicModelIds: [], modelPrefix: null,
         supportsResponsesItemReference: false,
         provider: { getPricingForModelKey: () => null },

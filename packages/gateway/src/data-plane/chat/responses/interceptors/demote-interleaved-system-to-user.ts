@@ -13,8 +13,6 @@ export const withInterleavedSystemDemotedToUser: ResponsesInterceptor = (ctx, _g
   if (!ctx.candidate.model.enabledFlags.has('demote-interleaved-system-to-user')) return run();
 
   const { input } = ctx.payload;
-  if (typeof input === 'string') return run();
-
   let crossedLeadingRun = false;
   for (let i = 0; i < input.length; i++) {
     const item = input[i];
