@@ -125,10 +125,10 @@ const accountIdShort = computed(() => {
         <p class="truncate text-sm font-medium text-white">{{ account.email }}</p>
         <div class="flex flex-wrap items-center gap-2 text-xs text-gray-400">
           <Badge tone="violet" size="sm" class="!uppercase tracking-wide">{{ account.planType }}</Badge>
-          <Badge v-if="accountCredits?.credits_balance !== undefined" tone="zinc" size="sm">
+          <Badge v-if="accountCredits?.credits_has_credits === false" tone="rose" size="sm">no credits</Badge>
+          <Badge v-else-if="accountCredits?.credits_balance !== undefined" tone="zinc" size="sm">
             credits: {{ accountCredits.credits_balance }}
           </Badge>
-          <Badge v-if="accountCredits?.credits_has_credits === false" tone="rose" size="sm">no credits</Badge>
           <span class="font-mono text-[11px] text-gray-500" :title="account.chatgptAccountId">{{ accountIdShort }}</span>
         </div>
       </div>
