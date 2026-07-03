@@ -134,8 +134,3 @@ export const putCodexQuota = async (
   const next = replaceAccountQuota(state, idx, { fetchedAt: Date.now(), data: snapshot });
   await getProviderRepo().upstreams.saveState(upstreamId, next, { expectedState: fresh.state });
 };
-
-export const isCodexRateLimited = (snapshot: CodexQuotaSnapshot | null, now: Date): boolean => {
-  if (!snapshot?.ratelimited_until) return false;
-  return new Date(snapshot.ratelimited_until).getTime() > now.getTime();
-};

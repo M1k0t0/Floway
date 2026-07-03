@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
   computeCodexQuotaTtlMs,
   getCodexQuota,
-  isCodexRateLimited,
   parseCodexQuotaHeaders,
   putCodexQuota,
   type CodexQuotaSnapshot,
@@ -172,20 +171,5 @@ describe('computeCodexQuotaTtlMs', () => {
       primary_reset_after_at: '2026-06-08T00:00:00.000Z',
     };
     expect(computeCodexQuotaTtlMs(snap, now)).toBe(3 * 24 * 60 * 60 * 1000);
-  });
-});
-
-describe('isCodexRateLimited', () => {
-  test('true when ratelimited_until is in the future', () => {
-    expect(isCodexRateLimited({ observed_at: 'x', ratelimited_until: '2026-06-05T01:00:00.000Z' }, new Date('2026-06-05T00:00:00.000Z'))).toBe(true);
-  });
-  test('false when reset time has passed', () => {
-    expect(isCodexRateLimited({ observed_at: 'x', ratelimited_until: '2026-06-05T00:00:00.000Z' }, new Date('2026-06-05T01:00:00.000Z'))).toBe(false);
-  });
-  test('false when ratelimited_until absent', () => {
-    expect(isCodexRateLimited({ observed_at: 'x' }, new Date())).toBe(false);
-  });
-  test('false for null snapshot', () => {
-    expect(isCodexRateLimited(null, new Date())).toBe(false);
   });
 });

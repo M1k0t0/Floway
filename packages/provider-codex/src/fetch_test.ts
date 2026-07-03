@@ -110,23 +110,21 @@ describe('callCodexResponses — gates', () => {
     }
   });
 
-  test('refuses while rate-limited window is open', async () => {
-    vi.useFakeTimers().setSystemTime(new Date('2026-06-05T00:30:00.000Z'));
+  test('continues to upstream when a cached rate-limited quota snapshot is still open', async () => {
     seedAccountState({
+      accessToken: farFutureAccessToken,
       quotaSnapshot: {
         fetchedAt: new Date('2026-06-05T00:00:00.000Z').getTime(),
         data: { observed_at: '2026-06-05T00:00:00.000Z', ratelimited_until: '2026-06-05T01:00:00.000Z' },
       },
     });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
     const result = await callCodexResponses({
       upstreamId, account: activeAccount,
       model, body: { input: [], stream: true }, headers: new Headers(), effects: makeEffects(), call: noopUpstreamCallOptions(),
     });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.response.status).toBe(429);
-      expect(result.response.headers.get('retry-after')).toBeTruthy();
-    }
+    expect(result.ok).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -773,20 +771,21 @@ describe('callCodexResponses — recorder contract', () => {
     expect(recorder.durationMs()).toBeGreaterThanOrEqual(0);
   });
 
-  test('rate-limited gate satisfies an enforcing recorder once', async () => {
-    vi.useFakeTimers().setSystemTime(new Date('2026-06-05T00:30:00.000Z'));
+  test('cached rate-limited quota does not synthetic-return before the upstream fetch', async () => {
     seedAccountState({
+      accessToken: farFutureAccessToken,
       quotaSnapshot: {
         fetchedAt: new Date('2026-06-05T00:00:00.000Z').getTime(),
         data: { observed_at: '2026-06-05T00:00:00.000Z', ratelimited_until: '2026-06-05T01:00:00.000Z' },
       },
     });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
     const recorder = enforcingRecorder();
     const result = await callCodexResponses({
       upstreamId, account: activeAccount,
       model, body: { input: [], stream: true }, headers: new Headers(), effects: makeEffects(), call: recorder.options,
     });
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
     expect(recorder.invocations()).toBe(1);
     expect(() => recorder.durationMs()).not.toThrow();
   });

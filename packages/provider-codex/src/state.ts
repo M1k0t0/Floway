@@ -18,7 +18,7 @@ export interface CodexAccessTokenEntry {
 
 // Most recent quota observation derived from upstream response headers.
 // `fetchedAt` is unix ms; `data` is the parsed snapshot, validated by quota.ts
-// at the boundary where it's read for dashboard display / rate-limit checks.
+// at the boundary where it's read for dashboard display.
 export interface CodexQuotaSnapshotEntry {
   fetchedAt: number;
   data: CodexQuotaSnapshot;
