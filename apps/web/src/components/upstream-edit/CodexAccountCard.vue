@@ -140,8 +140,9 @@ const accountIdShort = computed(() => {
     <template v-if="quotaEntries.length">
       <div class="space-y-3">
         <section v-for="entry in quotaEntries" :key="entry.key" class="space-y-3 rounded-xl border border-white/[0.06] bg-surface-900/40 p-3">
-          <div class="flex flex-wrap items-center gap-2 text-[11px]">
-            <Badge tone="zinc" size="sm">active limit: {{ entry.label }}</Badge>
+          <div class="flex min-w-0 items-baseline justify-between gap-3">
+            <h4 class="min-w-0 truncate text-sm font-medium text-gray-200" :title="entry.label">{{ entry.label }}</h4>
+            <span class="shrink-0 text-[11px] uppercase tracking-wide text-gray-500">active limit</span>
           </div>
 
           <div class="space-y-3">
