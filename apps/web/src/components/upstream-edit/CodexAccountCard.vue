@@ -84,10 +84,17 @@ const quotaEntries = computed<QuotaEntryView[]>(() => {
 const accountCredits = computed<CodexQuotaSnapshot | null>(() => {
   const map = quotaMap.value;
   if (!map) return null;
-  const withCredits = Object.values(map)
-    .filter(q => q.credits_balance !== undefined || q.credits_has_credits !== undefined)
-    .toSorted((a, b) => new Date(b.observed_at).getTime() - new Date(a.observed_at).getTime());
-  return withCredits[0] ?? null;
+  let newest: CodexQuotaSnapshot | null = null;
+  let newestObservedAt = Number.NEGATIVE_INFINITY;
+  for (const quota of Object.values(map)) {
+    if (quota.credits_balance === undefined && quota.credits_has_credits === undefined) continue;
+    const observedAt = new Date(quota.observed_at).getTime();
+    if (observedAt > newestObservedAt) {
+      newest = quota;
+      newestObservedAt = observedAt;
+    }
+  }
+  return newest;
 });
 
 const badge = computed<{ tone: 'rose' | 'amber' | 'emerald'; label: string; detail?: string }>(() => {
