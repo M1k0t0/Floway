@@ -23,6 +23,7 @@ interface QuotaEntryView {
   key: string;
   label: string;
   quota: CodexQuotaSnapshot;
+  rateLimitedUntil: string | null;
   windows: QuotaWindowView[];
 }
 
@@ -57,15 +58,22 @@ const formatPercent = (n: number | undefined): string => {
   return `${Math.max(0, Math.min(100, Math.round(n)))}%`;
 };
 
+const futureTimestamp = (iso: string | undefined, now: number): string | null => {
+  if (typeof iso !== 'string') return null;
+  return new Date(iso).getTime() > now ? iso : null;
+};
+
 const quotaEntries = computed<QuotaEntryView[]>(() => {
   const map = quotaMap.value;
   if (!map) return [];
+  const now = Date.now();
   return Object.entries(map)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, quota]) => ({
       key,
       label: quota.active_limit ?? key,
       quota,
+      rateLimitedUntil: futureTimestamp(quota.ratelimited_until, now),
       windows: [
         { label: 'Primary window', percent: quota.primary_used_percent, resetAt: quota.primary_reset_after_at, windowMinutes: quota.primary_window_minutes },
         { label: 'Secondary window', percent: quota.secondary_used_percent, resetAt: quota.secondary_reset_after_at, windowMinutes: quota.secondary_window_minutes },
@@ -90,10 +98,9 @@ const badge = computed<{ tone: 'rose' | 'amber' | 'emerald'; label: string; deta
   if (c?.state === 'refresh_failed') {
     return { tone: 'rose', label: 'Refresh failed — re-import to recover', detail: c.state_message };
   }
-  const now = Date.now();
   const rateLimitedUntil = quotaEntries.value
-    .map(entry => entry.quota.ratelimited_until)
-    .filter((until): until is string => typeof until === 'string' && new Date(until).getTime() > now)
+    .map(entry => entry.rateLimitedUntil)
+    .filter((until): until is string => until !== null)
     .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
   if (rateLimitedUntil) {
     return { tone: 'rose', label: `Rate-limited until ${formatTimestamp(rateLimitedUntil)}` };
@@ -164,7 +171,7 @@ const accountIdShort = computed(() => {
           </div>
 
           <footer class="flex flex-wrap items-center gap-3 border-t border-white/[0.06] pt-3 text-[11px] text-gray-500">
-            <span v-if="entry.quota.ratelimited_until">rate-limited until {{ formatTimestamp(entry.quota.ratelimited_until) }}</span>
+            <span v-if="entry.rateLimitedUntil">rate-limited until {{ formatTimestamp(entry.rateLimitedUntil) }}</span>
             <span>observed {{ formatTimestamp(entry.quota.observed_at) }}</span>
           </footer>
         </section>
