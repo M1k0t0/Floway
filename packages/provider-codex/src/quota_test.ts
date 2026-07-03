@@ -100,10 +100,13 @@ describe('parseCodexQuotaHeaders', () => {
     expect(snapshot.ratelimited_until).toBe('2026-06-05T02:00:00.000Z');
   });
 
-  test('survives missing optional headers', () => {
+  test('normalizes string headers at the provider boundary', () => {
     const observedAt = new Date('2026-06-05T00:00:00.000Z');
-    const snapshot = parseCodexQuotaHeaders(new Headers({}), { now: observedAt, isRateLimited: false });
-    expect(snapshot).toEqual({ observed_at: '2026-06-05T00:00:00.000Z' });
+    const snapshot = parseCodexQuotaHeaders(new Headers({
+      'x-codex-active-limit': '  premium  ',
+      'x-codex-plan-type': '   ',
+    }), { now: observedAt, isRateLimited: false });
+    expect(snapshot).toEqual({ observed_at: '2026-06-05T00:00:00.000Z', active_limit: 'premium' });
   });
 });
 

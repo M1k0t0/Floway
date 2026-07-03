@@ -45,7 +45,9 @@ export const parseCodexQuotaHeaders = (headers: Headers, options: ParseCodexQuot
 
   const setString = (key: keyof CodexQuotaSnapshot, header: string): void => {
     const v = headers.get(header);
-    if (v !== null) assign[key] = v;
+    if (v === null) return;
+    const trimmed = v.trim();
+    if (trimmed !== '') assign[key] = trimmed;
   };
   const setNumber = (key: keyof CodexQuotaSnapshot, header: string): void => {
     const v = headers.get(header);
