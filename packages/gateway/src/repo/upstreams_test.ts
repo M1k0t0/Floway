@@ -646,7 +646,7 @@ test('migration 0047 backfills openaiDeviceId on legacy Codex rows and leaves po
   }
 });
 
-test('migration 0048 rebuckets legacy Codex quota snapshots by active limit', async () => {
+test('migration 0048 rebuckets Codex quota snapshots by active limit', async () => {
   const db = await createMigratedSqlJsDatabase();
   try {
     for (const filename of [...migrationSqlByFilename.keys()].filter(f => f >= '0010_unified_upstreams.sql' && f < '0048_codex_quota_snapshot_active_limit_map.sql').toSorted()) {
@@ -661,10 +661,12 @@ test('migration 0048 rebuckets legacy Codex quota snapshots by active limit', as
                   'accessToken', NULL,
                   'chatgptAccountId', 'acc-premium',
                   'openaiDeviceId', '11111111-2222-4333-8444-555555555555',
-                  'quotaSnapshot', json_object(
-                    'data', json_object('active_limit', 'premium', 'observed_at', '2026-06-05T00:00:00.000Z', 'primary_used_percent', 42),
-                    'fetchedAt', 1700000000000
-                  ),
+                  'quotaSnapshot', json_extract(json_object(
+                    'premium', json_object(
+                      'data', json_object('active_limit', 'premium', 'observed_at', '2026-06-05T00:00:00.000Z', 'primary_used_percent', 42),
+                      'fetchedAt', 1700000000000
+                    )
+                  ), '$.premium'),
                   'refresh_token', 'rt',
                   'state', 'active',
                   'state_updated_at', '2026-06-05T00:00:00.000Z'
@@ -676,10 +678,12 @@ test('migration 0048 rebuckets legacy Codex quota snapshots by active limit', as
                   'accessToken', NULL,
                   'chatgptAccountId', 'acc-missing',
                   'openaiDeviceId', '22222222-3333-4444-8555-666666666666',
-                  'quotaSnapshot', json_object(
-                    'data', json_object('observed_at', '2026-06-05T01:00:00.000Z'),
-                    'fetchedAt', 1700000001000
-                  ),
+                  'quotaSnapshot', json_extract(json_object(
+                    'unknown', json_object(
+                      'data', json_object('observed_at', '2026-06-05T01:00:00.000Z'),
+                      'fetchedAt', 1700000001000
+                    )
+                  ), '$.unknown'),
                   'refresh_token', 'rt',
                   'state', 'active',
                   'state_updated_at', '2026-06-05T00:00:00.000Z'
@@ -691,10 +695,12 @@ test('migration 0048 rebuckets legacy Codex quota snapshots by active limit', as
                   'accessToken', NULL,
                   'chatgptAccountId', 'acc-unsafe',
                   'openaiDeviceId', '33333333-4444-4555-8666-777777777777',
-                  'quotaSnapshot', json_object(
-                    'data', json_object('active_limit', 'constructor', 'observed_at', '2026-06-05T02:00:00.000Z'),
-                    'fetchedAt', 1700000002000
-                  ),
+                  'quotaSnapshot', json_extract(json_object(
+                    'unknown', json_object(
+                      'data', json_object('active_limit', 'constructor', 'observed_at', '2026-06-05T02:00:00.000Z'),
+                      'fetchedAt', 1700000002000
+                    )
+                  ), '$.unknown'),
                   'refresh_token', 'rt',
                   'state', 'active',
                   'state_updated_at', '2026-06-05T00:00:00.000Z'
@@ -716,7 +722,7 @@ test('migration 0048 rebuckets legacy Codex quota snapshots by active limit', as
                 '[]', '[]', '[]'),
               ('up_custom', 'custom', 'Custom', 1, 4, '2026-06-05T00:00:00.000Z', '2026-06-05T00:00:00.000Z',
                 json_object('baseUrl', 'https://a.example/v1', 'apiKey', 'k', 'authStyle', 'bearer'),
-                json_object('accounts', json_array(json_object('quotaSnapshot', json_object('data', json_object('active_limit', 'premium'), 'fetchedAt', 1)))),
+                json_object('accounts', json_array(json_object('quotaSnapshot', json_object('premium', json_object('data', json_object('active_limit', 'premium'), 'fetchedAt', 1))))),
                 '[]', '[]', '[]')`);
 
     applySqlJsFile(db, '0048_codex_quota_snapshot_active_limit_map.sql');
@@ -764,8 +770,7 @@ test('migration 0048 rebuckets legacy Codex quota snapshots by active limit', as
       premium: { data: { active_limit: 'premium', observed_at: '2026-06-05T03:00:00.000Z' }, fetchedAt: 1700000003000 },
     });
     assertEquals(snapshotFor('up_custom'), {
-      data: { active_limit: 'premium' },
-      fetchedAt: 1,
+      premium: { data: { active_limit: 'premium' }, fetchedAt: 1 },
     });
   } finally {
     db.close();
