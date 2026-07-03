@@ -73,6 +73,15 @@ const quotaEntries = computed<QuotaEntryView[]>(() => {
     }));
 });
 
+const accountCredits = computed<CodexQuotaSnapshot | null>(() => {
+  const map = quotaMap.value;
+  if (!map) return null;
+  const withCredits = Object.values(map)
+    .filter(q => q.credits_balance !== undefined || q.credits_has_credits !== undefined)
+    .toSorted((a, b) => new Date(b.observed_at).getTime() - new Date(a.observed_at).getTime());
+  return withCredits[0] ?? null;
+});
+
 const badge = computed<{ tone: 'rose' | 'amber' | 'emerald'; label: string; detail?: string }>(() => {
   const c = credential.value;
   if (c?.state === 'session_terminated') {
@@ -116,6 +125,10 @@ const accountIdShort = computed(() => {
         <p class="truncate text-sm font-medium text-white">{{ account.email }}</p>
         <div class="flex flex-wrap items-center gap-2 text-xs text-gray-400">
           <Badge tone="violet" size="sm" class="!uppercase tracking-wide">{{ account.planType }}</Badge>
+          <Badge v-if="accountCredits?.credits_balance !== undefined" tone="zinc" size="sm">
+            credits: {{ accountCredits.credits_balance }}
+          </Badge>
+          <Badge v-if="accountCredits?.credits_has_credits === false" tone="rose" size="sm">no credits</Badge>
           <span class="font-mono text-[11px] text-gray-500" :title="account.chatgptAccountId">{{ accountIdShort }}</span>
         </div>
       </div>
@@ -129,10 +142,6 @@ const accountIdShort = computed(() => {
         <section v-for="entry in quotaEntries" :key="entry.key" class="space-y-3 rounded-xl border border-white/[0.06] bg-surface-900/40 p-3">
           <div class="flex flex-wrap items-center gap-2 text-[11px]">
             <Badge tone="zinc" size="sm">active limit: {{ entry.label }}</Badge>
-            <Badge v-if="entry.quota.credits_balance !== undefined" tone="zinc" size="sm">
-              credits: {{ entry.quota.credits_balance }}
-            </Badge>
-            <Badge v-if="entry.quota.credits_has_credits === false" tone="rose" size="sm">no credits</Badge>
           </div>
 
           <div class="space-y-3">
