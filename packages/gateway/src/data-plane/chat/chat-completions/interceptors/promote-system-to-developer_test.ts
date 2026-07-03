@@ -21,20 +21,44 @@ const stubCtx: ChatGatewayCtx = {
   store: createNonResponsesSourceStore('test-key'),
 };
 
-const invocation = (payload: ChatCompletionsPayload, enabledFlags: ReadonlySet<string> = new Set(['promote-system-to-developer'])): ChatCompletionsInvocation => ({
+const invocation = (
+  payload: ChatCompletionsPayload,
+  enabledFlags: ReadonlySet<string> = new Set(['promote-system-to-developer']),
+  targetApi: ChatCompletionsInvocation['targetApi'] = 'chat-completions',
+): ChatCompletionsInvocation => ({
   payload,
   candidate: stubModelCandidate({ enabledFlags }),
-  targetApi: 'chat-completions',
+  targetApi,
   headers: new Headers(),
 });
 
 const okEvents = () => Promise.resolve(eventResult((async function* () {})(), testTelemetryModelIdentity));
 
-test('rewrites system role to developer on messages', async () => {
+test('rewrites inline system role to developer on messages', async () => {
   const ctx = invocation({
     model: 'gpt-5.4',
     messages: [
+      { role: 'user', content: 'hello' },
       { role: 'system', content: 'inline instructions' },
+    ],
+  });
+
+  let observed: ChatCompletionsPayload | null = null;
+  await withPromoteSystemToDeveloper(ctx, stubCtx, () => {
+    observed = ctx.payload;
+    return okEvents();
+  });
+
+  assertEquals(observed!.messages[0].role, 'user');
+  assertEquals(observed!.messages[1].role, 'developer');
+  assertEquals(observed!.messages[1].content, 'inline instructions');
+});
+
+test('promotes every system message for native Chat Completions targets', async () => {
+  const ctx = invocation({
+    model: 'gpt-5.4',
+    messages: [
+      { role: 'system', content: 'base instructions' },
       { role: 'user', content: 'hello' },
     ],
   });
@@ -46,8 +70,35 @@ test('rewrites system role to developer on messages', async () => {
   });
 
   assertEquals(observed!.messages[0].role, 'developer');
-  assertEquals(observed!.messages[0].content, 'inline instructions');
+  assertEquals(observed!.messages[0].content, 'base instructions');
   assertEquals(observed!.messages[1].role, 'user');
+});
+
+test('preserves leading system prefix for Responses translation', async () => {
+  const ctx = invocation(
+    {
+      model: 'gpt-5.4',
+      messages: [
+        { role: 'system', content: 'base instructions' },
+        { role: 'user', content: 'hello' },
+        { role: 'system', content: 'inline instructions' },
+      ],
+    },
+    new Set(['promote-system-to-developer']),
+    'responses',
+  );
+
+  let observed: ChatCompletionsPayload | null = null;
+  await withPromoteSystemToDeveloper(ctx, stubCtx, () => {
+    observed = ctx.payload;
+    return okEvents();
+  });
+
+  assertEquals(observed!.messages[0].role, 'system');
+  assertEquals(observed!.messages[0].content, 'base instructions');
+  assertEquals(observed!.messages[1].role, 'user');
+  assertEquals(observed!.messages[2].role, 'developer');
+  assertEquals(observed!.messages[2].content, 'inline instructions');
 });
 
 test('leaves developer role untouched', async () => {

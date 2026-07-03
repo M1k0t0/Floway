@@ -12,12 +12,25 @@ const promoteRole = (message: ChatCompletionsMessage): ChatCompletionsMessage =>
   return { ...message, role: 'developer' as const };
 };
 
+const promoteInlineSystemRoles = (messages: ChatCompletionsMessage[]): ChatCompletionsMessage[] => {
+  let sawNonSystem = false;
+  return messages.map(message => {
+    if (message.role === 'system') {
+      return sawNonSystem ? promoteRole(message) : message;
+    }
+    sawNonSystem = true;
+    return message;
+  });
+};
+
 export const withPromoteSystemToDeveloper: ChatCompletionsInterceptor = async (ctx, _gatewayCtx, run) => {
   if (!providerModelOf(ctx.candidate).enabledFlags.has('promote-system-to-developer')) return await run();
 
   ctx.payload = {
     ...ctx.payload,
-    messages: ctx.payload.messages.map(promoteRole),
+    messages: ctx.targetApi === 'responses'
+      ? promoteInlineSystemRoles(ctx.payload.messages)
+      : ctx.payload.messages.map(promoteRole),
   };
 
   return await run();

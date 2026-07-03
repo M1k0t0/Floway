@@ -183,8 +183,8 @@ test('generate translate-to-responses branch runs target role promotion after Me
   const result = await messagesAttempt.generate({
     payload: makePayload({
       messages: [
-        { role: 'system', content: 'inline instructions' },
         { role: 'user', content: 'hello' },
+        { role: 'system', content: 'inline instructions' },
       ],
     }),
     ctx: makeGatewayCtx(),
@@ -202,8 +202,67 @@ test('generate translate-to-responses branch runs target role promotion after Me
   assertEquals(callResponses.mock.calls.length, 1);
   const input = observedBody?.input;
   if (!Array.isArray(input)) throw new Error('expected Responses input array');
-  assertEquals(input[0], { type: 'message', role: 'developer', content: 'inline instructions' });
+  assertEquals(input[0], { type: 'message', role: 'user', content: 'hello' });
+  assertEquals(input[1], { type: 'message', role: 'developer', content: 'inline instructions' });
+});
+
+test('generate translate-to-responses branch preserves multi-block system prefix', async () => {
+  installRepo();
+  let observedBody: Omit<ResponsesPayload, 'model'> | null = null;
+  const callResponses = vi.fn(async (_model, body): Promise<ProviderResponsesResult> => {
+    observedBody = body as Omit<ResponsesPayload, 'model'>;
+    return {
+      action: 'generate',
+      ok: true,
+      events: makeProtocolFrames([{
+        type: 'response.completed',
+        sequence_number: 0,
+        response: {
+          id: 'resp_x',
+          object: 'response',
+          model: 'test-model',
+          status: 'completed',
+          output: [],
+          output_text: '',
+          error: null,
+          incomplete_details: null,
+        },
+      }]),
+      modelKey: 'k',
+      headers: new Headers(),
+    };
+  });
+
+  const result = await messagesAttempt.generate({
+    payload: makePayload({
+      system: [{ type: 'text', text: 'base A' }, { type: 'text', text: 'base B' }],
+      messages: [
+        { role: 'user', content: 'hello' },
+        { role: 'system', content: 'inline instructions' },
+      ],
+    }),
+    ctx: makeGatewayCtx(),
+    candidate: makeCandidate({
+      callResponses,
+      endpoints: { responses: {} },
+      enabledFlags: new Set(['promote-system-to-developer']),
+    }),
+    headers: new Headers(),
+  });
+
+  assertEquals(result.type, 'events');
+  if (result.type !== 'events') throw new Error('unreachable');
+  await collectEvents(result.events);
+  assertEquals(callResponses.mock.calls.length, 1);
+  const input = observedBody?.input;
+  if (!Array.isArray(input)) throw new Error('expected Responses input array');
+  assertEquals(input[0], {
+    type: 'message',
+    role: 'system',
+    content: [{ type: 'input_text', text: 'base A' }, { type: 'input_text', text: 'base B' }],
+  });
   assertEquals(input[1], { type: 'message', role: 'user', content: 'hello' });
+  assertEquals(input[2], { type: 'message', role: 'developer', content: 'inline instructions' });
 });
 
 test('countTokens proxies the upstream response as a plain result', async () => {

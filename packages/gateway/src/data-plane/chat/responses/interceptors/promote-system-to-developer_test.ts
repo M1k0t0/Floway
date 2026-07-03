@@ -32,29 +32,74 @@ const okEvents = () =>
     ),
   );
 
-const invocation = (payload: CanonicalResponsesPayload, enabledFlags: ReadonlySet<string> = new Set(['promote-system-to-developer'])): ResponsesInvocation => ({
+const invocation = (
+  payload: CanonicalResponsesPayload,
+  enabledFlags: ReadonlySet<string> = new Set(['promote-system-to-developer']),
+  targetApi: ResponsesInvocation['targetApi'] = 'responses',
+): ResponsesInvocation => ({
   payload,
   candidate: stubModelCandidate({ enabledFlags }),
-  targetApi: 'responses',
+  targetApi,
   headers: new Headers(),
   action: 'generate',
 });
 
-test('rewrites system role to developer on input messages', async () => {
+test('rewrites inline system role to developer on input messages', async () => {
   const input = invocation({
     model: 'gpt-5.4',
     input: [
-      { type: 'message', role: 'system', content: 'inline instructions' },
       { type: 'message', role: 'user', content: 'hello' },
+      { type: 'message', role: 'system', content: 'inline instructions' },
     ],
   });
 
   await withPromoteSystemToDeveloper(input, stubCtx, okEvents);
 
   const items = input.payload.input as Array<{ role: string; content: unknown }>;
+  assertEquals(items[0].role, 'user');
+  assertEquals(items[1].role, 'developer');
+  assertEquals(items[1].content, 'inline instructions');
+});
+
+test('promotes every system message for non-native Responses targets', async () => {
+  const input = invocation(
+    {
+      model: 'gpt-5.4',
+      input: [
+        { type: 'message', role: 'system', content: 'base instructions' },
+        { type: 'message', role: 'user', content: 'hello' },
+      ],
+    },
+    new Set(['promote-system-to-developer']),
+    'chat-completions',
+  );
+
+  await withPromoteSystemToDeveloper(input, stubCtx, okEvents);
+
+  const items = input.payload.input as Array<{ role: string; content: unknown }>;
   assertEquals(items[0].role, 'developer');
-  assertEquals(items[0].content, 'inline instructions');
+  assertEquals(items[0].content, 'base instructions');
   assertEquals(items[1].role, 'user');
+});
+
+test('preserves leading system prefix for native Responses targets', async () => {
+  const input = invocation({
+    model: 'gpt-5.4',
+    input: [
+      { type: 'message', role: 'system', content: 'base instructions' },
+      { type: 'message', role: 'user', content: 'hello' },
+      { type: 'message', role: 'system', content: 'inline instructions' },
+    ],
+  });
+
+  await withPromoteSystemToDeveloper(input, stubCtx, okEvents);
+
+  const items = input.payload.input as Array<{ role: string; content: unknown }>;
+  assertEquals(items[0].role, 'system');
+  assertEquals(items[0].content, 'base instructions');
+  assertEquals(items[1].role, 'user');
+  assertEquals(items[2].role, 'developer');
+  assertEquals(items[2].content, 'inline instructions');
 });
 
 test('leaves developer role untouched on input messages', async () => {
@@ -76,6 +121,7 @@ test('leaves non-message input items untouched', async () => {
   const input = invocation({
     model: 'gpt-5.4',
     input: [
+      { type: 'message', role: 'user', content: 'hello' },
       { type: 'message', role: 'system', content: 'instructions' },
       { type: 'function_call_output', call_id: 'call_1', output: 'result' },
     ],
@@ -85,8 +131,10 @@ test('leaves non-message input items untouched', async () => {
 
   const items = input.payload.input as Array<{ type: string; role?: string }>;
   assertEquals(items[0].type, 'message');
-  assertEquals(items[0].role, 'developer');
-  assertEquals(items[1].type, 'function_call_output');
+  assertEquals(items[0].role, 'user');
+  assertEquals(items[1].type, 'message');
+  assertEquals(items[1].role, 'developer');
+  assertEquals(items[2].type, 'function_call_output');
 });
 
 test('early-returns when flag is not set', async () => {

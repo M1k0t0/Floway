@@ -25,7 +25,8 @@ import type { AzureUpstreamConfig, CustomRawModel, CustomUpstreamConfig, ModelEn
 import { toRecordEnvelope } from '../../api/types.ts';
 import { useRuntimeInfo } from '../../composables/useRuntimeInfo.ts';
 import { useUpstreamsStore } from '../../composables/useUpstreams.ts';
-import type { Flag, FlagOverrides } from '@floway-dev/provider/flags';
+import { resolveEffectiveFlags } from '@floway-dev/provider/flags';
+import type { Flag, FlagId, FlagOverrides } from '@floway-dev/provider/flags';
 import { Button } from '@floway-dev/ui';
 
 const props = defineProps<{
@@ -56,8 +57,7 @@ const isCreate = computed(() => draft.value.id === '');
 // mount even when the record carries a real value, so the "type to
 // overwrite; empty means keep-existing" behavior stays consistent
 // everywhere. They project back into draft.config via
-// buildCustomConfig / … at save.
-const customDraft = ref<CustomDraft>(blankCustomDraft());
+// buildCustomConfig / … at save.const customDraft = ref<CustomDraft>(blankCustomDraft());
 const azureDraft = ref<AzureDraft>(blankAzureDraft());
 const ollamaDraft = ref<OllamaDraft>(blankOllamaDraft());
 
@@ -111,6 +111,12 @@ const enabled = computed<boolean>({ get: () => draft.value.enabled, set: v => { 
 const flagOverrides = computed<FlagOverrides>({
   get: () => draft.value.flag_overrides,
   set: v => { draft.value = { ...draft.value, flag_overrides: v }; },
+});
+const effectiveFlagOverrides = computed<FlagOverrides>(() => {
+  const resolved = resolveEffectiveFlags([draft.value.flag_defaults, flagOverrides.value]);
+  const out: FlagOverrides = {};
+  for (const flag of props.flags) out[flag.id as FlagId] = resolved.has(flag.id as FlagId);
+  return out;
 });
 const disabledPublicModelIds = computed<string[]>({
   get: () => draft.value.disabled_public_model_ids,
@@ -600,7 +606,7 @@ const workbenchStyle = computed(() => ({ '--right-pane-h': `${Math.ceil(rightCon
         v-model:disabled-ids="disabledPublicModelIds"
         :auto-models="autoForActive"
         :flags="flags"
-        :upstream-flag-overrides="flagOverrides"
+        :upstream-flag-overrides="effectiveFlagOverrides"
         :provider-flag-defaults="draft.flag_defaults"
         :provider-kind="draft.kind"
         :upstream-id-label="upstreamIdLabelForActive"

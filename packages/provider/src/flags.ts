@@ -89,7 +89,7 @@ export const OPTIONAL_FLAGS = [
   {
     id: 'promote-system-to-developer',
     label: 'Promote system role to developer',
-    description: "Rewrite inline messages with role 'system' to role 'developer' for upstreams, such as Codex, that receive base system instructions through a top-level field and expect in-history instruction messages as developer role.",
+    description: "Rewrite inline messages with role 'system' to role 'developer' for upstreams, such as Codex, that receive base system instructions through a top-level field and expect in-history instruction messages as developer role. Reference: https://github.com/openai/codex/blob/1f17e7512f0e47625f2cad416f14870688a99814/codex-rs/core/src/client.rs#L829-L849",
   },
   {
     id: 'strip-billing-attribution',
