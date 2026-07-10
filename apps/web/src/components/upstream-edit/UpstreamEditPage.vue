@@ -25,7 +25,6 @@ import type { AzureUpstreamConfig, CustomRawModel, CustomUpstreamConfig, ModelEn
 import { toRecordEnvelope } from '../../api/types.ts';
 import { useRuntimeInfo } from '../../composables/useRuntimeInfo.ts';
 import { useUpstreamsStore } from '../../composables/useUpstreams.ts';
-import { resolveEffectiveFlags } from '@floway-dev/provider/flags';
 import type { Flag, FlagId, FlagOverrides } from '@floway-dev/provider/flags';
 import { Button } from '@floway-dev/ui';
 
@@ -51,6 +50,29 @@ const currentColo = computed(() => runtimeInfo.value?.colo ?? null);
 const draft = ref<UpstreamRecord>(structuredClone(props.initialRecord));
 
 const isCreate = computed(() => draft.value.id === '');
+
+const CONFLICTING_FLAGS: Partial<Record<FlagId, readonly FlagId[]>> = {
+  'demote-developer-to-system': ['promote-system-to-developer'],
+  'demote-interleaved-system-to-user': ['promote-system-to-developer'],
+  'promote-system-to-developer': ['demote-developer-to-system', 'demote-interleaved-system-to-user'],
+};
+
+const enableFlag = (effective: Set<FlagId>, id: FlagId): void => {
+  for (const conflicting of CONFLICTING_FLAGS[id] ?? []) effective.delete(conflicting);
+  effective.add(id);
+};
+
+const resolveUiEffectiveFlags = (layers: readonly (FlagOverrides | undefined)[]): ReadonlySet<FlagId> => {
+  const effective = new Set<FlagId>();
+  for (const layer of layers) {
+    if (!layer) continue;
+    for (const [id, on] of Object.entries(layer).sort(([a], [b]) => a.localeCompare(b)) as [FlagId, boolean][]) {
+      if (on) enableFlag(effective, id);
+      else effective.delete(id);
+    }
+  }
+  return effective;
+};
 
 // Provider-specific form-UX drafts. These mirror the record's config but
 // hold form-only state — most importantly, `apiKey` starts as '' on
@@ -114,7 +136,7 @@ const flagOverrides = computed<FlagOverrides>({
   set: v => { draft.value = { ...draft.value, flag_overrides: v }; },
 });
 const effectiveFlagOverrides = computed<FlagOverrides>(() => {
-  const resolved = resolveEffectiveFlags([draft.value.flag_defaults, flagOverrides.value]);
+  const resolved = resolveUiEffectiveFlags([draft.value.flag_defaults, flagOverrides.value]);
   const out: FlagOverrides = {};
   for (const flag of props.flags) out[flag.id as FlagId] = resolved.has(flag.id as FlagId);
   return out;
