@@ -9,6 +9,7 @@ import type { ChatCompletionsStreamEvent } from '@floway-dev/protocols/chat-comp
 import { doneFrame, eventFrame, type ModelEndpoints, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { MessagesPayload, MessagesStreamEvent } from '@floway-dev/protocols/messages';
 import type { ResponsesPayload, ResponsesResult } from '@floway-dev/protocols/responses';
+import type { FlagId } from '@floway-dev/provider/flags';
 import { type ModelCandidate, directFetcher, type ProviderCallResult, type ProviderResponsesResult, type ProviderStreamResult, type ResponsesAction, type UpstreamCallOptions } from '@floway-dev/provider';
 import { assertEquals, assertExists, stubProvider, stubInternalModel, stubProviderModel } from '@floway-dev/test-utils';
 
@@ -67,7 +68,7 @@ const makeCandidate = (overrides: {
   callResponses?: (model: unknown, body: unknown, action: ResponsesAction, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderResponsesResult>;
   callChatCompletions?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderStreamResult<ChatCompletionsStreamEvent>>;
   callMessagesCountTokens?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderCallResult>;
-  enabledFlags?: ReadonlySet<string>;
+  enabledFlags?: ReadonlySet<FlagId>;
 } = {}): ModelCandidate => {
   const upstream = overrides.upstream ?? 'up_test';
   const endpoints = overrides.endpoints ?? { chatCompletions: {}, responses: {}, messages: {} };
@@ -85,7 +86,7 @@ const makeCandidate = (overrides: {
     model: stubInternalModel({
       endpoints,
       providerModels: {
-        [upstream]: stubProviderModel({ endpoints, enabledFlags: new Set(overrides.enabledFlags ?? []) }),
+        [upstream]: stubProviderModel({ endpoints, enabledFlags: new Set<FlagId>(overrides.enabledFlags ?? []) }),
       },
     }, upstream),
     fetcher: directFetcher,
@@ -155,9 +156,9 @@ test('generate translate-to-responses branch routes through responsesAttempt', a
 
 test('generate translate-to-responses branch runs target role promotion after Messages translation', async () => {
   installRepo();
-  let observedBody: Omit<ResponsesPayload, 'model'> | null = null;
+  const observedBodies: Omit<ResponsesPayload, 'model'>[] = [];
   const callResponses = vi.fn(async (_model, body): Promise<ProviderResponsesResult> => {
-    observedBody = body as Omit<ResponsesPayload, 'model'>;
+    observedBodies.push(body as Omit<ResponsesPayload, 'model'>);
     return {
       action: 'generate',
       ok: true,
@@ -191,7 +192,7 @@ test('generate translate-to-responses branch runs target role promotion after Me
     candidate: makeCandidate({
       callResponses,
       endpoints: { responses: {} },
-      enabledFlags: new Set(['promote-system-to-developer']),
+      enabledFlags: new Set<FlagId>(['promote-system-to-developer']),
     }),
     headers: new Headers(),
   });
@@ -200,7 +201,9 @@ test('generate translate-to-responses branch runs target role promotion after Me
   if (result.type !== 'events') throw new Error('unreachable');
   await collectEvents(result.events);
   assertEquals(callResponses.mock.calls.length, 1);
-  const input = observedBody?.input;
+  const observedBody = observedBodies[0];
+  if (!observedBody) throw new Error('expected observed Responses body');
+  const input = observedBody.input;
   if (!Array.isArray(input)) throw new Error('expected Responses input array');
   assertEquals(input[0], { type: 'message', role: 'user', content: 'hello' });
   assertEquals(input[1], { type: 'message', role: 'developer', content: 'inline instructions' });
@@ -208,9 +211,9 @@ test('generate translate-to-responses branch runs target role promotion after Me
 
 test('generate translate-to-responses branch preserves multi-block system prefix', async () => {
   installRepo();
-  let observedBody: Omit<ResponsesPayload, 'model'> | null = null;
+  const observedBodies: Omit<ResponsesPayload, 'model'>[] = [];
   const callResponses = vi.fn(async (_model, body): Promise<ProviderResponsesResult> => {
-    observedBody = body as Omit<ResponsesPayload, 'model'>;
+    observedBodies.push(body as Omit<ResponsesPayload, 'model'>);
     return {
       action: 'generate',
       ok: true,
@@ -245,7 +248,7 @@ test('generate translate-to-responses branch preserves multi-block system prefix
     candidate: makeCandidate({
       callResponses,
       endpoints: { responses: {} },
-      enabledFlags: new Set(['promote-system-to-developer']),
+      enabledFlags: new Set<FlagId>(['promote-system-to-developer']),
     }),
     headers: new Headers(),
   });
@@ -254,7 +257,9 @@ test('generate translate-to-responses branch preserves multi-block system prefix
   if (result.type !== 'events') throw new Error('unreachable');
   await collectEvents(result.events);
   assertEquals(callResponses.mock.calls.length, 1);
-  const input = observedBody?.input;
+  const observedBody = observedBodies[0];
+  if (!observedBody) throw new Error('expected observed Responses body');
+  const input = observedBody.input;
   if (!Array.isArray(input)) throw new Error('expected Responses input array');
   assertEquals(input[0], {
     type: 'message',

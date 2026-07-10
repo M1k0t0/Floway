@@ -6,6 +6,7 @@ import type { ChatGatewayCtx } from '../../shared/gateway-ctx.ts';
 import { createNonResponsesSourceStore } from '../items/store.ts';
 import { doneFrame } from '@floway-dev/protocols/common';
 import { eventResult } from '@floway-dev/provider';
+import type { FlagId } from '@floway-dev/provider/flags';
 import { assertEquals, stubModelCandidate, testTelemetryModelIdentity } from '@floway-dev/test-utils';
 import type { CanonicalResponsesPayload } from '@floway-dev/translate/via-responses/responses-items';
 
@@ -34,7 +35,7 @@ const okEvents = () =>
 
 const invocation = (
   payload: CanonicalResponsesPayload,
-  enabledFlags: ReadonlySet<string> = new Set(['promote-system-to-developer']),
+  enabledFlags: ReadonlySet<FlagId> = new Set<FlagId>(['promote-system-to-developer']),
   targetApi: ResponsesInvocation['targetApi'] = 'responses',
 ): ResponsesInvocation => ({
   payload,
@@ -70,7 +71,7 @@ test('promotes every system message for non-native Responses targets', async () 
         { type: 'message', role: 'user', content: 'hello' },
       ],
     },
-    new Set(['promote-system-to-developer']),
+    new Set<FlagId>(['promote-system-to-developer']),
     'chat-completions',
   );
 

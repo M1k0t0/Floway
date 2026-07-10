@@ -6,6 +6,7 @@ import { createNonResponsesSourceStore } from '../../responses/items/store.ts';
 import type { ChatGatewayCtx } from '../../shared/gateway-ctx.ts';
 import type { ChatCompletionsPayload } from '@floway-dev/protocols/chat-completions';
 import { eventResult } from '@floway-dev/provider';
+import type { FlagId } from '@floway-dev/provider/flags';
 import { assertEquals, stubModelCandidate, testTelemetryModelIdentity } from '@floway-dev/test-utils';
 
 const stubCtx: ChatGatewayCtx = {
@@ -23,7 +24,7 @@ const stubCtx: ChatGatewayCtx = {
 
 const invocation = (
   payload: ChatCompletionsPayload,
-  enabledFlags: ReadonlySet<string> = new Set(['promote-system-to-developer']),
+  enabledFlags: ReadonlySet<FlagId> = new Set<FlagId>(['promote-system-to-developer']),
   targetApi: ChatCompletionsInvocation['targetApi'] = 'chat-completions',
 ): ChatCompletionsInvocation => ({
   payload,
@@ -84,7 +85,7 @@ test('preserves leading system prefix for Responses translation', async () => {
         { role: 'system', content: 'inline instructions' },
       ],
     },
-    new Set(['promote-system-to-developer']),
+    new Set<FlagId>(['promote-system-to-developer']),
     'responses',
   );
 

@@ -9,6 +9,7 @@ import type { ChatCompletionsPayload, ChatCompletionsStreamEvent } from '@floway
 import { doneFrame, eventFrame, type ModelEndpoints, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { MessagesStreamEvent } from '@floway-dev/protocols/messages';
 import type { ResponsesPayload, ResponsesResult } from '@floway-dev/protocols/responses';
+import type { FlagId } from '@floway-dev/provider/flags';
 import { type ModelCandidate, directFetcher, type ProviderResponsesResult, type ProviderStreamResult, type ResponsesAction, type UpstreamCallOptions } from '@floway-dev/provider';
 import { assertEquals, stubProvider, stubInternalModel, stubProviderModel } from '@floway-dev/test-utils';
 
@@ -75,7 +76,7 @@ const makeCandidate = (overrides: {
   callChatCompletions?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderStreamResult<ChatCompletionsStreamEvent>>;
   callMessages?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderStreamResult<MessagesStreamEvent>>;
   callResponses?: (model: unknown, body: unknown, action: ResponsesAction, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderResponsesResult>;
-  enabledFlags?: ReadonlySet<string>;
+  enabledFlags?: ReadonlySet<FlagId>;
 } = {}): ModelCandidate => {
   const upstream = overrides.upstream ?? 'up_test';
   const endpoints = overrides.endpoints ?? { chatCompletions: {}, responses: {}, messages: {} };
@@ -92,7 +93,7 @@ const makeCandidate = (overrides: {
     model: stubInternalModel({
       endpoints,
       providerModels: {
-        [upstream]: stubProviderModel({ endpoints, enabledFlags: new Set(overrides.enabledFlags ?? []) }),
+        [upstream]: stubProviderModel({ endpoints, enabledFlags: new Set<FlagId>(overrides.enabledFlags ?? []) }),
       },
     }, upstream),
     fetcher: directFetcher,
@@ -180,9 +181,9 @@ test('generate translates through the Responses target when only that endpoint i
 
 test('generate keeps leading system prompts as Responses instructions when promoting inline system', async () => {
   installRepo();
-  let observedBody: Omit<ResponsesPayload, 'model'> | null = null;
+  const observedBodies: Omit<ResponsesPayload, 'model'>[] = [];
   const callResponses = vi.fn(async (_model, body): Promise<ProviderResponsesResult> => {
-    observedBody = body as Omit<ResponsesPayload, 'model'>;
+    observedBodies.push(body as Omit<ResponsesPayload, 'model'>);
     return {
       action: 'generate',
       ok: true,
@@ -207,7 +208,7 @@ test('generate keeps leading system prompts as Responses instructions when promo
     candidate: makeCandidate({
       callResponses,
       endpoints: { responses: {} },
-      enabledFlags: new Set(['promote-system-to-developer']),
+      enabledFlags: new Set<FlagId>(['promote-system-to-developer']),
     }),
     headers: new Headers(),
   });
@@ -215,8 +216,10 @@ test('generate keeps leading system prompts as Responses instructions when promo
   assertEquals(result.type, 'events');
   if (result.type !== 'events') throw new Error('unreachable');
   await collectEvents(result.events);
-  assertEquals(observedBody?.instructions, 'base instructions');
-  const input = observedBody?.input;
+  const observedBody = observedBodies[0];
+  if (!observedBody) throw new Error('expected observed Responses body');
+  assertEquals(observedBody.instructions, 'base instructions');
+  const input = observedBody.input;
   if (!Array.isArray(input)) throw new Error('expected Responses input array');
   assertEquals(input[0], { type: 'message', role: 'user', content: 'hello' });
   assertEquals(input[1], { type: 'message', role: 'developer', content: 'inline instructions' });

@@ -57,37 +57,34 @@ test('flags-resolve: undefined layers are skipped', () => {
 });
 
 test('flags-resolve: developer/system conversion flags are mutually exclusive', () => {
-  const set = resolveEffectiveFlags(
-    new Set(['promote-system-to-developer']),
-    [{ 'demote-developer-to-system': true }],
-  );
+  const set = resolveEffectiveFlags([
+    { 'promote-system-to-developer': true },
+    { 'demote-developer-to-system': true },
+  ]);
   assertEquals([...set].sort(), ['demote-developer-to-system']);
 });
 
 test('flags-resolve: promote-system-to-developer disables interleaved system demotion', () => {
-  const set = resolveEffectiveFlags(
-    new Set(['demote-interleaved-system-to-user']),
-    [{ 'promote-system-to-developer': true }],
-  );
+  const set = resolveEffectiveFlags([
+    { 'demote-interleaved-system-to-user': true },
+    { 'promote-system-to-developer': true },
+  ]);
   assertEquals([...set].sort(), ['promote-system-to-developer']);
 });
 
 test('flags-resolve: interleaved system demotion disables promote-system-to-developer', () => {
-  const set = resolveEffectiveFlags(
-    new Set(['promote-system-to-developer']),
-    [{ 'demote-interleaved-system-to-user': true }],
-  );
+  const set = resolveEffectiveFlags([
+    { 'promote-system-to-developer': true },
+    { 'demote-interleaved-system-to-user': true },
+  ]);
   assertEquals([...set].sort(), ['demote-interleaved-system-to-user']);
 });
 
 test('flags-resolve: a later role conversion layer wins over an earlier one', () => {
-  const set = resolveEffectiveFlags(
-    new Set(),
-    [
-      { 'promote-system-to-developer': true },
-      { 'demote-developer-to-system': true },
-      { 'promote-system-to-developer': true },
-    ],
-  );
+  const set = resolveEffectiveFlags([
+    { 'promote-system-to-developer': true },
+    { 'demote-developer-to-system': true },
+    { 'promote-system-to-developer': true },
+  ]);
   assertEquals([...set].sort(), ['promote-system-to-developer']);
 });
