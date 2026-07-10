@@ -31,9 +31,9 @@ import { withVendorQwenResponsesNormalize } from './vendor-qwen-normalize.ts';
 //   - withPromoteSystemToDeveloper: gated by `promote-system-to-developer`
 //     and mutually exclusive with the role-demotion flags at flag resolution.
 //     Runs before interleaved-system demotion so Codex-shaped system items
-//     become developer messages rather than user text. For native Responses
-//     targets, the leading system prefix stays system so translated source-level
-//     system prompts keep their top-level-instruction priority.
+//     become developer messages rather than user text. Provider boundaries that
+//     need top-level instruction placement (Codex) can hoist the leading
+//     developer prefix after this generic role conversion.
 //   - withDemoteDeveloperToSystem: gated by `demote-developer-to-system`.
 //     Runs before withInterleavedSystemDemotedToUser so when both flags are
 //     on, a `developer` role first lands as `system`, then any system that

@@ -83,7 +83,7 @@ test('promotes every system message for non-native Responses targets', async () 
   assertEquals(items[1].role, 'user');
 });
 
-test('preserves leading system prefix for native Responses targets', async () => {
+test('promotes leading system prefix for native Responses targets', async () => {
   const input = invocation({
     model: 'gpt-5.4',
     input: [
@@ -96,7 +96,7 @@ test('preserves leading system prefix for native Responses targets', async () =>
   await withPromoteSystemToDeveloper(input, stubCtx, okEvents);
 
   const items = input.payload.input as Array<{ role: string; content: unknown }>;
-  assertEquals(items[0].role, 'system');
+  assertEquals(items[0].role, 'developer');
   assertEquals(items[0].content, 'base instructions');
   assertEquals(items[1].role, 'user');
   assertEquals(items[2].role, 'developer');

@@ -209,7 +209,7 @@ test('generate translate-to-responses branch runs target role promotion after Me
   assertEquals(input[1], { type: 'message', role: 'developer', content: 'inline instructions' });
 });
 
-test('generate translate-to-responses branch preserves multi-block system prefix', async () => {
+test('generate translate-to-responses branch promotes multi-block system prefix', async () => {
   installRepo();
   const observedBodies: Omit<ResponsesPayload, 'model'>[] = [];
   const callResponses = vi.fn(async (_model, body): Promise<ProviderResponsesResult> => {
@@ -263,7 +263,7 @@ test('generate translate-to-responses branch preserves multi-block system prefix
   if (!Array.isArray(input)) throw new Error('expected Responses input array');
   assertEquals(input[0], {
     type: 'message',
-    role: 'system',
+    role: 'developer',
     content: [{ type: 'input_text', text: 'base A' }, { type: 'input_text', text: 'base B' }],
   });
   assertEquals(input[1], { type: 'message', role: 'user', content: 'hello' });
