@@ -57,7 +57,8 @@ const isCreate = computed(() => draft.value.id === '');
 // mount even when the record carries a real value, so the "type to
 // overwrite; empty means keep-existing" behavior stays consistent
 // everywhere. They project back into draft.config via
-// buildCustomConfig / … at save.const customDraft = ref<CustomDraft>(blankCustomDraft());
+// buildCustomConfig / … at save.
+const customDraft = ref<CustomDraft>(blankCustomDraft());
 const azureDraft = ref<AzureDraft>(blankAzureDraft());
 const ollamaDraft = ref<OllamaDraft>(blankOllamaDraft());
 
