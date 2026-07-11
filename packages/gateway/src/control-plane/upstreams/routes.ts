@@ -70,12 +70,13 @@ interface ModelsCacheStatus {
   lastError: { message: string; at: number } | null;
 }
 
-type UpstreamResponse = SerializedUpstreamRecord & {
-  modelsCache?: ModelsCacheStatus;
-  codex_quota?: CodexQuotaSnapshotMap | null;
+type CodexQuotaProjection = { codex_quota?: CodexQuotaSnapshotMap | null };
+
+type UpstreamListResponse = SerializedUpstreamRecord & CodexQuotaProjection & {
+  modelsCache: ModelsCacheStatus;
 };
 
-const codexQuotaForResponse = async (record: UpstreamRecord): Promise<Pick<UpstreamResponse, 'codex_quota'>> => {
+const codexQuotaForResponse = async (record: UpstreamRecord): Promise<CodexQuotaProjection> => {
   if (record.kind !== 'codex') return {};
   assertCodexUpstreamRecord(record);
   return {
@@ -86,7 +87,7 @@ const codexQuotaForResponse = async (record: UpstreamRecord): Promise<Pick<Upstr
 // The response projections depend on repository state, while serialize.ts is a
 // pure persisted-record transform. Build the wire value only after both parts
 // are ready so callers cannot observe or extend a partially serialized record.
-const serializeForResponse = async (record: UpstreamRecord): Promise<UpstreamResponse> => {
+const serializeForResponse = async (record: UpstreamRecord): Promise<UpstreamListResponse> => {
   const [cacheRow, codexQuota] = await Promise.all([
     getRepo().modelsCache.get(record.id),
     codexQuotaForResponse(record),
