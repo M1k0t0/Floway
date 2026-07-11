@@ -65,15 +65,15 @@ import { clearInProcessCopilotTokenCache, emptyCopilotUpstreamState, exchangeCop
 import { assertCustomUpstreamRecord, fetchCustomModels } from '@floway-dev/provider-custom';
 import { assertOllamaUpstreamRecord, createOllamaProvider } from '@floway-dev/provider-ollama';
 
-interface ModelsCacheStatus {
-  fetchedAt: number | null;
-  lastError: { message: string; at: number } | null;
-}
-
 type CodexQuotaProjection = { codex_quota?: CodexQuotaSnapshotMap | null };
 
-type UpstreamListResponse = SerializedUpstreamRecord & CodexQuotaProjection & {
-  modelsCache: ModelsCacheStatus;
+type UpstreamResponse = SerializedUpstreamRecord & CodexQuotaProjection;
+
+type UpstreamWithCacheResponse = UpstreamResponse & {
+  modelsCache: {
+    fetchedAt: number | null;
+    lastError: { message: string; at: number } | null;
+  };
 };
 
 const codexQuotaForResponse = async (record: UpstreamRecord): Promise<CodexQuotaProjection> => {
@@ -84,10 +84,9 @@ const codexQuotaForResponse = async (record: UpstreamRecord): Promise<CodexQuota
   };
 };
 
-// The response projections depend on repository state, while serialize.ts is a
-// pure persisted-record transform. Build the wire value only after both parts
-// are ready so callers cannot observe or extend a partially serialized record.
-const serializeForResponse = async (record: UpstreamRecord): Promise<UpstreamListResponse> => {
+// These projections need repository/provider I/O, which serialize.ts excludes
+// so it stays a pure persisted-record transform.
+const serializeForResponse = async (record: UpstreamRecord): Promise<UpstreamWithCacheResponse> => {
   const [cacheRow, codexQuota] = await Promise.all([
     getRepo().modelsCache.get(record.id),
     codexQuotaForResponse(record),
@@ -248,17 +247,17 @@ export const getUpstreamBlueprint = (c: Context): Response => {
 // Single-record read for the edit page. Returns the FULL record — no
 // secret redaction — because every editor-scoped action posts the record
 // back to a helper endpoint that needs the same credentials the data plane
-// uses (refresh tokens, api keys, etc.). Codex quota remains a response-only
-// projection so the edit card receives the same fresh snapshot map as the
-// redacted list endpoint.
+// uses (refresh tokens, api keys, etc.). Codex quota is a response-only
+// projection, so it is attached here as well.
 export const getUpstream = async (c: AuthedContext<'/:id'>) => {
   const id = c.req.param('id');
   const record = await getRepo().upstreams.getById(id);
   if (!record) return c.json({ error: 'upstream not found' }, 404);
-  return c.json({
+  const response: UpstreamResponse = {
     ...upstreamRecordToFullJson(record),
     ...await codexQuotaForResponse(record),
-  });
+  };
+  return c.json(response);
 };
 
 export const createUpstream = async (c: CtxWithJson<typeof createUpstreamBody>) => {

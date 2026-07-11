@@ -10,9 +10,7 @@ export interface SerializedUpstreamRecord {
   created_at: string;
   updated_at: string;
   flag_overrides: FlagOverrides;
-  // Sent per record (rather than a separate per-kind lookup) so the
-  // dashboard's "Inherit → on/off" pill renders each row without a
-  // second round trip.
+  // Pure per-kind derivation of the record's effective flag baseline.
   flag_defaults: FlagDefaults;
   disabled_public_model_ids: string[];
   proxy_fallback_list: ProxyFallbackEntry[];
