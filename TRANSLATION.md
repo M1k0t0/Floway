@@ -184,8 +184,11 @@ runs for both `/v1/responses` and the synthesized `/v1/responses/compact`
 path (Codex has no native compact endpoint; the provider drives `compaction_trigger`
 inline and rebuilds the envelope client-side).
 
-- hoists `role: "system"` items out of `input` into top-level `instructions`
-  (the upstream rejects system messages inside `input`)
+- before the provider boundary, the gateway rewrites every `role: "system"`
+  input message to `role: "developer"`, because Codex Responses rejects
+  system-role messages inside `input`; the provider boundary then hoists only a
+  contiguous leading text-representable developer prefix into top-level
+  `instructions`, leaving later developer messages inline in chronological order
 - injects a default `instructions` string when none is supplied (the upstream
   rejects empty / missing `instructions`)
 - strips fields the upstream rejects with `Unsupported parameter`:

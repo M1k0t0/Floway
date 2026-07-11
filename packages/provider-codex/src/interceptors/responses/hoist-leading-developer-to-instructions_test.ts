@@ -18,7 +18,7 @@ const invocation = (payload: ResponsesPayload): ResponsesBoundaryCtx => ({
   action: 'generate',
 });
 
-test('hoists leading developer messages into instructions and removes them from input', async () => {
+test('hoists only the contiguous leading developer prefix into instructions and removes that prefix from input', async () => {
   const ctx = invocation({
     model: 'gpt-test',
     input: [

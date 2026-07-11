@@ -10,10 +10,12 @@ import type { Interceptor } from '@floway-dev/interceptor';
 import type { ProviderResponsesResult } from '@floway-dev/provider';
 
 // Order rationale:
-//   - hoistLeadingDeveloperToInstructions adapts standard Responses' leading
-//     instruction-prefix items to Codex's top-level `instructions` slot.
-//   - injectDefaultInstructions fills the required slot only if the caller and
-//     hoist stage left it empty.
+//   - hoistLeadingDeveloperToInstructions runs after the gateway's required
+//     conversion for Codex Responses, which rejects `role: 'system'` in `input`.
+//     It merges only a contiguous leading text-representable developer prefix
+//     into `instructions`; later developer messages remain inline in order.
+//   - injectDefaultInstructions fills the required slot only if neither the
+//     caller nor the prefix hoist produced a non-empty value.
 //   - stripUnsupportedFields then removes regular Responses fields the
 //     ChatGPT-subscription backend rejects.
 //

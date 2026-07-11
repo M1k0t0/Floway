@@ -1,6 +1,7 @@
-// Promote inline `system` role to `developer` in Responses input items for
-// upstreams whose base system prompt belongs in top-level `instructions` and
-// whose request history accepts developer-role instruction messages.
+// Promote `system` to `developer` in Responses input messages for upstreams
+// that reject `role: 'system'` in `input`, including Codex Responses. The Codex
+// provider boundary then hoists only a contiguous leading text-representable
+// developer prefix into `instructions`; later developer messages remain inline.
 // Always-attached; flag-gated by `promote-system-to-developer`.
 
 import type { ResponsesInterceptor } from './types.ts';

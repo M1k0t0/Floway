@@ -2,12 +2,10 @@ import type { ResponsesBoundaryCtx } from './types.ts';
 
 // Codex backend rejects /responses requests that lack a non-empty
 // `instructions` field with a 4xx ("Instructions are required"). Native
-// /v1/responses callers may legitimately omit it, and the
-// Messages/ChatCompletions/Gemini translators only synthesize it from a
-// caller-supplied system message — so when no system message exists we still
-// need a fallback string. We inject a neutral default at the Codex target
-// boundary so every request shape (native + every translated source
-// protocol) satisfies the upstream contract.
+// /v1/responses callers may omit it, and translated requests may have neither
+// caller-supplied instructions nor a hoistable leading developer prefix after
+// the required system-to-developer conversion. Inject a neutral default at the
+// Codex target boundary so every request shape satisfies the upstream contract.
 export const injectDefaultInstructions = async <TResult>(
   ctx: ResponsesBoundaryCtx,
   _request: object,
