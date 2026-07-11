@@ -184,10 +184,16 @@ runs for both `/v1/responses` and the synthesized `/v1/responses/compact`
 path (Codex has no native compact endpoint; the provider drives `compaction_trigger`
 inline and rebuilds the envelope client-side).
 
-- before the provider boundary, the gateway rewrites every `role: "system"`
-  input message to `role: "developer"`, because Codex Responses rejects
-  system-role messages inside `input`; the provider boundary then hoists only a
-  contiguous leading text-representable developer prefix into top-level
+The resulting `instructions` can come from two paths:
+
+- the generic Messages-to-Responses translator maps a string or single-block
+  Messages `system` field directly to `instructions`; this happens before any
+  Codex-specific processing
+- for `role: "system"` messages represented inside Responses `input` — including
+  a multi-block Messages `system` preserved as one multi-part leading message —
+  the gateway rewrites every such role to `developer`, because Codex Responses
+  rejects system-role messages in `input`; the provider boundary then hoists
+  only a contiguous leading text-representable developer prefix into
   `instructions`, leaving later developer messages inline in chronological order
 - injects a default `instructions` string when none is supplied (the upstream
   rejects empty / missing `instructions`)
@@ -303,8 +309,10 @@ Known losses:
 
 Request mapping:
 
-- `system` becomes Responses `instructions`; multi-block system text is joined
-  with blank lines.
+- a string or single text-block `system` maps directly to Responses
+  `instructions`. A multi-block `system` becomes one leading `role: "system"`
+  input message with a separate `input_text` part for each source block, so the
+  generic translation preserves block boundaries.
 - user text and images become Responses `message` input content.
 - user `tool_result` blocks become `function_call_output` items, preserving
   source order relative to user text by splitting input items when necessary.
