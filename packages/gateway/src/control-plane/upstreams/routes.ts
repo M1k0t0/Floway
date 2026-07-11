@@ -65,17 +65,19 @@ import { clearInProcessCopilotTokenCache, emptyCopilotUpstreamState, exchangeCop
 import { assertCustomUpstreamRecord, fetchCustomModels } from '@floway-dev/provider-custom';
 import { assertOllamaUpstreamRecord, createOllamaProvider } from '@floway-dev/provider-ollama';
 
+const codexQuotaForResponse = (record: UpstreamRecord): Promise<CodexQuotaSnapshotMap | null> | null => {
+  if (record.kind !== 'codex') return null;
+  assertCodexUpstreamRecord(record);
+  return getCodexQuota(record.id, record.config.accounts[0].chatgptAccountId);
+};
+
 // Serialize for the HTTP response, attaching the live codex_quota snapshot map
 // when the row is a Codex upstream and the SWR models-cache freshness for
 // every row. Keeps serialize.ts free of provider I/O and a global repo handle,
 // while ensuring every response shape carries the panels the dashboard
 // expects.
 const serializeForResponse = async (record: UpstreamRecord): Promise<SerializedUpstreamRecord> => {
-  let codexQuotaPromise: Promise<CodexQuotaSnapshotMap | null> | null = null;
-  if (record.kind === 'codex') {
-    assertCodexUpstreamRecord(record);
-    codexQuotaPromise = getCodexQuota(record.id, record.config.accounts[0].chatgptAccountId);
-  }
+  const codexQuotaPromise = codexQuotaForResponse(record);
   const cacheRow = await getRepo().modelsCache.get(record.id);
   const serialized = upstreamRecordToJson(record);
   serialized.modelsCache = {
@@ -232,13 +234,17 @@ export const getUpstreamBlueprint = (c: Context): Response => {
 // Single-record read for the edit page. Returns the FULL record — no
 // secret redaction — because every editor-scoped action posts the record
 // back to a helper endpoint that needs the same credentials the data plane
-// uses (refresh tokens, api keys, etc.). The list endpoint continues to
-// serve the redacted projection for surfaces that don't need secrets.
+// uses (refresh tokens, api keys, etc.). Codex quota remains a response-only
+// projection so the edit card receives the same fresh snapshot map as the
+// redacted list endpoint.
 export const getUpstream = async (c: AuthedContext<'/:id'>) => {
   const id = c.req.param('id');
   const record = await getRepo().upstreams.getById(id);
   if (!record) return c.json({ error: 'upstream not found' }, 404);
-  return c.json(upstreamRecordToFullJson(record));
+  const serialized = upstreamRecordToFullJson(record);
+  const codexQuotaPromise = codexQuotaForResponse(record);
+  if (codexQuotaPromise) serialized.codex_quota = await codexQuotaPromise;
+  return c.json(serialized);
 };
 
 export const createUpstream = async (c: CtxWithJson<typeof createUpstreamBody>) => {
