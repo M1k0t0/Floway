@@ -75,7 +75,7 @@ test('promotes every system message for native Chat Completions targets', async 
   assertEquals(observed!.messages[1].role, 'user');
 });
 
-test('preserves leading system prefix for Responses translation', async () => {
+test('promotes every system message for Responses targets', async () => {
   const ctx = invocation(
     {
       model: 'gpt-5.4',
@@ -95,7 +95,7 @@ test('preserves leading system prefix for Responses translation', async () => {
     return okEvents();
   });
 
-  assertEquals(observed!.messages[0].role, 'system');
+  assertEquals(observed!.messages[0].role, 'developer');
   assertEquals(observed!.messages[0].content, 'base instructions');
   assertEquals(observed!.messages[1].role, 'user');
   assertEquals(observed!.messages[2].role, 'developer');

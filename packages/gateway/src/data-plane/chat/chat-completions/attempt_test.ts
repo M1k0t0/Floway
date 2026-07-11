@@ -179,7 +179,7 @@ test('generate translates through the Responses target when only that endpoint i
   assertEquals(callResponses.mock.calls.length, 1);
 });
 
-test('generate keeps leading system prompts as Responses instructions when promoting inline system', async () => {
+test('generate promotes every system message before Responses translation', async () => {
   installRepo();
   const observedBodies: Omit<ResponsesPayload, 'model'>[] = [];
   const callResponses = vi.fn(async (_model, body): Promise<ProviderResponsesResult> => {
@@ -220,11 +220,12 @@ test('generate keeps leading system prompts as Responses instructions when promo
   await collectEvents(result.events);
   const observedBody = observedBodies[0];
   if (!observedBody) throw new Error('expected observed Responses body');
-  assertEquals(observedBody.instructions, 'base instructions');
+  assertEquals(observedBody.instructions, undefined);
   const input = observedBody.input;
   if (!Array.isArray(input)) throw new Error('expected Responses input array');
-  assertEquals(input[0], { type: 'message', role: 'user', content: 'hello' });
-  assertEquals(input[1], { type: 'message', role: 'developer', content: 'inline instructions' });
+  assertEquals(input[0], { type: 'message', role: 'developer', content: 'base instructions' });
+  assertEquals(input[1], { type: 'message', role: 'user', content: 'hello' });
+  assertEquals(input[2], { type: 'message', role: 'developer', content: 'inline instructions' });
 });
 
 test('generate propagates upstream response headers onto the EventResult so respond can forward them', async () => {

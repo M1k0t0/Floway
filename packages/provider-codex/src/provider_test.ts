@@ -147,18 +147,33 @@ describe('createCodexProvider', () => {
     }
   });
 
-  test('callResponses round-trips through fetch transport', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
+  test('callResponses hoists the leading developer prefix into the Codex wire instructions', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
     const instance = createCodexProvider(baseRecord);
     const result = await instance.instance.callResponses(
       stubProviderModel({ id: 'gpt-5.4', display_name: 'gpt-5.4', endpoints: { responses: {} } }),
-      { input: [{ type: 'message', role: 'user', content: 'hi' }], stream: true },
+      {
+        input: [
+          { type: 'message', role: 'developer', content: 'base instructions' },
+          { type: 'message', role: 'user', content: 'hi' },
+          { type: 'message', role: 'developer', content: 'inline instructions' },
+        ],
+        stream: true,
+      },
       'generate',
       undefined,
       noopUpstreamCallOptions(),
     );
     expect(result.ok).toBe(true);
     expect(result.action).toBe('generate');
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(init).toBeDefined();
+    const body = JSON.parse(init?.body as string) as Record<string, unknown>;
+    expect(body.instructions).toBe('base instructions');
+    expect(body.input).toEqual([
+      { type: 'message', role: 'user', content: 'hi' },
+      { type: 'message', role: 'developer', content: 'inline instructions' },
+    ]);
   });
 
   test('callResponses re-reads state per request (operator re-import takes effect)', async () => {
