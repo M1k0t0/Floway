@@ -65,27 +65,40 @@ import { clearInProcessCopilotTokenCache, emptyCopilotUpstreamState, exchangeCop
 import { assertCustomUpstreamRecord, fetchCustomModels } from '@floway-dev/provider-custom';
 import { assertOllamaUpstreamRecord, createOllamaProvider } from '@floway-dev/provider-ollama';
 
-const codexQuotaForResponse = (record: UpstreamRecord): Promise<CodexQuotaSnapshotMap | null> | null => {
-  if (record.kind !== 'codex') return null;
-  assertCodexUpstreamRecord(record);
-  return getCodexQuota(record.id, record.config.accounts[0].chatgptAccountId);
+interface ModelsCacheStatus {
+  fetchedAt: number | null;
+  lastError: { message: string; at: number } | null;
+}
+
+type UpstreamResponse = SerializedUpstreamRecord & {
+  modelsCache?: ModelsCacheStatus;
+  codex_quota?: CodexQuotaSnapshotMap | null;
 };
 
-// Serialize for the HTTP response, attaching the live codex_quota snapshot map
-// when the row is a Codex upstream and the SWR models-cache freshness for
-// every row. Keeps serialize.ts free of provider I/O and a global repo handle,
-// while ensuring every response shape carries the panels the dashboard
-// expects.
-const serializeForResponse = async (record: UpstreamRecord): Promise<SerializedUpstreamRecord> => {
-  const codexQuotaPromise = codexQuotaForResponse(record);
-  const cacheRow = await getRepo().modelsCache.get(record.id);
-  const serialized = upstreamRecordToJson(record);
-  serialized.modelsCache = {
-    fetchedAt: cacheRow?.fetchedAt ?? null,
-    lastError: cacheRow?.lastError ?? null,
+const codexQuotaForResponse = async (record: UpstreamRecord): Promise<Pick<UpstreamResponse, 'codex_quota'>> => {
+  if (record.kind !== 'codex') return {};
+  assertCodexUpstreamRecord(record);
+  return {
+    codex_quota: await getCodexQuota(record.id, record.config.accounts[0].chatgptAccountId),
   };
-  if (codexQuotaPromise) serialized.codex_quota = await codexQuotaPromise;
-  return serialized;
+};
+
+// The response projections depend on repository state, while serialize.ts is a
+// pure persisted-record transform. Build the wire value only after both parts
+// are ready so callers cannot observe or extend a partially serialized record.
+const serializeForResponse = async (record: UpstreamRecord): Promise<UpstreamResponse> => {
+  const [cacheRow, codexQuota] = await Promise.all([
+    getRepo().modelsCache.get(record.id),
+    codexQuotaForResponse(record),
+  ]);
+  return {
+    ...upstreamRecordToJson(record),
+    modelsCache: {
+      fetchedAt: cacheRow?.fetchedAt ?? null,
+      lastError: cacheRow?.lastError ?? null,
+    },
+    ...codexQuota,
+  };
 };
 
 type ValidationResult<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -241,10 +254,10 @@ export const getUpstream = async (c: AuthedContext<'/:id'>) => {
   const id = c.req.param('id');
   const record = await getRepo().upstreams.getById(id);
   if (!record) return c.json({ error: 'upstream not found' }, 404);
-  const serialized = upstreamRecordToFullJson(record);
-  const codexQuotaPromise = codexQuotaForResponse(record);
-  if (codexQuotaPromise) serialized.codex_quota = await codexQuotaPromise;
-  return c.json(serialized);
+  return c.json({
+    ...upstreamRecordToFullJson(record),
+    ...await codexQuotaForResponse(record),
+  });
 };
 
 export const createUpstream = async (c: CtxWithJson<typeof createUpstreamBody>) => {
