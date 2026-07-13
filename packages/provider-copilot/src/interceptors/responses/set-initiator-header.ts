@@ -1,5 +1,5 @@
 import type { ResponsesBoundaryCtx } from './types.ts';
-import type { ResponsesRequestInputItem } from '@floway-dev/protocols/responses';
+import type { ResponsesInputItem } from '@floway-dev/protocols/responses';
 
 /**
  * Copilot's `x-initiator` header distinguishes user-triggered turns from
@@ -22,7 +22,7 @@ import type { ResponsesRequestInputItem } from '@floway-dev/protocols/responses'
  * - https://github.com/caozhiyuan/copilot-api/blob/main/src/routes/responses/utils.ts#L60-L73
  *   (`hasAgentInitiator`)
  */
-const isAgentInitiated = (lastItem: ResponsesRequestInputItem | undefined): boolean => {
+const isAgentInitiated = (lastItem: ResponsesInputItem | undefined): boolean => {
   if (!lastItem) return false;
   // Items that do not carry a `role` field at all are tool/system outputs the
   // agent is feeding back into the model.
@@ -36,8 +36,7 @@ export const withInitiatorHeaderSet = async <TResult>(
   _request: object,
   run: () => Promise<TResult>,
 ): Promise<TResult> => {
-  const input = ctx.payload.input;
-  const initiator: 'user' | 'agent' = Array.isArray(input) && isAgentInitiated(input.at(-1)) ? 'agent' : 'user';
+  const initiator: 'user' | 'agent' = isAgentInitiated(ctx.payload.input.at(-1)) ? 'agent' : 'user';
   ctx.headers.set('x-initiator', initiator);
 
   return await run();

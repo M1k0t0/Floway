@@ -7,7 +7,7 @@ import { mockChatGatewayCtx } from '../../../test-helpers/gateway-ctx.ts';
 import type { ChatCompletionsStreamEvent } from '@floway-dev/protocols/chat-completions';
 import { doneFrame, eventFrame, type ModelEndpoints, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { MessagesPayload, MessagesStreamEvent } from '@floway-dev/protocols/messages';
-import type { ResponsesPayload, ResponsesResult } from '@floway-dev/protocols/responses';
+import type { CanonicalResponsesPayload, ResponsesResult } from '@floway-dev/protocols/responses';
 import { type ModelCandidate, directFetcher, type ProviderCallResult, type ProviderResponsesResult, type ProviderStreamResult, type ResponsesAction, type UpstreamCallOptions } from '@floway-dev/provider';
 import type { FlagId } from '@floway-dev/provider/flags';
 import { assertEquals, assertExists, stubProvider, stubInternalModel, stubProviderModel } from '@floway-dev/test-utils';
@@ -144,9 +144,9 @@ test('generate translate-to-responses branch routes through responsesAttempt', a
 
 test('generate lets target promotion take precedence over source demotion', async () => {
   installRepo();
-  const observedBodies: Omit<ResponsesPayload, 'model'>[] = [];
+  const observedBodies: Omit<CanonicalResponsesPayload, 'model'>[] = [];
   const callResponses = vi.fn(async (_model, body): Promise<ProviderResponsesResult> => {
-    observedBodies.push(body as Omit<ResponsesPayload, 'model'>);
+    observedBodies.push(body as Omit<CanonicalResponsesPayload, 'model'>);
     return {
       action: 'generate',
       ok: true,
@@ -202,9 +202,9 @@ test('generate lets target promotion take precedence over source demotion', asyn
 
 test('generate translate-to-responses branch promotes multi-block system prefix', async () => {
   installRepo();
-  const observedBodies: Omit<ResponsesPayload, 'model'>[] = [];
+  const observedBodies: Omit<CanonicalResponsesPayload, 'model'>[] = [];
   const callResponses = vi.fn(async (_model, body): Promise<ProviderResponsesResult> => {
-    observedBodies.push(body as Omit<ResponsesPayload, 'model'>);
+    observedBodies.push(body as Omit<CanonicalResponsesPayload, 'model'>);
     return {
       action: 'generate',
       ok: true,

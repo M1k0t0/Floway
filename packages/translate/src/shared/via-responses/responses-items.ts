@@ -4,20 +4,7 @@ import { TranslatorInputError } from '../../translator-input-error.ts';
 import type { ChatCompletionsReasoningItem, ChatCompletionsMessage } from '@floway-dev/protocols/chat-completions';
 import type { GeminiContent } from '@floway-dev/protocols/gemini';
 import type { MessagesAssistantContentBlock, MessagesMessage } from '@floway-dev/protocols/messages';
-import type { ResponsesEasyInputMessage, ResponsesInputItem, ResponsesPayload } from '@floway-dev/protocols/responses';
-
-// Wire `ResponsesPayload.input` accepts a bare string and EasyInputMessage
-// objects whose `type: "message"` discriminator is omitted. The gateway's
-// canonical internal shape is an explicitly discriminated item array: every
-// consumer past HTTP / WS entry normalization or cross-protocol translation
-// sees `type: "message"` on every message.
-// The name is owned here because `*-via-responses` translators produce this
-// shape directly — their `buildTargetRequest` always constructs an array —
-// so the boundary between "wire" and "canonical" naturally sits at the
-// translator's return type.
-export type CanonicalResponsesPayload = Omit<ResponsesPayload, 'input'> & {
-  input: ResponsesInputItem[];
-};
+import type { CanonicalResponsesPayload, ResponsesEasyInputMessage, ResponsesInputItem, ResponsesPayload } from '@floway-dev/protocols/responses';
 
 const isImplicitEasyInputMessage = (value: unknown): value is ResponsesEasyInputMessage & { type?: undefined } => {
   if (typeof value !== 'object' || value === null) return false;
