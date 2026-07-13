@@ -145,6 +145,28 @@ test('translateResponsesToMessages rejects file assistant content', async () => 
   );
 });
 
+test('translateResponsesToMessages preserves assistant input_text', async () => {
+  const result = await translateResponsesToMessages({
+    ...minimalPayload,
+    input: [{ type: 'message', role: 'assistant', content: [{ type: 'input_text', text: 'prior reply' }] }],
+  });
+
+  assertEquals(result.target.messages, [
+    { role: 'assistant', content: [{ type: 'text', text: 'prior reply', cache_control: { type: 'ephemeral' } }] },
+  ]);
+});
+
+test('translateResponsesToMessages rejects assistant images', async () => {
+  await assertRejects(
+    () => translateResponsesToMessages({
+      ...minimalPayload,
+      input: [{ type: 'message', role: 'assistant', content: [{ type: 'input_image', image_url: 'https://example.com/a.png', detail: 'auto' }] }],
+    }),
+    Error,
+    'input_image assistant content',
+  );
+});
+
 test('translateResponsesToMessages rejects file_id-only images', async () => {
   await assertRejects(
     () => translateResponsesToMessages({

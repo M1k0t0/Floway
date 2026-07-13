@@ -415,6 +415,8 @@ Known losses:
   other `format` fields are not preserved.
 - Remote image fetch failures and unsupported image media types drop that image
   rather than failing the request.
+- `input_file` content and assistant-side images have no Messages counterpart
+  and are rejected.
 
 ## Messages To Chat Completions
 
