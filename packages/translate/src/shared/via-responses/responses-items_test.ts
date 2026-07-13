@@ -6,7 +6,7 @@ import { packReasoningSignature } from '../messages-and-responses/reasoning.ts';
 import type { ChatCompletionsPayload } from '@floway-dev/protocols/chat-completions';
 import type { GeminiPayload } from '@floway-dev/protocols/gemini';
 import type { MessagesPayload } from '@floway-dev/protocols/messages';
-import type { ResponsesInputItem } from '@floway-dev/protocols/responses';
+import type { ResponsesInputItem, ResponsesPayload } from '@floway-dev/protocols/responses';
 
 test('canonicalizes string and implicit-message wire inputs', () => {
   assertEquals(canonicalizeResponsesPayload({ model: 'gpt-test', input: 'hello' }), {
@@ -29,6 +29,21 @@ test('canonicalizes string and implicit-message wire inputs', () => {
       { type: 'function_call_output', call_id: 'call_1', output: 'result' },
     ],
   });
+});
+
+test('leaves malformed untyped input items untouched', () => {
+  const malformed = [
+    null,
+    42,
+    { content: 'missing role' },
+    { role: 'unknown', content: 'invalid role' },
+  ];
+  const payload = canonicalizeResponsesPayload({
+    model: 'gpt-test',
+    input: malformed as unknown as ResponsesPayload['input'],
+  });
+
+  assertEquals(payload.input, malformed);
 });
 
 test('mapAsResponsesItems maps Responses input items through the callback', async () => {
