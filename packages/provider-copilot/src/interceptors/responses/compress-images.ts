@@ -1,6 +1,6 @@
 import { targetSizeForResponsesChat } from '../image-size.ts';
 import type { ResponsesBoundaryCtx } from './types.ts';
-import type { ResponsesInputImage } from '@floway-dev/protocols/responses';
+import type { ResponsesInputContent, ResponsesInputImage } from '@floway-dev/protocols/responses';
 import { isBase64ImageDataUrl, memoizedDataUrlCompressor } from '@floway-dev/provider';
 
 // Recompresses every inline base64 image in the outgoing Responses payload to
@@ -30,11 +30,36 @@ export const withInlineImagesCompressed = async <TResult>(
 
   if (targets.length > 0) {
     const compress = memoizedDataUrlCompressor(targetSizeForResponsesChat(ctx.model.id));
+    const compressedUrls = new Map<ResponsesInputImage, string>();
     await Promise.all(
       targets.map(async target => {
-        target.part.image_url = await compress(target.imageUrl);
+        compressedUrls.set(target.part, await compress(target.imageUrl));
       }),
     );
+
+    const rewriteParts = (parts: ResponsesInputContent[]): ResponsesInputContent[] =>
+      parts.map(part => {
+        if (part.type !== 'input_image') return part;
+        const imageUrl = compressedUrls.get(part);
+        return imageUrl === undefined ? part : { ...part, image_url: imageUrl };
+      });
+
+    ctx.payload = {
+      ...ctx.payload,
+      input: ctx.payload.input.map(item => {
+        if (item.type === 'message' && Array.isArray(item.content)) {
+          return item.content.some(part => part.type === 'input_image' && compressedUrls.has(part))
+            ? { ...item, content: rewriteParts(item.content) }
+            : item;
+        }
+        if ((item.type === 'function_call_output' || item.type === 'custom_tool_call_output') && Array.isArray(item.output)) {
+          return item.output.some(part => part.type === 'input_image' && compressedUrls.has(part))
+            ? { ...item, output: rewriteParts(item.output) }
+            : item;
+        }
+        return item;
+      }),
+    };
   }
 
   return await run();

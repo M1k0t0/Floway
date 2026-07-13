@@ -39,7 +39,7 @@ test('compresses a top-level image block to WebP', async () => {
   const { processor, inputs } = spyProcessor();
   initImageProcessor(processor);
 
-  const ctx = invocation({
+  const payload: MessagesPayload = {
     model: 'claude-test',
     max_tokens: 10,
     messages: [
@@ -51,13 +51,17 @@ test('compresses a top-level image block to WebP', async () => {
         ],
       },
     ],
-  });
+  };
+  const ctx = invocation(payload);
 
   await withInlineImagesCompressed(ctx, stubRequest, okEvents);
 
   const block = (ctx.payload.messages[0].content as Array<{ type: string; source?: { media_type: string; data: string } }>)[1];
   assertEquals(block.source?.media_type, 'image/webp');
   assertEquals(block.source?.data, 'AQID');
+  const sourceBlock = (payload.messages[0].content as Array<{ type: string; source?: { media_type: string; data: string } }>)[1];
+  assertEquals(sourceBlock.source?.media_type, 'image/png');
+  assertEquals(sourceBlock.source?.data, 'AAAA');
   // "AAAA" decodes to three zero bytes.
   assertEquals([...inputs[0]], [0, 0, 0]);
 });
