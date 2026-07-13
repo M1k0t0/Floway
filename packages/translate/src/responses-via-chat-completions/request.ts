@@ -198,8 +198,7 @@ export const translateResponsesToChatCompletions = (source: ResponsesPayload): R
       continue;
     }
 
-    // item_reference items are connection-bound pointers with no inline
-    // content to translate; skip them.
+    // Item references are connection-bound pointers with no inline content to translate.
     if (item.type === 'item_reference') continue;
 
     // The shim must translate echoed web_search_call input items

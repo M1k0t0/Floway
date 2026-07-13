@@ -11,7 +11,8 @@ import type { ResponsesBoundaryCtx } from './types.ts';
  * still flips the header.
  *
  * References:
- * - https://github.com/caozhiyuan/copilot-api/blob/main/src/routes/responses/utils.ts#L185-L210
+ * - https://github.com/caozhiyuan/copilot-api/blob/cd0d0182eb4b9bf68a3376dc79728afa7f42ce07/src/lib/api-config.ts#L248-L258
+ * - https://github.com/caozhiyuan/copilot-api/blob/cd8207cb70ede07771bf37a04accfbf2af76d980/src/routes/responses/utils.ts#L176-L201
  */
 const containsVisionContent = (value: unknown): boolean => {
   if (!value) return false;
