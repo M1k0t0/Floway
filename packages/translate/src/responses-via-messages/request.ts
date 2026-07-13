@@ -134,10 +134,8 @@ const responsesSystemBlocks = (message: ResponsesInputMessage): MessagesTextBloc
       throw new TranslatorInputError(`Invalid 'input_image' content part in ${message.role} message. Only 'input_text' content parts are supported in ${message.role} messages on this model.`);
     }
     if (block.type !== 'input_text' && block.type !== 'output_text') {
-      // Exhaustiveness guard: today ResponsesInputContent is
-      // input_text|input_image|output_text; a future variant must opt into
-      // translator behavior rather than be silently dropped from system
-      // content.
+      // System messages admit only textual parts; every other canonical
+      // variant must be rejected instead of silently dropped.
       throw new TranslatorInputError(`Invalid content block type '${(block as { type: string }).type}' in ${message.role} message.`);
     }
     blocks.push({ type: 'text', text: block.text });
