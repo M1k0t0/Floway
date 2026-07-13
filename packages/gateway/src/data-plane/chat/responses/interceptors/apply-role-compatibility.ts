@@ -24,7 +24,7 @@ export const withRoleCompatibilityApplied: ResponsesInterceptor = (ctx, _gateway
       }
       const isSystemMessage = mapped.type === 'message' && mapped.role === 'system';
       if (!crossedLeadingSystemRun && !isSystemMessage) crossedLeadingSystemRun = true;
-      if (demoteInterleavedSystem && crossedLeadingSystemRun && isSystemMessage) {
+      if (demoteInterleavedSystem && crossedLeadingSystemRun && mapped.type === 'message' && mapped.role === 'system') {
         mapped = { ...mapped, role: 'user' };
       }
       return mapped;
