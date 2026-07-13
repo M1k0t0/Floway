@@ -3,7 +3,7 @@ import { responsesReasoningToMessagesBlock, unpackReasoningSignature } from '../
 import type { ChatCompletionsReasoningItem, ChatCompletionsMessage } from '@floway-dev/protocols/chat-completions';
 import type { GeminiContent } from '@floway-dev/protocols/gemini';
 import type { MessagesAssistantContentBlock, MessagesMessage } from '@floway-dev/protocols/messages';
-import type { ResponsesInputItem, ResponsesPayload } from '@floway-dev/protocols/responses';
+import type { ResponsesEasyInputMessage, ResponsesInputItem, ResponsesPayload } from '@floway-dev/protocols/responses';
 
 // Wire `ResponsesPayload.input` accepts a bare string and EasyInputMessage
 // objects whose `type: "message"` discriminator is omitted. The gateway's
@@ -18,6 +18,14 @@ export type CanonicalResponsesPayload = Omit<ResponsesPayload, 'input'> & {
   input: ResponsesInputItem[];
 };
 
+const isImplicitEasyInputMessage = (value: unknown): value is ResponsesEasyInputMessage & { type?: undefined } => {
+  if (typeof value !== 'object' || value === null) return false;
+  const message = value as Record<string, unknown>;
+  if (message.type !== undefined) return false;
+  if (message.role !== 'user' && message.role !== 'assistant' && message.role !== 'system' && message.role !== 'developer') return false;
+  return typeof message.content === 'string' || Array.isArray(message.content);
+};
+
 // Lifts a wire `ResponsesPayload` to canonical form. Called at every wire
 // boundary that produces a payload destined for internal use and by direct
 // Responses-source translators; cross-protocol translators already construct
@@ -26,7 +34,7 @@ export const canonicalizeResponsesPayload = (payload: ResponsesPayload): Canonic
   ...payload,
   input: typeof payload.input === 'string'
     ? [{ type: 'message', role: 'user', content: payload.input }]
-    : payload.input.map(item => item.type === undefined
+    : payload.input.map(item => isImplicitEasyInputMessage(item)
       ? { ...item, type: 'message' }
       : item as ResponsesInputItem),
 });
