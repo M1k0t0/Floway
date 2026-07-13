@@ -44,7 +44,10 @@ export const compactionResponse = (input: ResponsesInputItem[], generated: Respo
     const content: ResponsesInputContent[] = typeof item.content === 'string'
       ? [{ type: 'input_text', text: item.content }]
       : item.content.map(part => part.type === 'output_text' ? { ...part, type: 'input_text' } : part);
-    const tokens = content.reduce((sum, part) => (part.type === 'input_image' ? sum : sum + Math.ceil(encoder.encode(part.text).length / APPROX_BYTES_PER_TOKEN)), 0);
+    const tokens = content.reduce((sum, part) =>
+      part.type === 'input_text' || part.type === 'output_text'
+        ? sum + Math.ceil(encoder.encode(part.text).length / APPROX_BYTES_PER_TOKEN)
+        : sum, 0);
     used += Math.max(tokens, 1);
     if (used > RETAINED_BUDGET_TOKENS && kept.length > 0) break;
 

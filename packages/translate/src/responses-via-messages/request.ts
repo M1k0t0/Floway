@@ -65,6 +65,10 @@ const translateUserMessage = async (message: ResponsesInputMessage, loadRemoteIm
       continue;
     }
 
+    if (block.type === 'input_file') {
+      throw new TranslatorInputError('Cannot translate input_file message content to Messages.');
+    }
+
     if (block.type !== 'input_image') continue;
 
     const image = await resolveImageUrlToMessagesImage((block as ResponsesInputImage).image_url, loadRemoteImage);
@@ -85,6 +89,8 @@ const translateToolOutput = async (output: string | ResponsesInputContent[], loa
     if (part.type === 'input_image') {
       const image = await resolveImageUrlToMessagesImage(part.image_url, loadRemoteImage);
       if (image) blocks.push(image);
+    } else if (part.type === 'input_file') {
+      throw new TranslatorInputError('Cannot translate input_file tool output to Messages.');
     } else {
       blocks.push({ type: 'text', text: part.text });
     }
