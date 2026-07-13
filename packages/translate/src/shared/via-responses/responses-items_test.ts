@@ -17,14 +17,14 @@ test('canonicalizes string and implicit-message wire inputs', () => {
   assertEquals(canonicalizeResponsesPayload({
     model: 'gpt-test',
     input: [
-      { role: 'system', content: 'rules' },
+      { role: 'system', content: 'rules', phase: 'future_phase' },
       { type: 'message', role: 'user', content: 'hello' },
       { type: 'function_call_output', call_id: 'call_1', output: 'result' },
     ],
   }), {
     model: 'gpt-test',
     input: [
-      { type: 'message', role: 'system', content: 'rules' },
+      { type: 'message', role: 'system', content: 'rules', phase: 'future_phase' },
       { type: 'message', role: 'user', content: 'hello' },
       { type: 'function_call_output', call_id: 'call_1', output: 'result' },
     ],
