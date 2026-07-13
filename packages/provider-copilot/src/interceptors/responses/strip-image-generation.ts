@@ -40,7 +40,6 @@ export const withImageGenerationStripped = async <TResult>(
   if (typeof toolChoice === 'object' && toolChoice !== null && toolChoice.type === 'image_generation') {
     delete payload.tool_choice;
   } else if (removedTool && toolChoice === 'required' && (!Array.isArray(payload.tools) || payload.tools.length === 0)) {
-    // A forced choice with no surviving tools would reference nothing.
     delete payload.tool_choice;
   }
 
