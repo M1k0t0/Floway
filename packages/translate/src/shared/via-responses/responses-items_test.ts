@@ -6,17 +6,40 @@ import { packReasoningSignature } from '../messages-and-responses/reasoning.ts';
 import type { ChatCompletionsPayload } from '@floway-dev/protocols/chat-completions';
 import type { GeminiPayload } from '@floway-dev/protocols/gemini';
 import type { MessagesPayload } from '@floway-dev/protocols/messages';
-import type { ResponsesInputItem, ResponsesPayload } from '@floway-dev/protocols/responses';
+import type { ResponsesInputItem } from '@floway-dev/protocols/responses';
+
+test('canonicalizes string and implicit-message wire inputs', () => {
+  assertEquals(canonicalizeResponsesPayload({ model: 'gpt-test', input: 'hello' }), {
+    model: 'gpt-test',
+    input: [{ type: 'message', role: 'user', content: 'hello' }],
+  });
+
+  assertEquals(canonicalizeResponsesPayload({
+    model: 'gpt-test',
+    input: [
+      { role: 'system', content: 'rules' },
+      { type: 'message', role: 'user', content: 'hello' },
+      { type: 'function_call_output', call_id: 'call_1', output: 'result' },
+    ],
+  }), {
+    model: 'gpt-test',
+    input: [
+      { type: 'message', role: 'system', content: 'rules' },
+      { type: 'message', role: 'user', content: 'hello' },
+      { type: 'function_call_output', call_id: 'call_1', output: 'result' },
+    ],
+  });
+});
 
 test('mapAsResponsesItems maps Responses input items through the callback', async () => {
-  const payload: ResponsesPayload = {
+  const payload = canonicalizeResponsesPayload({
     model: 'gpt-test',
     input: [
       { type: 'item_reference', id: 'msg_stored' },
       { type: 'reasoning', id: 'rs_stored', summary: [{ type: 'summary_text', text: 'trace' }] },
       { type: 'function_call', call_id: 'call_stored', name: 'lookup', arguments: '{}', status: 'completed' },
     ],
-  };
+  });
 
   const mapped = await responsesItemsView.mapAsResponsesItems(payload.input, item => {
     if (item.type === 'item_reference') return { type: 'message', role: 'user', content: 'expanded' };

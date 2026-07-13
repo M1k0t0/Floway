@@ -3,12 +3,13 @@ import { responsesReasoningToMessagesBlock, unpackReasoningSignature } from '../
 import type { ChatCompletionsReasoningItem, ChatCompletionsMessage } from '@floway-dev/protocols/chat-completions';
 import type { GeminiContent } from '@floway-dev/protocols/gemini';
 import type { MessagesAssistantContentBlock, MessagesMessage } from '@floway-dev/protocols/messages';
-import type { ResponsesInputItem, ResponsesPayload } from '@floway-dev/protocols/responses';
+import type { ResponsesInputItem, ResponsesPayload, ResponsesRequestInputItem } from '@floway-dev/protocols/responses';
 
-// Wire `ResponsesPayload.input` is `string | ResponsesInputItem[]`. The
-// gateway's canonical internal shape narrows it to array-only: every
-// consumer past the wire boundary (HTTP / WS entry canonicalization,
-// cross-protocol translation returning this type) sees a real item array.
+// Wire `ResponsesPayload.input` accepts a bare string and EasyInputMessage
+// objects whose `type: "message"` discriminator is omitted. The gateway's
+// canonical internal shape is an explicitly discriminated item array: every
+// consumer past HTTP / WS entry normalization or cross-protocol translation
+// sees `type: "message"` on every message.
 // The name is owned here because `*-via-responses` translators produce this
 // shape directly — their `buildTargetRequest` always constructs an array —
 // so the boundary between "wire" and "canonical" naturally sits at the
@@ -17,17 +18,20 @@ export type CanonicalResponsesPayload = Omit<ResponsesPayload, 'input'> & {
   input: ResponsesInputItem[];
 };
 
-// Lifts a wire `ResponsesPayload` to canonical form by wrapping a bare-string
-// `input` into a single synthetic user-role message. Called at every wire
-// boundary that produces a `ResponsesPayload` destined for internal use — the
-// HTTP entry parsing a request body, and the WebSocket entry building a
-// payload from a client frame. Cross-protocol translators return
-// `CanonicalResponsesPayload` directly and do not need this step.
+const canonicalizeResponsesInputItem = (item: ResponsesRequestInputItem): ResponsesInputItem =>
+  item.type === undefined
+    ? { ...item, type: 'message' }
+    : item as ResponsesInputItem;
+
+// Lifts a wire `ResponsesPayload` to canonical form. Called at every wire
+// boundary that produces a payload destined for internal use and by direct
+// Responses-source translators; cross-protocol translators already construct
+// `CanonicalResponsesPayload` with explicit message discriminators.
 export const canonicalizeResponsesPayload = (payload: ResponsesPayload): CanonicalResponsesPayload => ({
   ...payload,
   input: typeof payload.input === 'string'
     ? [{ type: 'message', role: 'user', content: payload.input }]
-    : payload.input,
+    : payload.input.map(canonicalizeResponsesInputItem),
 });
 
 export type ResponsesItemMapper = (

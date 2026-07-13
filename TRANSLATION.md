@@ -56,6 +56,10 @@ the gateway returns a Gemini-shaped unsupported-model error.
 
 - Pairwise translators preserve source semantics where the target API has a
   natural counterpart.
+- Responses wire input accepts OpenAI's EasyInputMessage shorthand without a
+  `type` field. HTTP, WebSocket, and direct Responses-source translator
+  boundaries normalize it to an explicit `type: "message"` before storage,
+  interception, or translation.
 - Translators do not synthesize defaults merely to satisfy a target shape.
   Examples: no translated-only `temperature: 1`, `store: false`,
   `parallel_tool_calls: true`, or `reasoning.summary: "detailed"`.
