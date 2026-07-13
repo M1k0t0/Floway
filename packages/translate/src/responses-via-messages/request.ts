@@ -25,7 +25,6 @@ import type {
   ResponsesInputItem,
   ResponsesInputMessage,
   ResponsesInputText,
-  ResponsesPayload,
   ResponsesRequestPayload,
   ResponsesTool,
   ResponsesToolChoice,
