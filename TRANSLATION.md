@@ -388,7 +388,7 @@ Request mapping:
 - user `input_text` becomes Messages text; `input_image` URLs are resolved via
   the shared remote-image loader and converted to base64 image blocks when
   supported.
-- assistant `output_text` becomes assistant text blocks.
+- assistant `input_text` and `output_text` become assistant text blocks.
 - `function_call` becomes assistant `tool_use`.
 - `function_call_output` becomes user `tool_result`; incomplete status marks the
   tool result as an error.
