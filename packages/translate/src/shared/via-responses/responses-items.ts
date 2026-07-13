@@ -17,7 +17,21 @@ export function canonicalizeResponsesPayload(value: unknown): CanonicalResponses
     if (message.type !== undefined) return false;
     if (message.role !== 'user' && message.role !== 'assistant' && message.role !== 'system' && message.role !== 'developer') return false;
     return typeof message.content === 'string'
-      || (Array.isArray(message.content) && message.content.every(part => typeof part === 'object' && part !== null));
+      || (Array.isArray(message.content) && message.content.every(part => {
+        if (typeof part !== 'object' || part === null) return false;
+        const content = part as Record<string, unknown>;
+        switch (content.type) {
+        case 'input_text':
+        case 'output_text':
+          return typeof content.text === 'string';
+        case 'input_image':
+          return typeof content.image_url === 'string' && typeof content.detail === 'string';
+        case 'input_file':
+          return true;
+        default:
+          return false;
+        }
+      }));
   };
 
   if (typeof value !== 'object' || value === null) {
