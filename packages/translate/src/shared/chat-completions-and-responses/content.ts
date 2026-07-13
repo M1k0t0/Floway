@@ -34,8 +34,11 @@ export const responsesContentToText = (content: string | ResponsesInputContent[]
 
 export const responsesContentToChatCompletionsContent = (content: string | ResponsesInputContent[]): string | ChatCompletionsContentPart[] => {
   if (typeof content === 'string') return content;
+  if (!content.every((part): part is Exclude<ResponsesInputContent, { type: 'input_file' }> => part.type !== 'input_file')) {
+    throw new TranslatorInputError('Cannot translate input_file content to Chat Completions.');
+  }
 
-  return content.some(part => part.type === 'input_image' || part.type === 'input_file')
+  return content.some(part => part.type === 'input_image')
     ? content.map(
         (part): ChatCompletionsContentPart => {
           if (part.type === 'input_image') {
@@ -47,7 +50,6 @@ export const responsesContentToChatCompletionsContent = (content: string | Respo
               },
             };
           }
-          if (part.type === 'input_file') throw new TranslatorInputError('Cannot translate input_file content to Chat Completions.');
           return { type: 'text', text: part.text };
         },
       )
