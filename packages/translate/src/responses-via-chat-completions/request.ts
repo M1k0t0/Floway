@@ -214,8 +214,11 @@ export const translateResponsesToChatCompletions = (source: ResponsesPayload): R
     }
 
     if (item.role === 'assistant') {
-      if (Array.isArray(item.content) && item.content.some(part => part.type === 'input_file')) {
-        throw new TranslatorInputError('Cannot translate input_file assistant content to Chat Completions.');
+      if (Array.isArray(item.content)) {
+        const unsupported = item.content.find(part => part.type === 'input_file' || part.type === 'input_image');
+        if (unsupported !== undefined) {
+          throw new TranslatorInputError(`Cannot translate ${unsupported.type} assistant content to Chat Completions.`);
+        }
       }
       assistant = appendAssistantText(assistant, responsesContentToText(item.content));
       continue;

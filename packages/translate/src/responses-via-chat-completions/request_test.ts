@@ -1513,6 +1513,17 @@ test('translateResponsesToChatCompletions rejects file assistant content', () =>
   );
 });
 
+test('translateResponsesToChatCompletions rejects image assistant content', () => {
+  assertThrows(
+    () => translateResponsesToChatCompletions({
+      model: 'gpt-test',
+      input: [{ type: 'message', role: 'assistant', content: [{ type: 'input_image', image_url: 'https://example.com/a.png', detail: 'auto' }] }],
+    }),
+    Error,
+    'input_image assistant content',
+  );
+});
+
 test('translateResponsesToChatCompletions rejects file_id-only images', () => {
   assertThrows(
     () => translateResponsesToChatCompletions({
