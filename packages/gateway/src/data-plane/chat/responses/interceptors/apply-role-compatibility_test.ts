@@ -37,6 +37,14 @@ test('leaves roles unchanged without flags or at a translated target', async () 
   assertEquals(await applyRoles(input, new Set(['promote-system-to-developer']), 'chat-completions'), input);
 });
 
+test('leaves malformed non-object items for downstream validation', async () => {
+  const malformed = null as unknown as ResponsesInputItem;
+  assertEquals(
+    await applyRoles([malformed], new Set(['promote-system-to-developer'])),
+    [malformed],
+  );
+});
+
 test('applies promotion and developer demotion independently', async () => {
   assertEquals(
     await applyRoles(

@@ -16,6 +16,10 @@ export const withRoleCompatibilityApplied: ResponsesInterceptor = (ctx, _gateway
     ...ctx.payload,
     input: ctx.payload.input.map(item => {
       let mapped: ResponsesInputItem = item;
+      if (typeof mapped !== 'object' || mapped === null) {
+        crossedLeadingSystemRun = true;
+        return mapped;
+      }
       if (mapped.type === 'message' && promoteSystem && mapped.role === 'system') {
         mapped = { ...mapped, role: 'developer' };
       }
