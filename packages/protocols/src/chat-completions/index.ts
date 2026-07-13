@@ -1,5 +1,15 @@
 // Chat Completions type definitions (subset needed for translation)
 
+// Symbol-keyed metadata travels between in-process translation, gateway, and
+// provider boundaries but is ignored by structured JSON wire serialization.
+// Attempt cloning explicitly preserves it because structuredClone omits symbol
+// properties.
+export const CHAT_COMPLETIONS_INTERNAL_METADATA = Symbol('chat-completions-internal-metadata');
+
+export interface ChatCompletionsInternalMetadata {
+  liftedToolOutputImages?: true;
+}
+
 export interface ChatCompletionsPayload {
   model: string;
   messages: ChatCompletionsMessage[];
@@ -28,6 +38,7 @@ export interface ChatCompletionsPayload {
   tool_choice?: 'none' | 'auto' | 'required' | { type: 'function'; function: { name: string } } | null;
   /** Request usage stats in streaming responses */
   stream_options?: { include_usage: boolean } | null;
+  [CHAT_COMPLETIONS_INTERNAL_METADATA]?: ChatCompletionsInternalMetadata;
 }
 
 export interface ChatCompletionsTool {
