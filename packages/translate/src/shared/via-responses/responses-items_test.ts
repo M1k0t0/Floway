@@ -1,7 +1,8 @@
 import { test } from 'vitest';
 
 import { chatCompletionsViaResponsesItemsView, canonicalizeResponsesPayload, geminiViaResponsesItemsView, messagesViaResponsesItemsView, responsesItemsView } from './responses-items.ts';
-import { assertEquals } from '../../test-assert.ts';
+import { assertEquals, assertThrows } from '../../test-assert.ts';
+import { TranslatorInputError } from '../../translator-input-error.ts';
 import { packReasoningSignature } from '../messages-and-responses/reasoning.ts';
 import type { ChatCompletionsPayload } from '@floway-dev/protocols/chat-completions';
 import type { GeminiPayload } from '@floway-dev/protocols/gemini';
@@ -31,19 +32,23 @@ test('canonicalizes string and implicit-message wire inputs', () => {
   });
 });
 
-test('leaves malformed untyped input items untouched', () => {
-  const malformed = [
+test('rejects malformed untyped input items at the canonical boundary', () => {
+  for (const malformed of [
     null,
     42,
     { content: 'missing role' },
     { role: 'unknown', content: 'invalid role' },
-  ];
-  const payload = canonicalizeResponsesPayload({
-    model: 'gpt-test',
-    input: malformed as unknown as ResponsesPayload['input'],
-  });
-
-  assertEquals(payload.input, malformed);
+  ]) {
+    const error = assertThrows(
+      () => canonicalizeResponsesPayload({
+        model: 'gpt-test',
+        input: [malformed] as unknown as ResponsesPayload['input'],
+      }),
+      TranslatorInputError,
+      'valid role and content',
+    ) as TranslatorInputError;
+    assertEquals(error.param, 'input[0]');
+  }
 });
 
 test('mapAsResponsesItems maps Responses input items through the callback', async () => {

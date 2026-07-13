@@ -19,6 +19,7 @@ import { RESPONSES_MISSING_TERMINAL_MESSAGE } from '@floway-dev/protocols/respon
 import { isResponsesTerminalEvent, type ResponsesPayload, type ResponsesResult, type ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 import type { ExecuteResult } from '@floway-dev/provider';
 import { toInternalDebugError } from '@floway-dev/provider';
+import { TranslatorInputError } from '@floway-dev/translate';
 import { canonicalizeResponsesPayload, type CanonicalResponsesPayload } from '@floway-dev/translate/via-responses/responses-items';
 
 interface WorkerWebSocket extends WebSocket {
@@ -264,6 +265,15 @@ const handleClientMessage = async (
     await respondResponsesWebSocket({ socket, eventId, signal, isClosed, result, ctx });
   } catch (error) {
     if (signal.aborted || isClosed()) return;
+    if (error instanceof TranslatorInputError) {
+      sendError(socket, 400, {
+        type: 'invalid_request_error',
+        code: 'invalid_request_error',
+        message: error.message,
+        param: error.param,
+      }, eventId);
+      return;
+    }
     if (error instanceof WebSocketClientMessageError) {
       sendError(socket, 400, {
         type: 'invalid_request_error',

@@ -228,6 +228,20 @@ test('POST /v1/responses canonicalizes and promotes an implicit system message',
   ]);
 });
 
+test('POST /v1/responses rejects a malformed untyped input item', async () => {
+  installRepo();
+  const response = await makeApp().request('/v1/responses', {
+    method: 'POST',
+    headers: new Headers({ 'content-type': 'application/json' }),
+    body: JSON.stringify({ model: 'test-model', input: [null] }),
+  });
+
+  assertEquals(response.status, 400);
+  const body = await response.json() as { error: { message: string; param: string } };
+  assertEquals(body.error.message, 'Untyped Responses input items require a valid role and content.');
+  assertEquals(body.error.param, 'input[0]');
+});
+
 test('POST /v1/responses returns a single JSON body when stream is omitted', async () => {
   installRepo();
   queueCompletedResponse('resp_nonstream');
