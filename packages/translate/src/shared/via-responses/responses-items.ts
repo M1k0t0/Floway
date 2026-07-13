@@ -6,7 +6,7 @@ import type { GeminiContent } from '@floway-dev/protocols/gemini';
 import type { MessagesAssistantContentBlock, MessagesMessage } from '@floway-dev/protocols/messages';
 import type { ResponsesEasyInputMessage, ResponsesInputItem, ResponsesRequestPayload } from '@floway-dev/protocols/responses';
 
-// Wire `ResponsesPayload.input` accepts a bare string and EasyInputMessage
+// Wire `ResponsesRequestPayload.input` accepts a bare string and EasyInputMessage
 // objects whose `type: "message"` discriminator is omitted. The gateway's
 // canonical internal shape is an explicitly discriminated item array: every
 // consumer past HTTP / WS entry normalization or cross-protocol translation
@@ -24,6 +24,7 @@ const isImplicitEasyInputMessage = (value: unknown): value is ResponsesEasyInput
   const message = value as Record<string, unknown>;
   if (message.type !== undefined) return false;
   if (message.role !== 'user' && message.role !== 'assistant' && message.role !== 'system' && message.role !== 'developer') return false;
+  if (message.phase !== undefined && message.phase !== null && typeof message.phase !== 'string') return false;
   return typeof message.content === 'string'
     || (Array.isArray(message.content) && message.content.every(part => {
       if (typeof part !== 'object' || part === null) return false;
@@ -33,14 +34,15 @@ const isImplicitEasyInputMessage = (value: unknown): value is ResponsesEasyInput
       case 'output_text':
         return typeof content.text === 'string';
       case 'input_image':
-        return typeof content.image_url === 'string' && typeof content.detail === 'string';
+        return typeof content.image_url === 'string'
+          && (content.detail === 'auto' || content.detail === 'low' || content.detail === 'high');
       default:
         return false;
       }
     }));
 };
 
-// Lifts a wire `ResponsesPayload` to canonical form. Called at every wire
+// Lifts a wire `ResponsesRequestPayload` to canonical form. Called at every wire
 // boundary that produces a payload destined for internal use and by direct
 // Responses-source translators; cross-protocol translators already construct
 // `CanonicalResponsesPayload` with explicit message discriminators.

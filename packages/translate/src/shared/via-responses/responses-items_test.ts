@@ -41,6 +41,8 @@ test('rejects malformed untyped input items at the canonical boundary', () => {
     { role: 'user', content: [null] },
     { role: 'user', content: [{}] },
     { role: 'user', content: [{ type: 'input_text' }] },
+    { role: 'user', content: 'invalid phase', phase: 42 },
+    { role: 'user', content: [{ type: 'input_image', image_url: 'https://example.com/a.png', detail: 'future' }] },
   ]) {
     const error = assertThrows(
       () => canonicalizeResponsesPayload({
