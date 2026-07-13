@@ -184,17 +184,16 @@ runs for both `/v1/responses` and the synthesized `/v1/responses/compact`
 path (Codex has no native compact endpoint; the provider drives `compaction_trigger`
 inline and rebuilds the envelope client-side).
 
-The resulting `instructions` can come from two paths:
+Before the provider boundary, the target Responses interceptor rewrites
+`role: "system"` input messages to `role: "developer"`. It changes only the
+role; item order, content-part boundaries, ids, and status remain intact. This
+also covers a multi-block Messages `system` field after generic translation has
+preserved it as one multi-part input message. Native Responses instructions,
+Gemini `systemInstruction`, and a string or single-block Messages `system`
+already occupy the top-level `instructions` field and remain unchanged.
 
-- the generic Messages-to-Responses translator maps a string or single-block
-  Messages `system` field directly to `instructions`; this happens before any
-  Codex-specific processing
-- for `role: "system"` messages represented inside Responses `input` — including
-  a multi-block Messages `system` preserved as one multi-part leading message —
-  the gateway rewrites every such role to `developer`, because Codex Responses
-  rejects system-role messages in `input`; the provider boundary then hoists
-  only a contiguous leading text-representable developer prefix into
-  `instructions`, leaving later developer messages inline in chronological order
+The Codex boundary then runs these steps:
+
 - injects a default `instructions` string when none is supplied (the upstream
   rejects empty / missing `instructions`)
 - strips fields the upstream rejects with `Unsupported parameter`:

@@ -89,7 +89,7 @@ export const OPTIONAL_FLAGS = [
   {
     id: 'promote-system-to-developer',
     label: 'Promote system role to developer',
-    description: "Rewrite messages with role 'system' to role 'developer' for upstreams that reject system-role input messages, including Codex Responses. At the Codex provider boundary, only a contiguous leading text-representable developer prefix moves into top-level instructions; later developer messages remain inline in chronological order. Reference: https://github.com/openai/codex/blob/1f17e7512f0e47625f2cad416f14870688a99814/codex-rs/core/src/client.rs#L829-L849",
+    description: "Rewrite message inputs with role 'system' to role 'developer' for upstreams that reject system-role input while accepting the developer role.",
   },
   {
     id: 'strip-billing-attribution',

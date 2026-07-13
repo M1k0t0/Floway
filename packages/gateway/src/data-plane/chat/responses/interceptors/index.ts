@@ -29,11 +29,8 @@ import { withVendorQwenResponsesNormalize } from './vendor-qwen-normalize.ts';
 //   - withReasoningDisabledOnForcedToolChoice: gated by
 //     `disable-reasoning-on-forced-tool-choice`.
 //   - withPromoteSystemToDeveloper: gated by `promote-system-to-developer`.
-//     Codex Responses rejects `role: 'system'` in `input`, so this stage converts
-//     those messages to developer before the provider boundary. The Codex
-//     boundary then hoists only a contiguous leading text-representable
-//     developer prefix into `instructions`; later developer messages remain in
-//     `input` in chronological order.
+//     Rewrites system input messages to the developer role accepted by the
+//     selected upstream.
 //   - withDemoteDeveloperToSystem: gated by `demote-developer-to-system`.
 //     Runs before withInterleavedSystemDemotedToUser so when both flags are
 //     on, a `developer` role first lands as `system`, then any system that

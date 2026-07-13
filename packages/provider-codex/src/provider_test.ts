@@ -148,7 +148,7 @@ describe('createCodexProvider', () => {
     }
   });
 
-  test('callResponses hoists the leading developer prefix into the Codex wire instructions', async () => {
+  test('callResponses preserves developer messages on the Codex wire', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
     const instance = createCodexProvider(baseRecord);
     const result = await instance.instance.callResponses(
@@ -170,8 +170,9 @@ describe('createCodexProvider', () => {
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     expect(init).toBeDefined();
     const body = JSON.parse(init?.body as string) as Record<string, unknown>;
-    expect(body.instructions).toBe('base instructions');
+    expect(body.instructions).toBe("You're a helpful assistant.");
     expect(body.input).toEqual([
+      { type: 'message', role: 'developer', content: 'base instructions' },
       { type: 'message', role: 'user', content: 'hi' },
       { type: 'message', role: 'developer', content: 'inline instructions' },
     ]);

@@ -1,8 +1,5 @@
-// Promote `system` to `developer` before dispatch or translation to upstreams
-// that reject system-role input messages, including Codex Responses. The Codex
-// provider boundary then hoists only a contiguous leading text-representable
-// developer prefix into `instructions`; later developer messages remain inline.
-// Always-attached; flag-gated by `promote-system-to-developer`.
+// Promote `system` to `developer` for upstreams that reject system-role input
+// messages while accepting the developer role.
 
 import type { ChatCompletionsInterceptor } from './types.ts';
 import type { ChatCompletionsMessage } from '@floway-dev/protocols/chat-completions';
