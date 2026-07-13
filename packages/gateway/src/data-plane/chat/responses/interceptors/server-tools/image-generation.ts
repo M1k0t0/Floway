@@ -12,7 +12,7 @@ import type {
   ResponsesFunctionTool,
   ResponsesFunctionToolCallItem,
   ResponsesHostedTool,
-  ResponsesInputImage,
+  ResponsesInputContent,
   ResponsesInputImageGenerationCall,
   ResponsesInputItem,
   ResponsesOutputImageGenerationCall,
@@ -337,8 +337,8 @@ export const synthesizeImageGenerationCallId = (): string =>
   `ig_gw_${crypto.randomUUID().replace(/-/g, '')}`;
 
 // Collect all inline image sources from the request input in forward
-// declaration order: `input_image` blocks in messages and function/custom tool
-// outputs, and full-echo
+// declaration order: `input_image` blocks in messages, `input_image` blocks in
+// `function_call_output` (tool-result) content, and full-echo
 // `image_generation_call` items carrying `result` bytes, each in the order they
 // appear. Order is load-bearing: probing both the standalone /images/edits
 // endpoint and native Responses showed gpt-image numbers the attached images
@@ -346,35 +346,27 @@ export const synthesizeImageGenerationCallId = (): string =>
 // against the order received — and native flattens every image across messages
 // and tool results into this same forward order. Preserving declaration order
 // therefore makes "the Nth image" mean the same thing here as it does natively.
-const inputImagesOf = (item: ResponsesInputItem): ResponsesInputImage[] => {
-  const content = item.type === 'message'
-    ? item.content
-    : item.type === 'function_call_output' || item.type === 'custom_tool_call_output' ? item.output : undefined;
-  return Array.isArray(content)
-    ? content.filter((block): block is ResponsesInputImage => block.type === 'input_image')
-    : [];
-};
-
-interface ImageSourceInspection {
-  sources: ImageSource[];
-  hasUnresolvableInputImage: boolean;
-}
-
-export const inspectImageSources = (input: readonly ResponsesInputItem[]): ImageSourceInspection => {
+export const collectImageSources = (input: readonly ResponsesInputItem[]): ImageSource[] => {
   const sources: ImageSource[] = [];
-  let hasUnresolvableInputImage = false;
+  const collectFromContent = (content: string | ResponsesInputContent[]): void => {
+    if (!Array.isArray(content)) return;
+    for (const block of content) {
+      if (block.type === 'input_image' && typeof block.image_url === 'string') {
+        const decoded = decodeInlineImage(block.image_url);
+        if (decoded !== null) sources.push(decoded);
+      }
+    }
+  };
   for (const item of input) {
-    for (const image of inputImagesOf(item)) {
-      if (typeof image.image_url !== 'string') {
-        hasUnresolvableInputImage = true;
-        continue;
-      }
-      const decoded = decodeInlineImage(image.image_url);
-      if (decoded === null) {
-        hasUnresolvableInputImage = true;
-        continue;
-      }
-      sources.push(decoded);
+    if (item.type === 'message') {
+      collectFromContent(item.content);
+      continue;
+    }
+    // A tool result may carry images as structured `input_image` content; read
+    // them so a tool-returned image is editable, matching native's flattening.
+    if (item.type === 'function_call_output') {
+      collectFromContent(item.output);
+      continue;
     }
     if (item.type === 'image_generation_call' && typeof item.result === 'string' && item.result.length > 0) {
       // A prior generated image carries no MIME prefix on its bare-base64
@@ -385,7 +377,7 @@ export const inspectImageSources = (input: readonly ResponsesInputItem[]): Image
       if (decoded !== null) sources.push(decoded);
     }
   }
-  return { sources, hasUnresolvableInputImage };
+  return sources;
 };
 
 // The successfully-resolved image, or a normalized failure. Failures are
@@ -520,7 +512,7 @@ const buildEditsForm = (prompt: string, config: ImageGenerationConfig, sources: 
     // keeps a stray unsupported byte stream failing loud at the backend.
     const mime = editSupportedMime(source.mimeType) ?? source.mimeType;
     // `image[]` repeated parts: gpt-image accepts multiple, resolving "the
-    // Nth image" against attach order (see `inspectImageSources`).
+    // Nth image" against attach order (see `collectImageSources`).
     form.append('image[]', new Blob([source.bytes], { type: mime }), `image_${i}.${editFileExt(mime)}`);
   }
   if (config.mask !== undefined) {
@@ -874,7 +866,7 @@ const streamImageGeneration = (
 //
 // Fidelity across requests: a client may echo a prior call back as a bare id
 // with the bytes dropped. By the time this seam runs the input item already
-// carries the full result payload — inspectImageSources can bind result bytes
+// carries the full result payload — collectImageSources can bind result bytes
 // directly without any out-of-band lookup. The `image_generation_call` shape
 // needs no out-of-band payload for this to be lossless: every field required
 // to rebuild the pair, INCLUDING the error (`status` + `error{message,code,
@@ -961,18 +953,8 @@ export const imageGenerationServerTool: ServerToolRegistration = (invocation, ga
     return { type: 'invalid-request', message: prepared.error.message, param: prepared.error.param, code: prepared.error.code };
   }
   const config = prepared.config;
-  const {
-    sources: originalImageSources,
-    hasUnresolvableInputImage,
-  } = inspectImageSources(invocation.payload.input);
-  if (config.action !== 'generate' && hasUnresolvableInputImage) {
-    return {
-      type: 'invalid-request',
-      message: 'image_generation cannot edit an input image unless it is an inline decodable data URL. Set action to "generate" to use remote, file_id, or malformed images only as model context.',
-      param: 'input',
-      code: 'invalid_value',
-    };
-  }
+  const originalImageSources = collectImageSources(invocation.payload.input);
+
   // `action:"edit"` with no bindable image is a client request-shape error,
   // surfaced before the model loop because it is not a runtime backend
   // failure.
@@ -1063,7 +1045,7 @@ export const imageGenerationServerTool: ServerToolRegistration = (invocation, ga
         // Re-collect edit sources from the live input so an image generated in
         // an earlier turn (fed back as an `input_image`) is editable now, and
         // resolve edit-vs-generate against the current sources for action:auto.
-        const { sources } = inspectImageSources(invocation.payload.input);
+        const sources = collectImageSources(invocation.payload.input);
         const isEdit = config.action === 'edit' || (config.action === 'auto' && sources.length > 0);
         const action: 'generate' | 'edit' = isEdit ? 'edit' : 'generate';
 

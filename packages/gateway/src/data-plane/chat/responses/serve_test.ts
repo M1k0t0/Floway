@@ -10,9 +10,10 @@ import type { ChatGatewayCtx } from '../shared/gateway-ctx.ts';
 import type { ChatCompletionsStreamEvent } from '@floway-dev/protocols/chat-completions';
 import { type AliasRules, doneFrame, eventFrame, type ModelEndpoints, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { MessagesStreamEvent } from '@floway-dev/protocols/messages';
-import type { CanonicalResponsesPayload, ResponsesPayload, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { ResponsesPayload, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 import { type ModelCandidate, directFetcher, type ProviderResponsesResult, type ProviderStreamResult, type ResponsesAction, type UpstreamCallOptions } from '@floway-dev/provider';
 import { assert, assertEquals, stubProvider, stubInternalModel } from '@floway-dev/test-utils';
+import type { CanonicalResponsesPayload } from '@floway-dev/translate/via-responses/responses-items';
 
 // Mock the resolver seam so each test hands the serve exactly the provider
 // candidates it wants, optionally with an alias-rules overlay attached.
@@ -108,7 +109,6 @@ const makeProtocolFrames = async function* <E>(events: readonly E[]): AsyncGener
 
 const makeCandidate = (overrides: {
   upstream?: string;
-  modelId?: string;
   endpoints?: ModelEndpoints;
   callResponses?: (model: unknown, body: unknown, action: ResponsesAction, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderResponsesResult>;
   callMessages?: (model: unknown, body: unknown, signal?: AbortSignal, opts?: UpstreamCallOptions) => Promise<ProviderStreamResult<MessagesStreamEvent>>;
@@ -131,10 +131,7 @@ const makeCandidate = (overrides: {
     },
     // Default keeps stubInternalModel's three-endpoint map intact; tests that
     // need a rejected candidate pass an explicit `endpoints` override.
-    model: stubInternalModel({
-      id: overrides.modelId ?? 'test-model',
-      ...(overrides.endpoints ? { endpoints: overrides.endpoints } : {}),
-    }, upstream),
+    model: stubInternalModel(overrides.endpoints ? { endpoints: overrides.endpoints } : {}, upstream),
     fetcher: directFetcher,
   };
 };
@@ -184,18 +181,15 @@ test('compact returns a result envelope from the wrapped attempt', async () => {
     object: 'response.compaction',
     output: [compactionItem] as unknown as ResponsesResult['output'],
   };
-  const observedModelIds: string[] = [];
-  const callResponses = vi.fn(async (model: unknown, _body: unknown, action: ResponsesAction): Promise<ProviderResponsesResult> => {
+  const callResponses = vi.fn(async (_model: unknown, _body: unknown, action: ResponsesAction): Promise<ProviderResponsesResult> => {
     if (action !== 'compact') throw new Error(`expected compact, got ${action}`);
-    observedModelIds.push((model as { id: string }).id);
     return { action: 'compact', ok: true, result: compactionResult, modelKey: 'test-model-key' };
   });
-  const candidate = makeCandidate({ upstream: 'up_a', modelId: 'gpt-target', callResponses });
+  const candidate = makeCandidate({ upstream: 'up_a', callResponses });
   queueResolution([candidate]);
-  const payload = compactPayload({ model: 'gpt-alias' });
 
   const result = await responsesServe.compact({
-    payload,
+    payload: compactPayload(),
     ctx: makeGatewayCtx(),
     headers: new Headers(),
   });
@@ -205,47 +199,30 @@ test('compact returns a result envelope from the wrapped attempt', async () => {
   assertEquals(result.result.object, 'response.compaction');
   assertEquals(callResponses.mock.calls.length, 1);
   assertEquals(callResponses.mock.calls[0][2], 'compact');
-  assertEquals(observedModelIds, ['gpt-target']);
-  assertEquals(payload.model, 'gpt-alias');
 });
 
 test('generate falls through to the next candidate when the first yields an upstream error', async () => {
   installRepo();
-  const originalImageUrl = 'data:image/png;base64,AQID';
-  const payload = makePayload({
-    input: [{
-      type: 'message',
-      role: 'user',
-      content: [{ type: 'input_image', image_url: originalImageUrl, detail: 'auto' }],
-    }],
-  });
   const firstError = new Response(JSON.stringify({ error: { message: 'nope' } }), {
     status: 502, headers: new Headers({ 'content-type': 'application/json' }),
   });
-  const firstCall = vi.fn(async (_model: unknown, body: unknown): Promise<ProviderResponsesResult> => {
-    const item = (body as Omit<CanonicalResponsesPayload, 'model'>).input[0];
-    if (item.type !== 'message' || !Array.isArray(item.content) || item.content[0]?.type !== 'input_image') throw new Error('expected image content');
-    item.content[0].image_url = 'data:image/webp;base64,COMPRESSED';
-    return { action: 'generate', ok: false, response: firstError, modelKey: 'first-key' };
-  });
+  const firstCall = vi.fn(async (): Promise<ProviderResponsesResult> => ({
+    action: 'generate', ok: false, response: firstError, modelKey: 'first-key',
+  }));
   const completed: ResponsesStreamEvent = {
     type: 'response.completed',
     sequence_number: 0,
     response: makeResponsesResult('resp_second'),
   };
-  let fallbackImageUrl: string | null | undefined;
-  const secondCall = vi.fn(async (_model: unknown, body: unknown): Promise<ProviderResponsesResult> => {
-    const item = (body as Omit<CanonicalResponsesPayload, 'model'>).input[0];
-    if (item.type !== 'message' || !Array.isArray(item.content) || item.content[0]?.type !== 'input_image') throw new Error('expected image content');
-    fallbackImageUrl = item.content[0].image_url;
-    return { action: 'generate', ok: true, events: makeProtocolFrames([completed]), modelKey: 'second-key', headers: new Headers() };
-  });
+  const secondCall = vi.fn(async (): Promise<ProviderResponsesResult> => ({
+    action: 'generate', ok: true, events: makeProtocolFrames([completed]), modelKey: 'second-key', headers: new Headers(),
+  }));
   const first = makeCandidate({ upstream: 'up_a', callResponses: firstCall });
   const second = makeCandidate({ upstream: 'up_b', callResponses: secondCall });
   queueResolution([first, second]);
 
   const result = await responsesServe.generate({
-    payload,
+    payload: makePayload(),
     ctx: makeGatewayCtx(),
     headers: new Headers(),
   });
@@ -256,10 +233,6 @@ test('generate falls through to the next candidate when the first yields an upst
   assertEquals(result.type, 'events');
   assertEquals(firstCall.mock.calls.length, 1);
   assertEquals(secondCall.mock.calls.length, 1);
-  assertEquals(fallbackImageUrl, originalImageUrl);
-  const sourceItem = payload.input[0];
-  if (sourceItem.type !== 'message' || !Array.isArray(sourceItem.content) || sourceItem.content[0]?.type !== 'input_image') throw new Error('expected source image content');
-  assertEquals(sourceItem.content[0].image_url, originalImageUrl);
 });
 
 // A mid-attempt throw (interceptor bug / translation error / provider-layer
@@ -747,13 +720,12 @@ test('generate treats compaction_trigger-bearing input as compaction: snapshot r
 test('alias resolution swaps the inbound model id for the target and overlays rules onto the Responses IR', async () => {
   installRepo();
   const capturedBodies: ResponsesPayload[] = [];
-  const observedModelIds: string[] = [];
-  const callResponses = vi.fn(async (model: unknown, body: unknown): Promise<ProviderResponsesResult> => {
-    observedModelIds.push((model as { id: string }).id);
+  const callResponses = vi.fn(async (_model: unknown, body: unknown): Promise<ProviderResponsesResult> => {
     capturedBodies.push(body as ResponsesPayload);
     return { action: 'generate', ok: true, events: makeProtocolFrames([{ type: 'response.completed', sequence_number: 0, response: makeResponsesResult() }]), modelKey: 'gpt-5.4', headers: new Headers() };
   });
-  const candidate = makeCandidate({ upstream: 'up_a', modelId: 'gpt-5.4', callResponses });
+  const candidate = makeCandidate({ upstream: 'up_a', callResponses });
+  Object.assign(candidate.model, { id: 'gpt-5.4' });
   queueResolution([candidate], {
     aliasRules: { reasoning: { effort: 'high', summary: 'detailed' }, verbosity: 'medium', serviceTier: 'priority' },
   });
@@ -769,11 +741,12 @@ test('alias resolution swaps the inbound model id for the target and overlays ru
   if (result.type !== 'events') throw new Error('unreachable');
   await collectEvents(result.events);
 
-  // Resolver and caller payload retain the inbound alias; the provider model
-  // argument carries the resolved target id while the body omits `model`.
+  // Resolver saw the inbound alias id; serve rewrote the prepared payload's
+  // model to the target id before dispatching. (The attempt strips `model`
+  // from the body — the provider re-stamps it from `candidate.model.id` —
+  // so we only verify payload rewriting via `payload.model` here.)
   assertEquals(lastResolveCall.model, 'gpt-fast');
-  assertEquals(observedModelIds, ['gpt-5.4']);
-  assertEquals(payload.model, 'gpt-fast');
+  assertEquals(payload.model, 'gpt-5.4');
   const observed = capturedBodies[0]!;
   assertEquals(observed.reasoning?.effort, 'high');
   assertEquals(observed.reasoning?.summary, 'detailed');

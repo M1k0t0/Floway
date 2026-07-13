@@ -7,12 +7,11 @@ import type { ResponsesBoundaryCtx } from './types.ts';
  * and not only inside top-level `message.content`: hosted-tool output items,
  * custom tool outputs, and other future input shapes may also carry image
  * content nested at arbitrary depth. The detector recursively scans every
- * input item's `content` / `output` array branches so a deeply embedded image
- * still flips the header.
+ * input item's `content` and array branches so a deeply embedded image still
+ * flips the header.
  *
  * References:
- * - https://github.com/caozhiyuan/copilot-api/blob/cd0d0182eb4b9bf68a3376dc79728afa7f42ce07/src/lib/api-config.ts#L248-L258
- * - https://github.com/caozhiyuan/copilot-api/blob/cd8207cb70ede07771bf37a04accfbf2af76d980/src/routes/responses/utils.ts#L176-L201
+ * - https://github.com/caozhiyuan/copilot-api/blob/main/src/routes/responses/utils.ts#L185-L210
  */
 const containsVisionContent = (value: unknown): boolean => {
   if (!value) return false;
@@ -25,7 +24,6 @@ const containsVisionContent = (value: unknown): boolean => {
   // avoids dropping the header on aged samples we may still see in replay.
   if (type === 'input_image' || type === 'image') return true;
   if (Array.isArray(record.content)) return record.content.some(entry => containsVisionContent(entry));
-  if (Array.isArray(record.output)) return record.output.some(entry => containsVisionContent(entry));
   return false;
 };
 
@@ -34,7 +32,10 @@ export const withVisionHeaderSet = async <TResult>(
   _request: object,
   run: () => Promise<TResult>,
 ): Promise<TResult> => {
-  if (containsVisionContent(ctx.payload.input)) ctx.headers.set('copilot-vision-request', 'true');
+  const input = ctx.payload.input;
+  if (!Array.isArray(input)) return await run();
+
+  if (containsVisionContent(input)) ctx.headers.set('copilot-vision-request', 'true');
 
   return await run();
 };

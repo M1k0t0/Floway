@@ -16,11 +16,11 @@ import { DOWNSTREAM_KEEP_ALIVE_INTERVAL_MS, type StreamCompletion } from '../sha
 import type { BackgroundScheduler } from '@floway-dev/platform';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import { RESPONSES_MISSING_TERMINAL_MESSAGE } from '@floway-dev/protocols/responses';
-import { isResponsesTerminalEvent, type CanonicalResponsesPayload, type ResponsesPayload, type ResponsesResult, type ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import { isResponsesTerminalEvent, type ResponsesRequestPayload, type ResponsesResult, type ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 import type { ExecuteResult } from '@floway-dev/provider';
 import { toInternalDebugError } from '@floway-dev/provider';
 import { TranslatorInputError } from '@floway-dev/translate';
-import { canonicalizeResponsesPayload } from '@floway-dev/translate/via-responses/responses-items';
+import { canonicalizeResponsesPayload, type CanonicalResponsesPayload } from '@floway-dev/translate/via-responses/responses-items';
 
 interface WorkerWebSocket extends WebSocket {
   accept(): void;
@@ -69,7 +69,7 @@ declare const WebSocketPair: {
 interface ResponsesWebSocketClientEvent {
   type: string;
   event_id?: string;
-  response?: Partial<ResponsesPayload>;
+  response?: Partial<ResponsesRequestPayload>;
   [key: string]: unknown;
 }
 
@@ -132,7 +132,8 @@ const createResponsesWebSocketEvents = (c: AuthedContext): ResponsesWebSocketHan
   // genuinely empty, which is bounded because `closed = true` short-
   // circuits future message handlers at the top of `handleClientMessage`.
   const pendingWork = new Set<Promise<unknown>>();
-  const { promise: sessionClosed, resolve: resolveSessionClosed } = Promise.withResolvers<void>();
+  let sessionClosedResolve: (() => void) | undefined;
+  const sessionClosed = new Promise<void>(resolve => { sessionClosedResolve = resolve; });
   const sessionScheduler: BackgroundScheduler = promise => {
     const tracked: Promise<unknown> = Promise.resolve(promise)
       .catch(err => console.error('[ws-background]', err))
@@ -149,7 +150,7 @@ const createResponsesWebSocketEvents = (c: AuthedContext): ResponsesWebSocketHan
   const closeActiveRequest = (): void => {
     closed = true;
     activeAbortController?.abort();
-    resolveSessionClosed();
+    sessionClosedResolve?.();
   };
 
   return {
@@ -320,7 +321,7 @@ const responsesPayloadFromClientSource = (source: object): CanonicalResponsesPay
     throw new WebSocketClientMessageError('response.create requires response.input to be a string or an array.');
   }
   // stamp stream: true — the WS transport always streams.
-  return { ...canonicalizeResponsesPayload(source), stream: true };
+  return { ...canonicalizeResponsesPayload(source as ResponsesRequestPayload), stream: true };
 };
 
 const respondResponsesWebSocket = async (input: {

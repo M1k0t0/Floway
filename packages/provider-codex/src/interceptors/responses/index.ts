@@ -8,6 +8,9 @@ import type { ResponsesBoundaryCtx } from './types.ts';
 import type { Interceptor } from '@floway-dev/interceptor';
 import type { ProviderResponsesResult } from '@floway-dev/provider';
 
+// Order rationale: neither interceptor below reads or writes a field the
+// other touches, so order is positional only.
+//
 // Codex interceptors are pure payload/header mutators, so the chain's only
 // terminal — the streaming `generate` + non-streaming `compact` dispatch —
 // returns its `ProviderResponsesResult` directly without any per-frame

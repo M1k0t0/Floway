@@ -6,8 +6,8 @@ import { InMemoryRepo } from '../../../repo/memory.ts';
 import { mockChatGatewayCtx } from '../../../test-helpers/gateway-ctx.ts';
 import type { ChatCompletionsStreamEvent } from '@floway-dev/protocols/chat-completions';
 import { doneFrame, eventFrame, type ModelEndpoints, type ProtocolFrame } from '@floway-dev/protocols/common';
-import type { MessagesClientTool, MessagesPayload, MessagesStreamEvent } from '@floway-dev/protocols/messages';
-import type { CanonicalResponsesPayload, ResponsesResult } from '@floway-dev/protocols/responses';
+import type { MessagesPayload, MessagesStreamEvent } from '@floway-dev/protocols/messages';
+import type { ResponsesPayload, ResponsesResult } from '@floway-dev/protocols/responses';
 import { type ModelCandidate, directFetcher, type ProviderCallResult, type ProviderResponsesResult, type ProviderStreamResult, type ResponsesAction, type UpstreamCallOptions } from '@floway-dev/provider';
 import type { FlagId } from '@floway-dev/provider/flags';
 import { assertEquals, assertExists, stubProvider, stubInternalModel, stubProviderModel } from '@floway-dev/test-utils';
@@ -144,9 +144,9 @@ test('generate translate-to-responses branch routes through responsesAttempt', a
 
 test('generate lets target promotion take precedence over source demotion', async () => {
   installRepo();
-  const observedBodies: Omit<CanonicalResponsesPayload, 'model'>[] = [];
+  const observedBodies: Omit<ResponsesPayload, 'model'>[] = [];
   const callResponses = vi.fn(async (_model, body): Promise<ProviderResponsesResult> => {
-    observedBodies.push(body as Omit<CanonicalResponsesPayload, 'model'>);
+    observedBodies.push(body as Omit<ResponsesPayload, 'model'>);
     return {
       action: 'generate',
       ok: true,
@@ -202,9 +202,9 @@ test('generate lets target promotion take precedence over source demotion', asyn
 
 test('generate translate-to-responses branch promotes multi-block system prefix', async () => {
   installRepo();
-  const observedBodies: Omit<CanonicalResponsesPayload, 'model'>[] = [];
+  const observedBodies: Omit<ResponsesPayload, 'model'>[] = [];
   const callResponses = vi.fn(async (_model, body): Promise<ProviderResponsesResult> => {
-    observedBodies.push(body as Omit<CanonicalResponsesPayload, 'model'>);
+    observedBodies.push(body as Omit<ResponsesPayload, 'model'>);
     return {
       action: 'generate',
       ok: true,
@@ -283,10 +283,10 @@ test('countTokens proxies the upstream response as a plain result', async () => 
   assertEquals(callMessagesCountTokens.mock.calls.length, 1);
 });
 
-test('countTokens applies the generation payload transforms before the provider boundary', async () => {
+test('countTokens applies role compatibility before the provider boundary', async () => {
   installRepo();
   const observedBodies: Array<Omit<MessagesPayload, 'model'>> = [];
-  const callMessagesCountTokens = vi.fn(async (_model: unknown, body: unknown): Promise<ProviderCallResult> => {
+  const callMessagesCountTokens = vi.fn(async (_model, body): Promise<ProviderCallResult> => {
     observedBodies.push(body as Omit<MessagesPayload, 'model'>);
     return {
       response: new Response(JSON.stringify({ input_tokens: 9 }), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) }),
@@ -296,23 +296,15 @@ test('countTokens applies the generation payload transforms before the provider 
 
   const result = await messagesAttempt.countTokens({
     payload: makePayload({
-      system: 'x-anthropic-billing-header: token\ncch=deadbeef1234;\nbase rules',
       messages: [
         { role: 'system', content: 'inline rules' },
         { role: 'user', content: 'hello' },
       ],
-      thinking: { type: 'enabled', budget_tokens: 1024 },
-      output_config: { effort: 'high' },
-      tool_choice: { type: 'tool', name: 'lookup' },
     }),
     ctx: makeGatewayCtx(),
     candidate: makeCandidate({
       callMessagesCountTokens,
-      enabledFlags: new Set<FlagId>([
-        'strip-billing-attribution',
-        'disable-reasoning-on-forced-tool-choice',
-        'demote-interleaved-system-to-user',
-      ]),
+      enabledFlags: new Set<FlagId>(['demote-interleaved-system-to-user']),
     }),
     headers: new Headers(),
   });
@@ -320,49 +312,11 @@ test('countTokens applies the generation payload transforms before the provider 
   assertEquals(result.type, 'plain');
   assertEquals(observedBodies, [{
     max_tokens: 32,
-    system: 'base rules',
     messages: [
       { role: 'user', content: 'inline rules' },
       { role: 'user', content: 'hello' },
     ],
-    thinking: { type: 'disabled' },
-    tool_choice: { type: 'tool', name: 'lookup' },
   }]);
-});
-
-test('countTokens prepares the same web-search tool shape as generation', async () => {
-  installRepo();
-  const observedBodies: Array<Omit<MessagesPayload, 'model'>> = [];
-  const callMessagesCountTokens = vi.fn(async (_model: unknown, body: unknown): Promise<ProviderCallResult> => {
-    observedBodies.push(body as Omit<MessagesPayload, 'model'>);
-    return {
-      response: Response.json({ input_tokens: 11 }),
-      modelKey: 'k',
-    };
-  });
-
-  const result = await messagesAttempt.countTokens({
-    payload: makePayload({
-      tools: [{ type: 'web_search_20260209', max_uses: 3 }],
-    }),
-    ctx: makeGatewayCtx(),
-    candidate: makeCandidate({
-      callMessagesCountTokens,
-      enabledFlags: new Set<FlagId>(['messages-web-search-shim']),
-    }),
-    headers: new Headers(),
-  });
-
-  assertEquals(result.type, 'plain');
-  const tool = observedBodies[0]?.tools?.[0] as MessagesClientTool | undefined;
-  if (tool === undefined) throw new Error('expected rewritten web-search tool');
-  assertEquals(tool.name, 'web_search');
-  assertEquals('type' in tool, false);
-  assertEquals(tool.input_schema, {
-    type: 'object',
-    properties: { query: { type: 'string', description: 'Search query' } },
-    required: ['query'],
-  });
 });
 
 test('countTokens refuses a non-messages candidate', async () => {

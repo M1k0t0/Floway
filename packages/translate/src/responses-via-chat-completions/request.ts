@@ -4,8 +4,8 @@ import { buildCustomToolInputSchema } from '../shared/responses-via/custom-tool-
 import { rejectProgramCaller, rejectProgrammaticResponsesPayload } from '../shared/responses-via/programmatic-tooling.ts';
 import { canonicalizeResponsesPayload } from '../shared/via-responses/responses-items.ts';
 import { TranslatorInputError } from '../translator-input-error.ts';
-import { CHAT_COMPLETIONS_LIFTED_TOOL_OUTPUT_IMAGES, type ChatCompletionsContentPart, type ChatCompletionsPayload, type ChatCompletionsMessage, type ChatCompletionsTool, type ChatCompletionsToolCall } from '@floway-dev/protocols/chat-completions';
-import type { ResponsesFunctionCallOutputItem, ResponsesInputImage, ResponsesInputText, ResponsesPayload, ResponsesTool, ResponsesToolChoice } from '@floway-dev/protocols/responses';
+import type { ChatCompletionsPayload, ChatCompletionsMessage, ChatCompletionsTool, ChatCompletionsToolCall } from '@floway-dev/protocols/chat-completions';
+import type { ResponsesPayload, ResponsesRequestPayload, ResponsesTool, ResponsesToolChoice } from '@floway-dev/protocols/responses';
 
 interface AssistantAccumulator {
   message: ChatCompletionsMessage;
@@ -18,7 +18,9 @@ const ensureAssistant = (assistant: AssistantAccumulator | null): AssistantAccum
     reasoning: createChatCompletionsReasoningProjection(),
   };
 
-const appendAssistantText = (assistant: AssistantAccumulator | null, text: string): AssistantAccumulator => {
+const appendAssistantText = (assistant: AssistantAccumulator | null, text: string): AssistantAccumulator | null => {
+  if (!text) return assistant;
+
   const next = ensureAssistant(assistant);
   next.message.content = typeof next.message.content === 'string' ? next.message.content + text : text;
   return next;
@@ -41,41 +43,6 @@ const appendAssistantToolCall = (
     } satisfies ChatCompletionsToolCall,
   ];
   return next;
-};
-
-interface FunctionCallOutputProjection {
-  toolContent: string;
-  liftedImageContent: ChatCompletionsContentPart[];
-}
-
-// Chat tool messages admit only strings or text parts, while Responses tool
-// output also admits images. Keep every tool result contiguous with its
-// assistant tool-call group, then lift its images into one following user
-// message so vision targets receive a legal, usable shape.
-// https://github.com/openai/openai-node/blob/61539248cbe04665de68a71e6fd878127ae4db87/src/resources/chat/completions/completions.ts#L1893-L1908
-// https://github.com/vercel/ai/blob/c093ee7458ccd5dada05d8461041e47c24ee55c0/packages/google/src/convert-to-google-messages.ts#L137-L180
-const projectFunctionCallOutput = (item: ResponsesFunctionCallOutputItem): FunctionCallOutputProjection => {
-  if (typeof item.output === 'string') return { toolContent: item.output, liftedImageContent: [] };
-  if (item.output.some(part => part.type === 'input_file')) {
-    throw new TranslatorInputError('Cannot translate input_file tool output to Chat Completions.');
-  }
-
-  const images = item.output.filter((part): part is ResponsesInputImage => part.type === 'input_image');
-  const textParts = item.output.filter((part): part is ResponsesInputText =>
-    part.type === 'input_text' || part.type === 'output_text');
-  if (images.length === 0) {
-    return { toolContent: responsesContentToText(textParts), liftedImageContent: [] };
-  }
-
-  const lifted = responsesContentToChatCompletionsContent([
-    { type: 'input_text', text: `Image output from tool call ${item.call_id}:` },
-    ...images,
-  ]);
-  if (typeof lifted === 'string') throw new Error('Image tool output projection lost its image content');
-  return {
-    toolContent: responsesContentToText(textParts) || 'Image output is attached in the following user message.',
-    liftedImageContent: lifted,
-  };
 };
 
 const translateResponsesTools = (tools: ResponsesTool[] | null | undefined, customToolNames: Set<string>): ChatCompletionsTool[] | undefined => {
@@ -166,14 +133,12 @@ export interface ResponsesToChatCompletionsResult {
   customToolNames: Set<string>;
 }
 
-export const translateResponsesToChatCompletions = (source: ResponsesPayload): ResponsesToChatCompletionsResult => {
+export const translateResponsesToChatCompletions = (source: ResponsesRequestPayload): ResponsesToChatCompletionsResult => {
   const payload = canonicalizeResponsesPayload(source);
   rejectProgrammaticResponsesPayload(payload, 'Chat Completions');
   const customToolNames = new Set<string>();
   const responseFormat = buildChatCompletionsResponseFormat(payload.text);
   const messages: ChatCompletionsMessage[] = payload.instructions ? [{ role: 'system', content: payload.instructions }] : [];
-  const pendingToolOutputImages: ChatCompletionsContentPart[] = [];
-  let lastLiftedToolOutputMessage: ChatCompletionsMessage | undefined;
 
   let assistant: AssistantAccumulator | null = null;
   const flushAssistant = () => {
@@ -185,15 +150,7 @@ export const translateResponsesToChatCompletions = (source: ResponsesPayload): R
     assistant = null;
   };
 
-  const flushToolOutputImages = () => {
-    if (pendingToolOutputImages.length === 0) return;
-    lastLiftedToolOutputMessage = { role: 'user', content: [...pendingToolOutputImages] };
-    messages.push(lastLiftedToolOutputMessage);
-    pendingToolOutputImages.length = 0;
-  };
-
   for (const item of payload.input) {
-    if (item.type !== 'function_call_output' && item.type !== 'custom_tool_call_output') flushToolOutputImages();
     rejectProgramCaller(item);
     if (item.type === 'reasoning') {
       assistant = ensureAssistant(assistant);
@@ -208,13 +165,14 @@ export const translateResponsesToChatCompletions = (source: ResponsesPayload): R
 
     if (item.type === 'function_call_output') {
       flushAssistant();
-      const projected = projectFunctionCallOutput(item);
+      // FIXME: a multimodal function_call_output becomes a tool-role message
+      // with image_url content parts. Verify GitHub Copilot's chat upstream
+      // accepts image content on tool messages before relying on this path.
       messages.push({
         role: 'tool',
         tool_call_id: item.call_id,
-        content: projected.toolContent,
+        content: responsesContentToChatCompletionsContent(item.output),
       });
-      pendingToolOutputImages.push(...projected.liftedImageContent);
       continue;
     }
 
@@ -242,9 +200,9 @@ export const translateResponsesToChatCompletions = (source: ResponsesPayload): R
       continue;
     }
 
-    if (item.type === 'item_reference') {
-      throw new TranslatorInputError("Invalid input item type 'item_reference'.");
-    }
+    // item_reference items are connection-bound pointers with no inline
+    // content to translate; skip them.
+    if (item.type === 'item_reference') continue;
 
     // The shim must translate echoed web_search_call input items
     // into function_call + function_call_output pairs before this
@@ -259,12 +217,6 @@ export const translateResponsesToChatCompletions = (source: ResponsesPayload): R
     }
 
     if (item.role === 'assistant') {
-      if (Array.isArray(item.content)) {
-        const unsupported = item.content.find(part => part.type === 'input_file' || part.type === 'input_image');
-        if (unsupported !== undefined) {
-          throw new TranslatorInputError(`Cannot translate ${unsupported.type} assistant content to Chat Completions.`);
-        }
-      }
       assistant = appendAssistantText(assistant, responsesContentToText(item.content));
       continue;
     }
@@ -277,11 +229,8 @@ export const translateResponsesToChatCompletions = (source: ResponsesPayload): R
   }
 
   flushAssistant();
-  flushToolOutputImages();
 
   const tools = translateResponsesTools(payload.tools, customToolNames);
-  const endsWithLiftedToolOutputImages = lastLiftedToolOutputMessage !== undefined
-    && messages.at(-1) === lastLiftedToolOutputMessage;
   // Same-purpose OpenAI fields pass through directly here, while broader
   // Responses-only state such as `previous_response_id` remains native-only.
   const target: ChatCompletionsPayload = {
@@ -304,9 +253,6 @@ export const translateResponsesToChatCompletions = (source: ResponsesPayload): R
     // `reasoning`; only explicit reasoning items survive this translation.
     tools,
     tool_choice: translateResponsesToolChoice(payload.tool_choice),
-    ...(endsWithLiftedToolOutputImages
-      ? { [CHAT_COMPLETIONS_LIFTED_TOOL_OUTPUT_IMAGES]: true as const }
-      : {}),
   };
 
   return { target, customToolNames };

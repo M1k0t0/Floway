@@ -61,12 +61,6 @@ the gateway returns a Gemini-shaped unsupported-model error.
   boundaries normalize it to an explicit `type: "message"` before storage,
   interception, or translation. Malformed untyped items are rejected as caller
   input errors at the same boundary.
-- Responses compact requests retain `prompt_cache_options` and the deprecated
-  `prompt_cache_retention` through the canonical/provider boundary for native
-  compact targets. Provider-specific rejection remains a boundary workaround
-  (Codex strips `prompt_cache_retention`).
-- Explicit `prompt_cache_breakpoint` metadata on text, image, and file content
-  survives canonicalization and retained-message compaction.
 - Translators do not synthesize defaults merely to satisfy a target shape.
   Examples: no translated-only `temperature: 1`, `store: false`,
   `parallel_tool_calls: true`, or `reasoning.summary: "detailed"`.
@@ -80,7 +74,7 @@ the gateway returns a Gemini-shaped unsupported-model error.
 - Each provider runs its own boundary interceptor chain inside its `call*`
   method, after the gateway-side chain and immediately before the wire. The
   boundary chain owns provider-specific quirks: image compression, header
-  shaping (`copilot-vision-request`, `x-initiator`, anthropic-beta filtering),
+  shaping (`x-vision-request`, `x-initiator`, anthropic-beta filtering),
   field stripping (Copilot Responses `service_tier`, `image_generation`,
   `store: false` forcing), Copilot Messages `cache_control.scope` scrubbing,
   and similar.
@@ -156,15 +150,7 @@ Header shaping (UA, `X-Stainless-*`, `anthropic-beta`) and the dated
 upstream model id are set in the provider's fetch path, not as interceptor
 steps.
 
-### Responses — gateway flow and interceptors
-
-- resolves `previous_response_id` and every `item_reference` through the
-  gateway's Responses store before candidate dispatch. Affinity is classified
-  from each referenced item's stored type, then the candidate rewrite replaces
-  every reference with its durable payload. Same-upstream items recover their
-  upstream wire id; portable items receive a temporary id when needed. A
-  missing durable payload returns `item_not_found`, and no provider receives an
-  `item_reference` carrier.
+### Responses — gateway interceptors
 
 - removes unsupported `image_generation` Responses tool entries and forced
   tool choices that targeted them before target request construction. Other
@@ -190,16 +176,18 @@ The same boundary runs for both `/v1/responses` (streaming) and
   persistence; the original `store` is captured by the entry adapter before
   the chain runs, so durable storage is unaffected
 - compresses inline base64 image data URLs to WebP
-- injects `copilot-vision-request` and `x-initiator` headers
-- on `/v1/responses` only: synchronizes mismatched stream output item IDs
+- injects `x-vision-request` and `x-initiator` headers
+- on `/v1/responses` only: retries expired connection-bound input IDs once
+  with deterministic rewrites, and synchronizes mismatched stream output
+  item IDs
 
 ### Responses — Codex provider boundary chain
 
 Codex (ChatGPT subscription) only serves Responses; Messages, Chat
 Completions, and Gemini reach Codex through translation. The same boundary
-runs for streaming `/v1/responses` and non-streaming `/v1/responses/compact`.
-The compact action is narrowed to the compact request shape and dispatched
-directly to the subscription backend's `/codex/responses/compact` endpoint.
+runs for both `/v1/responses` and the synthesized `/v1/responses/compact`
+path (Codex has no native compact endpoint; the provider drives `compaction_trigger`
+inline and rebuilds the envelope client-side).
 
 Before the provider boundary, the target Responses interceptor rewrites
 `role: "system"` input messages to `role: "developer"`. It changes only the
@@ -388,7 +376,7 @@ Request mapping:
 - user `input_text` becomes Messages text; `input_image` URLs are resolved via
   the shared remote-image loader and converted to base64 image blocks when
   supported.
-- assistant `input_text` and `output_text` become assistant text blocks.
+- assistant `output_text` becomes assistant text blocks.
 - `function_call` becomes assistant `tool_use`.
 - `function_call_output` becomes user `tool_result`; incomplete status marks the
   tool result as an error.
@@ -443,8 +431,6 @@ Known losses:
   other `format` fields are not preserved.
 - Remote image fetch failures and unsupported image media types drop that image
   rather than failing the request.
-- `input_file` content and assistant-side images have no Messages counterpart
-  and are rejected.
 
 ## Messages To Chat Completions
 
@@ -578,13 +564,7 @@ Request mapping:
   assistant message as `reasoning_items[]`; the first scalar-eligible group also
   projects to `reasoning_text`.
 - `function_call` items become assistant `tool_calls`.
-- `function_call_output` items become text-only Chat `tool` messages. Because
-  Chat tool messages do not admit image parts, tool-output images are grouped
-  after the contiguous tool-result run in one synthesized user image message;
-  each tool call's image group is preceded by its source `call_id` label.
-  Symbol-keyed internal provenance keeps that synthesized message
-  agent-initiated at the Copilot boundary without exposing a marker on the JSON
-  wire or trusting client text.
+- `function_call_output` items become Chat `tool` messages.
 - `max_output_tokens`, `stream`, `temperature`, `top_p`, `metadata`, `store`,
   `parallel_tool_calls`, `prompt_cache_key`, `safety_identifier`,
   `service_tier`, and explicit `reasoning.effort` pass through when present.
@@ -625,9 +605,6 @@ Known losses:
 - Freeform `custom` tool `format.definition` is preserved as a
   `Lark grammar: ${definition}` description on the wrapped `input` parameter;
   other `format` fields are not preserved.
-- Lifting tool-output images into a user message changes their speaker role but
-  keeps the visual bytes usable on Chat targets. `input_file` tool output and
-  file-id-only images cannot be materialized and are rejected.
 - opaque Responses reasoning state is not requested, translated, or preserved on
   Chat fallback paths.
 

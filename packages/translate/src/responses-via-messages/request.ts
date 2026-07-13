@@ -25,7 +25,7 @@ import type {
   ResponsesInputItem,
   ResponsesInputMessage,
   ResponsesInputText,
-  ResponsesPayload,
+  ResponsesRequestPayload,
   ResponsesTool,
   ResponsesToolChoice,
 } from '@floway-dev/protocols/responses';
@@ -65,17 +65,9 @@ const translateUserMessage = async (message: ResponsesInputMessage, loadRemoteIm
       continue;
     }
 
-    if (block.type === 'input_file') {
-      throw new TranslatorInputError('Cannot translate input_file message content to Messages.');
-    }
-
     if (block.type !== 'input_image') continue;
 
-    const imageUrl = (block as ResponsesInputImage).image_url;
-    if (typeof imageUrl !== 'string') {
-      throw new TranslatorInputError('Cannot translate file_id-only image content to Messages.');
-    }
-    const image = await resolveImageUrlToMessagesImage(imageUrl, loadRemoteImage);
+    const image = await resolveImageUrlToMessagesImage((block as ResponsesInputImage).image_url, loadRemoteImage);
     if (image) content.push(image);
   }
 
@@ -91,13 +83,8 @@ const translateToolOutput = async (output: string | ResponsesInputContent[], loa
   const blocks: MessagesToolResultContentBlock[] = [];
   for (const part of output) {
     if (part.type === 'input_image') {
-      if (typeof part.image_url !== 'string') {
-        throw new TranslatorInputError('Cannot translate file_id-only image tool output to Messages.');
-      }
       const image = await resolveImageUrlToMessagesImage(part.image_url, loadRemoteImage);
       if (image) blocks.push(image);
-    } else if (part.type === 'input_file') {
-      throw new TranslatorInputError('Cannot translate input_file tool output to Messages.');
     } else {
       blocks.push({ type: 'text', text: part.text });
     }
@@ -114,13 +101,7 @@ const translateAssistantMessage = (message: ResponsesInputMessage): MessagesAssi
   const content: MessagesAssistantContentBlock[] = [];
 
   for (const block of message.content) {
-    if (block.type === 'input_image') {
-      throw new TranslatorInputError('Cannot translate input_image assistant content to Messages.');
-    }
-    if (block.type === 'input_file') {
-      throw new TranslatorInputError('Cannot translate input_file assistant content to Messages.');
-    }
-    if (block.type === 'input_text' || block.type === 'output_text') {
+    if (block.type === 'output_text') {
       content.push({ type: 'text', text: (block as ResponsesInputText).text });
     }
   }
@@ -144,8 +125,10 @@ const responsesSystemBlocks = (message: ResponsesInputMessage): MessagesTextBloc
       throw new TranslatorInputError(`Invalid 'input_image' content part in ${message.role} message. Only 'input_text' content parts are supported in ${message.role} messages on this model.`);
     }
     if (block.type !== 'input_text' && block.type !== 'output_text') {
-      // System messages admit only textual parts; every other canonical
-      // variant must be rejected instead of silently dropped.
+      // Exhaustiveness guard: today ResponsesInputContent is
+      // input_text|input_image|output_text; a future variant must opt into
+      // translator behavior rather than be silently dropped from system
+      // content.
       throw new TranslatorInputError(`Invalid content block type '${(block as { type: string }).type}' in ${message.role} message.`);
     }
     blocks.push({ type: 'text', text: block.text });
@@ -255,7 +238,9 @@ const translateResponsesInput = async (input: ResponsesInputItem[], loadRemoteIm
       break;
     }
     case 'item_reference':
-      throw new TranslatorInputError("Invalid input item type 'item_reference'.");
+      // Connection-bound pointer with no inline content to translate; drop it.
+      // Mirrors the responses-via-chat-completions translator behaviour.
+      break;
     case 'web_search_call':
       // The shim must translate echoed web_search_call input items
       // into function_call + function_call_output pairs before this
@@ -333,7 +318,7 @@ const translateToolChoice = (toolChoice: ResponsesToolChoice | null | undefined)
   return undefined;
 };
 
-export const translateResponsesToMessages = async (source: ResponsesPayload, options: TranslateResponsesToMessagesOptions = {}): Promise<ResponsesToMessagesResult> => {
+export const translateResponsesToMessages = async (source: ResponsesRequestPayload, options: TranslateResponsesToMessagesOptions = {}): Promise<ResponsesToMessagesResult> => {
   const payload = canonicalizeResponsesPayload(source);
   rejectProgrammaticResponsesPayload(payload, 'Messages');
   const customToolNames = new Set<string>();
@@ -406,5 +391,5 @@ export const translateResponsesToMessages = async (source: ResponsesPayload, opt
   return { target, customToolNames };
 };
 
-export const buildTargetRequest = (payload: ResponsesPayload, options: { fallbackMaxOutputTokens?: number }): Promise<ResponsesToMessagesResult> =>
+export const buildTargetRequest = (payload: ResponsesRequestPayload, options: { fallbackMaxOutputTokens?: number }): Promise<ResponsesToMessagesResult> =>
   translateResponsesToMessages(payload, options);

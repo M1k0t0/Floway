@@ -1,5 +1,5 @@
 
-import type { MessagesCountTokensInterceptor, MessagesInterceptor, MessagesInvocation } from './types.ts';
+import type { MessagesInterceptor } from './types.ts';
 import { decodeBase64UrlJson, encodeBase64UrlJson } from '../../../../shared/base64url-json.ts';
 import { isJsonObject } from '../../../../shared/json-helpers.ts';
 import { resolveConfiguredWebSearchProvider } from '../../../tools/web-search/provider.ts';
@@ -838,24 +838,21 @@ export const rewriteMessagesWebSearchEventsToNative = async function* (
   }
 };
 
-const messagesWebSearchInvalidRequestBody = (message: string) => ({
-  type: 'error',
-  error: {
-    type: 'invalid_request_error',
-    message,
-  },
-});
-
 const buildSyntheticInvalidRequestUpstreamError = (message: string) => ({
   type: 'api-error' as const,
   source: 'gateway' as const,
   status: 400,
   headers: new Headers({ 'content-type': 'application/json' }),
-  body: new TextEncoder().encode(JSON.stringify(messagesWebSearchInvalidRequestBody(message))),
+  body: new TextEncoder().encode(
+    JSON.stringify({
+      type: 'error',
+      error: {
+        type: 'invalid_request_error',
+        message,
+      },
+    }),
+  ),
 });
-
-const buildInvalidRequestResponse = (message: string): Response =>
-  Response.json(messagesWebSearchInvalidRequestBody(message), { status: 400 });
 
 const resolveActiveMessagesWebSearchProvider = async (apiKeyId: string): Promise<{ type: 'ok'; provider: ActiveMessagesWebSearchProvider } | ReturnType<typeof internalErrorResult>> => {
   const searchConfig = await loadSearchConfig();
@@ -884,26 +881,6 @@ const resolveActiveMessagesWebSearchProvider = async (apiKeyId: string): Promise
   );
 };
 
-type PreparedMessagesWebSearchShimState = Exclude<MessagesWebSearchShimState, { mode: 'inactive' }>;
-
-type PrepareMessagesWebSearchInvocationResult =
-  | { type: 'inactive' }
-  | { type: 'invalid-request'; message: string }
-  | { type: 'prepared'; state: PreparedMessagesWebSearchShimState };
-
-const prepareMessagesWebSearchInvocation = (ctx: MessagesInvocation): PrepareMessagesWebSearchInvocationResult => {
-  if (ctx.targetApi === 'messages' && !providerModelOf(ctx.candidate).enabledFlags.has('messages-web-search-shim')) {
-    return { type: 'inactive' };
-  }
-
-  const prepared = prepareMessagesWebSearchShimRequest(ctx.payload);
-  if (prepared.type === 'invalid-request') return prepared;
-  if (prepared.state.mode === 'inactive') return { type: 'inactive' };
-
-  ctx.payload = prepared.payload;
-  return { type: 'prepared', state: prepared.state };
-};
-
 /**
  * Anthropic exposes native `web_search_*` server tools, but non-Messages
  * targets cannot run Anthropic server tools. This shim rewrites the native tool
@@ -918,12 +895,22 @@ const prepareMessagesWebSearchInvocation = (ctx: MessagesInvocation): PrepareMes
  * may or may not be able to serve web_search natively).
  */
 export const withMessagesWebSearchShim: MessagesInterceptor = async (ctx, gatewayCtx, run) => {
-  const prepared = prepareMessagesWebSearchInvocation(ctx);
-  if (prepared.type === 'inactive') return await run();
-  if (prepared.type === 'invalid-request') return buildSyntheticInvalidRequestUpstreamError(prepared.message);
+  if (ctx.targetApi === 'messages' && !providerModelOf(ctx.candidate).enabledFlags.has('messages-web-search-shim')) return await run();
+
+  const prepared = prepareMessagesWebSearchShimRequest(ctx.payload);
+
+  if (prepared.type === 'invalid-request') {
+    return buildSyntheticInvalidRequestUpstreamError(prepared.message);
+  }
+
+  if (prepared.state.mode === 'inactive') {
+    return await run();
+  }
 
   const provider = prepared.state.mode === 'active' ? await resolveActiveMessagesWebSearchProvider(gatewayCtx.apiKeyId) : { type: 'ok' as const, provider: undefined };
   if (provider.type !== 'ok') return provider;
+
+  ctx.payload = prepared.payload;
 
   const result = await run();
   if (result.type !== 'events') return result;
@@ -932,12 +919,4 @@ export const withMessagesWebSearchShim: MessagesInterceptor = async (ctx, gatewa
     ...result,
     events: rewriteMessagesWebSearchEventsToNative(result.events, prepared.state, provider.provider),
   };
-};
-
-// count_tokens has no stream to rewrite, but it must measure the same client-
-// tool and replay-history request shape that generation sends upstream.
-export const withMessagesWebSearchRequestPrepared: MessagesCountTokensInterceptor = async (ctx, _gatewayCtx, run) => {
-  const prepared = prepareMessagesWebSearchInvocation(ctx);
-  if (prepared.type === 'invalid-request') return buildInvalidRequestResponse(prepared.message);
-  return await run();
 };

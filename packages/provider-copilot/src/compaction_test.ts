@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 
-import type { ResponsesInputItem, ResponsesInputText, ResponsesResult } from '@floway-dev/protocols/responses';
+import type { ResponsesInputItem, ResponsesResult } from '@floway-dev/protocols/responses';
 import { compactionResponse } from '@floway-dev/provider';
 
 const generatedResult = (output: unknown[]): ResponsesResult =>
@@ -23,7 +23,7 @@ const shape = (result: ResponsesResult): string[] =>
 test('keeps retained user/assistant/developer/system messages and appends the compaction item, absorbing tool/function items into the blob', () => {
   const input: ResponsesInputItem[] = [
     { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hello' }] },
-    { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'hi' }], phase: 'commentary' },
+    { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'hi' }] },
     { type: 'function_call', id: 'fc_1', call_id: 'call_1', name: 'lookup', arguments: '{}', status: 'completed' },
     { type: 'message', role: 'system', content: 'be nice' },
   ];
@@ -33,27 +33,28 @@ test('keeps retained user/assistant/developer/system messages and appends the co
 
   expect(result.object).toBe('response.compaction');
   expect(shape(result)).toEqual(['message:user', 'message:assistant', 'message:system', 'compaction']);
-  expect((result.output[1] as { phase?: string }).phase).toBe('commentary');
   expect(result.output.at(-1)).toEqual(compaction);
 });
 
 test('normalizes every retained text part to input_text — assistant output_text included', () => {
   const input: ResponsesInputItem[] = [
-    {
-      type: 'message',
-      role: 'assistant',
-      content: [{ type: 'output_text', text: 'reply', prompt_cache_breakpoint: { mode: 'explicit' } }],
-    },
+    { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'reply' }] },
     { type: 'message', role: 'user', content: 'plain string' },
   ];
   const result = compactionResponse(input, generatedResult([compaction]));
 
   // Both retained messages echo with `input_text` parts, regardless of original part type.
-  const assistantPart = (result.output[0] as { content: ResponsesInputText[] }).content[0];
+  const assistantPart = (result.output[0] as { content: Array<{ type: string }> }).content[0];
   const userPart = (result.output[1] as { content: Array<{ type: string }> }).content[0];
   expect(assistantPart.type).toBe('input_text');
-  expect(assistantPart.prompt_cache_breakpoint).toEqual({ mode: 'explicit' });
   expect(userPart.type).toBe('input_text');
+});
+
+test('accepts input messages with the type field omitted (implicit message)', () => {
+  // OpenAI accepts `{role, content}` without `type`; we follow.
+  const input = [{ role: 'user', content: 'hi' }] as unknown as ResponsesInputItem[];
+  const result = compactionResponse(input, generatedResult([compaction]));
+  expect(shape(result)).toEqual(['message:user', 'compaction']);
 });
 
 test('throws when the trigger turn did not return exactly one compaction item', () => {
@@ -128,26 +129,6 @@ test('preserves input_image parts verbatim in retained content', () => {
     { type: 'input_image', image_url: 'data:image/png;base64,AAA', detail: 'auto' },
     { type: 'input_text', text: 'and tell me' },
   ]);
-});
-
-test('preserves input_file parts and prompt cache breakpoints', () => {
-  const input: ResponsesInputItem[] = [{
-    type: 'message',
-    role: 'user',
-    content: [{
-      type: 'input_file',
-      file_id: 'file_1',
-      prompt_cache_breakpoint: { mode: 'explicit' },
-    }],
-  }];
-
-  const result = compactionResponse(input, generatedResult([compaction]));
-
-  expect((result.output[0] as unknown as { content: unknown[] }).content).toEqual([{
-    type: 'input_file',
-    file_id: 'file_1',
-    prompt_cache_breakpoint: { mode: 'explicit' },
-  }]);
 });
 
 test('input_image parts do not consume token budget', () => {

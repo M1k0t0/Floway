@@ -2,7 +2,7 @@ import { test } from 'vitest';
 
 import { injectDefaultInstructions } from './inject-default-instructions.ts';
 import type { ResponsesBoundaryCtx } from './types.ts';
-import type { CanonicalResponsesPayload, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { ResponsesPayload, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 import type { ProviderStreamResult } from '@floway-dev/provider';
 import { assertEquals, stubProviderModel } from '@floway-dev/test-utils';
 
@@ -11,7 +11,7 @@ const stubRequest = {};
 const okEvents = (): Promise<ProviderStreamResult<ResponsesStreamEvent>> =>
   Promise.resolve({ ok: true, events: (async function* () {})(), modelKey: 'test', headers: new Headers() });
 
-const invocation = (payload: CanonicalResponsesPayload): ResponsesBoundaryCtx => ({
+const invocation = (payload: ResponsesPayload): ResponsesBoundaryCtx => ({
   payload,
   headers: new Headers(),
   model: stubProviderModel({ endpoints: { responses: {} } }),
@@ -19,7 +19,7 @@ const invocation = (payload: CanonicalResponsesPayload): ResponsesBoundaryCtx =>
 });
 
 test('injects the default when instructions is absent', async () => {
-  const ctx = invocation({ model: 'gpt-test', input: [{ type: 'message', role: 'user', content: 'hello' }] });
+  const ctx = invocation({ model: 'gpt-test', input: 'hello' });
 
   await injectDefaultInstructions(ctx, stubRequest, okEvents);
 
@@ -27,7 +27,7 @@ test('injects the default when instructions is absent', async () => {
 });
 
 test('injects the default when instructions is an empty string', async () => {
-  const ctx = invocation({ model: 'gpt-test', input: [{ type: 'message', role: 'user', content: 'hello' }], instructions: '' });
+  const ctx = invocation({ model: 'gpt-test', input: 'hello', instructions: '' });
 
   await injectDefaultInstructions(ctx, stubRequest, okEvents);
 
@@ -35,23 +35,11 @@ test('injects the default when instructions is an empty string', async () => {
 });
 
 test('preserves a caller-supplied instructions string', async () => {
-  const ctx = invocation({ model: 'gpt-test', input: [{ type: 'message', role: 'user', content: 'hello' }], instructions: 'You are a pirate.' });
+  const ctx = invocation({ model: 'gpt-test', input: 'hello', instructions: 'You are a pirate.' });
 
   await injectDefaultInstructions(ctx, stubRequest, okEvents);
 
   assertEquals(ctx.payload.instructions, 'You are a pirate.');
-});
-
-test('preserves malformed instructions for upstream validation', async () => {
-  const ctx = invocation({
-    model: 'gpt-test',
-    input: [{ type: 'message', role: 'user', content: 'hello' }],
-    instructions: 42 as unknown as string,
-  });
-
-  await injectDefaultInstructions(ctx, stubRequest, okEvents);
-
-  assertEquals(ctx.payload.instructions, 42);
 });
 
 test('injects the default and preserves input items it does not own', async () => {

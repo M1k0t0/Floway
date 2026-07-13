@@ -4,57 +4,45 @@ import { responsesReasoningToMessagesBlock, unpackReasoningSignature } from '../
 import type { ChatCompletionsReasoningItem, ChatCompletionsMessage } from '@floway-dev/protocols/chat-completions';
 import type { GeminiContent } from '@floway-dev/protocols/gemini';
 import type { MessagesAssistantContentBlock, MessagesMessage } from '@floway-dev/protocols/messages';
-import type { CanonicalResponsesPayload, ResponsesEasyInputMessage, ResponsesInputItem, ResponsesPayload } from '@floway-dev/protocols/responses';
+import type { ResponsesEasyInputMessage, ResponsesInputItem, ResponsesRequestPayload } from '@floway-dev/protocols/responses';
+
+// Wire `ResponsesPayload.input` accepts a bare string and EasyInputMessage
+// objects whose `type: "message"` discriminator is omitted. The gateway's
+// canonical internal shape is an explicitly discriminated item array: every
+// consumer past HTTP / WS entry normalization or cross-protocol translation
+// sees `type: "message"` on every message.
+// The name is owned here because `*-via-responses` translators produce this
+// shape directly — their `buildTargetRequest` always constructs an array —
+// so the boundary between "wire" and "canonical" naturally sits at the
+// translator's return type.
+export type CanonicalResponsesPayload = Omit<ResponsesRequestPayload, 'input'> & {
+  input: ResponsesInputItem[];
+};
+
+const isImplicitEasyInputMessage = (value: unknown): value is ResponsesEasyInputMessage & { type?: undefined } => {
+  if (typeof value !== 'object' || value === null) return false;
+  const message = value as Record<string, unknown>;
+  if (message.type !== undefined) return false;
+  if (message.role !== 'user' && message.role !== 'assistant' && message.role !== 'system' && message.role !== 'developer') return false;
+  return typeof message.content === 'string' || Array.isArray(message.content);
+};
 
 // Lifts a wire `ResponsesPayload` to canonical form. Called at every wire
 // boundary that produces a payload destined for internal use and by direct
 // Responses-source translators; cross-protocol translators already construct
 // `CanonicalResponsesPayload` with explicit message discriminators.
-export function canonicalizeResponsesPayload(value: unknown): CanonicalResponsesPayload {
-  const isImplicitEasyInputMessage = (item: unknown): item is ResponsesEasyInputMessage & { type?: undefined } => {
-    if (typeof item !== 'object' || item === null) return false;
-    const message = item as Record<string, unknown>;
-    if (message.type !== undefined) return false;
-    if (message.role !== 'user' && message.role !== 'assistant' && message.role !== 'system' && message.role !== 'developer') return false;
-    return typeof message.content === 'string'
-      || (Array.isArray(message.content) && message.content.every(part => {
-        if (typeof part !== 'object' || part === null) return false;
-        const content = part as Record<string, unknown>;
-        switch (content.type) {
-        case 'input_text':
-        case 'output_text':
-          return typeof content.text === 'string';
-        case 'input_image':
-          return (typeof content.image_url === 'string' || typeof content.file_id === 'string') && typeof content.detail === 'string';
-        case 'input_file':
-          return true;
-        default:
-          return false;
+export const canonicalizeResponsesPayload = (payload: ResponsesRequestPayload): CanonicalResponsesPayload => ({
+  ...payload,
+  input: typeof payload.input === 'string'
+    ? [{ type: 'message', role: 'user', content: payload.input }]
+    : payload.input.map((item, index) => {
+        if (isImplicitEasyInputMessage(item)) return { ...item, type: 'message' };
+        if (typeof item !== 'object' || item === null || (item as { type?: unknown }).type === undefined) {
+          throw new TranslatorInputError('Untyped Responses input items require a valid role and content.', { param: `input[${index}]` });
         }
-      }));
-  };
-
-  if (typeof value !== 'object' || value === null) {
-    throw new TranslatorInputError('Responses payload must be an object.');
-  }
-  const payload = value as ResponsesPayload;
-  const input: unknown = payload.input;
-  if (typeof input !== 'string' && !Array.isArray(input)) {
-    throw new TranslatorInputError('Responses input must be a string or an array.', { param: 'input' });
-  }
-  return {
-    ...payload,
-    input: typeof input === 'string'
-      ? [{ type: 'message', role: 'user', content: input }]
-      : input.map((item, index) => {
-          if (isImplicitEasyInputMessage(item)) return { ...item, type: 'message' };
-          if (typeof item !== 'object' || item === null || (item as { type?: unknown }).type === undefined) {
-            throw new TranslatorInputError('Untyped Responses input items require a valid role and content.', { param: `input[${index}]` });
-          }
-          return item as ResponsesInputItem;
-        }),
-  };
-}
+        return item as ResponsesInputItem;
+      }),
+});
 
 export type ResponsesItemMapper = (
   item: ResponsesInputItem,

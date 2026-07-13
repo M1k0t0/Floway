@@ -36,9 +36,7 @@ export interface GeminiAttemptCountTokensArgs {
 
 export const geminiAttempt = {
   generate: async (args: GeminiAttemptGenerateArgs): Promise<ExecuteResult<ProtocolFrame<GeminiStreamEvent>>> => {
-    const { payload: sourcePayload, ctx, candidate, headers: sourceHeaders } = args;
-    const payload = structuredClone(sourcePayload);
-    const headers = new Headers(sourceHeaders);
+    const { payload, ctx, candidate, headers } = args;
     const targetApi = geminiGenerateTarget.pick(candidate.model.endpoints);
     const invocation: GeminiInvocation = { payload, candidate, targetApi, headers };
     return await runInterceptors(invocation, ctx, geminiInterceptors, async () => {
@@ -82,9 +80,7 @@ export const geminiAttempt = {
   },
 
   countTokens: async (args: GeminiAttemptCountTokensArgs): Promise<PlainResult> => {
-    const { payload: sourcePayload, ctx, candidate, headers: sourceHeaders } = args;
-    const payload = structuredClone(sourcePayload);
-    const headers = new Headers(sourceHeaders);
+    const { payload, ctx, candidate, headers } = args;
     const targetApi = geminiCountTokensTarget.pick(candidate.model.endpoints);
     const invocation: GeminiInvocation = { payload, candidate, targetApi, headers };
     return await runInterceptors(invocation, ctx, geminiCountTokensInterceptors, async () => {
@@ -94,13 +90,13 @@ export const geminiAttempt = {
       // shipped Gemini interceptors that mutate the payload pre-dispatch
       // cannot run via the countTokens interceptor list — the post-`run()`
       // ones inspect event streams the result type cannot carry — so the
-      // payload-mutators are applied inline here before translation; the
-      // attempt-owned payload clone keeps the caller's source intact.
+      // payload-mutators are applied inline here on a structuredClone of
+      // the source so the caller's payload stays intact.
       const transCtx = {
         model: candidate.model.id,
         fallbackMaxOutputTokens: candidate.model.limits.max_output_tokens,
       };
-      const cleaned = invocation.payload;
+      const cleaned = structuredClone(invocation.payload);
       stripUnsupportedPartFieldsFromPayload(cleaned);
       stripUnsupportedToolsFromPayload(cleaned);
       delete cleaned.safetySettings;

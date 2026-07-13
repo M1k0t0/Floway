@@ -3,7 +3,7 @@ import { beforeEach, test } from 'vitest';
 import {
   buildGenerationsBody,
   buildImageGenerationFunctionTool,
-  inspectImageSources,
+  collectImageSources,
   DEFAULT_IMAGE_MODEL,
   type ImageGenerationConfig,
   type ImageOutcome,
@@ -21,8 +21,9 @@ import { initRepo } from '../../../../../repo/index.ts';
 import { InMemoryRepo } from '../../../../../repo/memory.ts';
 import { mockChatGatewayCtx } from '../../../../../test-helpers/gateway-ctx.ts';
 import type { ResponsesInvocation } from '../types.ts';
-import type { CanonicalResponsesPayload, ResponsesInputItem, ResponsesPayload, ResponsesTool } from '@floway-dev/protocols/responses';
+import type { ResponsesInputItem, ResponsesPayload, ResponsesTool } from '@floway-dev/protocols/responses';
 import { assert, assertEquals, assertFalse, assertStringIncludes, stubModelCandidate } from '@floway-dev/test-utils';
+import type { CanonicalResponsesPayload } from '@floway-dev/translate/via-responses/responses-items';
 
 const PNG_B64 = 'aGVsbG8='; // "hello" — any decodable base64 works for source tests.
 
@@ -46,14 +47,6 @@ beforeEach(() => {
 const imageMessage = (mime: string): ResponsesInputItem => ({
   type: 'message', role: 'user', content: [{ type: 'input_image', image_url: `data:${mime};base64,${PNG_B64}`, detail: 'auto' }],
 });
-
-const fileIdImageMessage: ResponsesInputItem = {
-  type: 'message', role: 'user', content: [{ type: 'input_image', file_id: 'file_1', detail: 'auto' }],
-};
-
-const remoteImageMessage: ResponsesInputItem = {
-  type: 'message', role: 'user', content: [{ type: 'input_image', image_url: 'https://example.com/a.png', detail: 'auto' }],
-};
 
 // ── isHostedImageGenerationTool ──
 
@@ -206,9 +199,9 @@ test('buildImageGenerationFunctionTool exposes only an optional prompt and is no
   assertEquals(params.additionalProperties, false);
 });
 
-// ── inspectImageSources ──
+// ── collectImageSources ──
 
-test('inspectImageSources reads input_image blocks and image_generation_call results', () => {
+test('collectImageSources reads input_image blocks and image_generation_call results', () => {
   const input: ResponsesInputItem[] = [
     {
       type: 'message', role: 'user', content: [
@@ -218,12 +211,11 @@ test('inspectImageSources reads input_image blocks and image_generation_call res
     },
     { type: 'image_generation_call', id: 'ig_prev', status: 'completed', result: PNG_B64 },
   ];
-  const { sources, hasUnresolvableInputImage } = inspectImageSources(input);
+  const sources = collectImageSources(input);
   assertEquals(sources.length, 2);
-  assertEquals(hasUnresolvableInputImage, false);
 });
 
-test('inspectImageSources marks http(s) image urls as unresolvable', () => {
+test('collectImageSources skips http(s) image urls (remote fetch unsupported)', () => {
   const input: ResponsesInputItem[] = [
     {
       type: 'message', role: 'user', content: [
@@ -231,22 +223,18 @@ test('inspectImageSources marks http(s) image urls as unresolvable', () => {
       ],
     },
   ];
-  const { sources, hasUnresolvableInputImage } = inspectImageSources(input);
-  assertEquals(sources.length, 0);
-  assertEquals(hasUnresolvableInputImage, true);
+  assertEquals(collectImageSources(input).length, 0);
 });
 
-test('inspectImageSources reads tool-result images and preserves forward order', () => {
+test('collectImageSources reads tool-result images and preserves forward order', () => {
   const input: ResponsesInputItem[] = [
     { type: 'function_call_output', call_id: 'c1', output: [{ type: 'input_image', image_url: `data:image/png;base64,${PNG_B64}`, detail: 'auto' }] },
-    { type: 'custom_tool_call_output', call_id: 'c2', output: [{ type: 'input_image', image_url: `data:image/jpeg;base64,${PNG_B64}`, detail: 'auto' }] },
     { type: 'message', role: 'user', content: [{ type: 'input_image', image_url: `data:image/webp;base64,${PNG_B64}`, detail: 'auto' }] },
   ];
-  const { sources } = inspectImageSources(input);
-  assertEquals(sources.length, 3);
+  const sources = collectImageSources(input);
+  assertEquals(sources.length, 2);
   assertEquals(sources[0].mimeType, 'image/png');
-  assertEquals(sources[1].mimeType, 'image/jpeg');
-  assertEquals(sources[2].mimeType, 'image/webp');
+  assertEquals(sources[1].mimeType, 'image/webp');
 });
 
 // ── transformInputItemsForImageGeneration ──
@@ -504,42 +492,6 @@ test('imageGenerationServerTool rejects an unsupported edit input format up fron
   assertEquals(result.code, 'unsupported_file_mimetype');
   assertEquals(result.param, 'input');
   assertStringIncludes(result.message, 'image/gif');
-});
-
-test('imageGenerationServerTool rejects file_id-only images when action may edit', async () => {
-  const result = await imageGenerationServerTool(
-    makeCtx({ tools: [{ type: 'image_generation' }], input: [fileIdImageMessage] }),
-    gatewayCtx(),
-  );
-  assert(result.type === 'invalid-request');
-  assertEquals(result.code, 'invalid_value');
-  assertEquals(result.param, 'input');
-  assertStringIncludes(result.message, 'inline decodable data URL');
-});
-
-test('imageGenerationServerTool rejects remote images when action may edit', async () => {
-  const result = await imageGenerationServerTool(
-    makeCtx({ tools: [{ type: 'image_generation' }], input: [remoteImageMessage] }),
-    gatewayCtx(),
-  );
-  assert(result.type === 'invalid-request');
-  assertEquals(result.code, 'invalid_value');
-});
-
-test('imageGenerationServerTool accepts file_id-only context for explicit generation', async () => {
-  const result = await imageGenerationServerTool(
-    makeCtx({ tools: [{ type: 'image_generation', action: 'generate' }], input: [fileIdImageMessage] }),
-    gatewayCtx(),
-  );
-  assert(result.type === 'active');
-});
-
-test('imageGenerationServerTool accepts remote image context for explicit generation', async () => {
-  const result = await imageGenerationServerTool(
-    makeCtx({ tools: [{ type: 'image_generation', action: 'generate' }], input: [remoteImageMessage] }),
-    gatewayCtx(),
-  );
-  assert(result.type === 'active');
 });
 
 test('imageGenerationServerTool accepts webp input for editing', async () => {

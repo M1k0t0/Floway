@@ -32,7 +32,7 @@ const imageUrl = (payload: ChatCompletionsPayload): string => {
 test('rewrites a base64 image_url data URL to a WebP data URL', async () => {
   initImageProcessor(fixedProcessor);
 
-  const payload: ChatCompletionsPayload = {
+  const ctx = invocation({
     model: 'gpt-test',
     messages: [
       {
@@ -43,13 +43,11 @@ test('rewrites a base64 image_url data URL to a WebP data URL', async () => {
         ],
       },
     ],
-  };
-  const ctx = invocation(payload);
+  });
 
   await withInlineImagesCompressed(ctx, stubRequest, okEvents);
 
   assertEquals(imageUrl(ctx.payload), 'data:image/webp;base64,AQID');
-  assertEquals(imageUrl(payload), 'data:image/png;base64,AAAA');
 });
 
 test('leaves remote https image references untouched', async () => {

@@ -35,9 +35,7 @@ export interface MessagesAttemptArgs {
 
 export const messagesAttempt = {
   generate: async (args: MessagesAttemptArgs): Promise<ExecuteResult<ProtocolFrame<MessagesStreamEvent>>> => {
-    const { payload: sourcePayload, ctx, candidate, headers: sourceHeaders } = args;
-    const payload = { ...structuredClone(sourcePayload), model: candidate.model.id };
-    const headers = new Headers(sourceHeaders);
+    const { payload, ctx, candidate, headers } = args;
     const { store } = ctx;
     const targetApi = messagesGenerateTarget.pick(candidate.model.endpoints);
     const rewritten = await rewriteOrRenderMessagesFailure(payload, store, candidate);
@@ -83,9 +81,7 @@ export const messagesAttempt = {
   },
 
   countTokens: async (args: MessagesAttemptArgs): Promise<PlainResult> => {
-    const { payload: sourcePayload, ctx, candidate, headers: sourceHeaders } = args;
-    const payload = { ...structuredClone(sourcePayload), model: candidate.model.id };
-    const headers = new Headers(sourceHeaders);
+    const { payload, ctx, candidate, headers } = args;
     const { store } = ctx;
     // `pick` here is contractually total — serve filtered with
     // `messagesCountTokensTarget.canServe`, so a non-messages candidate is

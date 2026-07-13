@@ -13,12 +13,35 @@ import type { ResponsesCompactionTriggerItem, ResponsesInputContent, ResponsesIn
 
 export const COMPACTION_TRIGGER: ResponsesCompactionTriggerItem = { type: 'compaction_trigger' };
 
+// Native compact retains `user` + `assistant` + `developer` + `system` —
+// confirmed empirically against an OpenAI long fixture (287 user + 286
+// assistant messages co-retained). Only tool/function items are absorbed by
+// the encrypted blob. codex's `is_retained_for_remote_compaction_v2` drops
+// assistant; production captures show the server keeps it.
+const RETAINED_ROLES = new Set(['user', 'assistant', 'developer', 'system']);
+
 // codex's retained-message budget (its comment notes it mirrors the server-side
 // `/responses/compact` default) and its token heuristic `ceil(utf8_bytes / 4)`,
 // with images costing nothing.
 const RETAINED_BUDGET_TOKENS = 64_000;
 const APPROX_BYTES_PER_TOKEN = 4;
 const encoder = new TextEncoder();
+
+// Native compact echoes every text part — including assistant `output_text` —
+// as `input_text` so the client can resend `output` verbatim as next-turn
+// `input`. Normalize unconditionally; images pass through (and cost 0 tokens
+// against the retained budget).
+const normalizeContent = (content: ResponsesInputMessage['content']): ResponsesInputContent[] => {
+  if (typeof content === 'string') return [{ type: 'input_text', text: content }];
+  return content.map(part => (part.type === 'input_image' ? part : { type: 'input_text', text: part.text }));
+};
+
+// OpenAI accepts input messages with the `type` field omitted (implicit
+// `type: "message"`); accept the same so a hand-rolled client that emits
+// `{role, content}` without `type` still routes correctly.
+const isRetainedMessage = (item: ResponsesInputItem): item is ResponsesInputMessage =>
+  (item.type === 'message' || (item.type === undefined && 'role' in (item as { role?: unknown })))
+  && RETAINED_ROLES.has((item as ResponsesInputMessage).role);
 
 // The retained items are input-shaped messages (role + `input_text` content),
 // which is what `/responses/compact` echoes so the client can resend `output`
@@ -37,24 +60,18 @@ export const compactionResponse = (input: ResponsesInputItem[], generated: Respo
   let used = 0;
   for (let i = input.length - 1; i >= 0; i -= 1) {
     const item = input[i];
-    if (item.type !== 'message') continue;
+    if (!isRetainedMessage(item)) continue;
 
-    // Native compact echoes assistant output_text as input_text; every other
-    // canonical content part remains unchanged for the next turn.
-    const content: ResponsesInputContent[] = typeof item.content === 'string'
-      ? [{ type: 'input_text', text: item.content }]
-      : item.content.map(part => part.type === 'output_text' ? { ...part, type: 'input_text' } : part);
-    const tokens = content.reduce((sum, part) =>
-      part.type === 'input_text'
-        ? sum + Math.ceil(encoder.encode(part.text).length / APPROX_BYTES_PER_TOKEN)
-        : sum, 0);
+    const content = normalizeContent(item.content);
+    const tokens = content.reduce((sum, part) => (part.type === 'input_image' ? sum : sum + Math.ceil(encoder.encode(part.text).length / APPROX_BYTES_PER_TOKEN)), 0);
     used += Math.max(tokens, 1);
     if (used > RETAINED_BUDGET_TOKENS && kept.length > 0) break;
 
     kept.push({
-      ...item,
+      type: 'message',
       id: item.id ?? `msg_${crypto.randomUUID().replace(/-/g, '')}`,
       status: item.status ?? 'completed',
+      role: item.role,
       content,
     });
   }

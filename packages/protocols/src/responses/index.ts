@@ -3,19 +3,9 @@
 
 // ── Request types ──
 
-// Supported for gpt-5.6+. Slots remain open-string so future modes and
-// lifetimes reach the upstream unchanged.
-// https://github.com/openai/openai-python/blob/f16fbbd2bd25dc1ff150b5f78dbd15ff6bab6d91/src/openai/types/responses/response_compact_params.py#L144-L184
-export interface ResponsesPromptCacheOptions {
-  mode?: 'implicit' | 'explicit' | (string & {});
-  ttl?: '30m' | (string & {});
-}
-
-export type ResponsesPromptCacheRetention = 'in_memory' | '24h' | (string & {});
-
 export interface ResponsesPayload {
   model: string;
-  input: string | ResponsesRequestInputItem[];
+  input: string | ResponsesInputItem[];
   previous_response_id?: string | null;
   instructions?: string | null;
   temperature?: number | null;
@@ -54,8 +44,6 @@ export interface ResponsesPayload {
   // Reference: https://platform.openai.com/docs/api-reference/responses/create
   text?: { format?: Record<string, unknown> | null; verbosity?: string | null } | null;
   prompt_cache_key?: string | null;
-  prompt_cache_options?: ResponsesPromptCacheOptions | null;
-  prompt_cache_retention?: ResponsesPromptCacheRetention | null;
   safety_identifier?: string | null;
   service_tier?: 'default' | 'auto' | 'flex' | 'priority' | 'scale' | (string & {}) | null;
 }
@@ -70,12 +58,11 @@ export interface ResponsesPayload {
 // Reference: https://developers.openai.com/api/reference/resources/responses/methods/compact
 export interface ResponsesCompactPayload {
   model: string;
-  input: string | ResponsesRequestInputItem[];
+  input: string | ResponsesInputItem[];
   instructions?: string | null;
   previous_response_id?: string | null;
   prompt_cache_key?: string | null;
-  prompt_cache_options?: ResponsesPromptCacheOptions | null;
-  prompt_cache_retention?: ResponsesPromptCacheRetention | null;
+  prompt_cache_retention?: 'in_memory' | '24h' | null;
   service_tier?: 'default' | 'auto' | 'flex' | 'priority' | 'scale' | (string & {}) | null;
   // Gateway-only: controls whether the compact response's output items + the
   // committed snapshot persist. Forwarded NEITHER to upstream nor to the
@@ -83,24 +70,20 @@ export interface ResponsesCompactPayload {
   store?: boolean | null;
 }
 
-export type CanonicalResponsesCompactPayload = Omit<ResponsesCompactPayload, 'input'> & {
-  input: ResponsesInputItem[];
-};
-
 // Project a (possibly-wider) ResponsesPayload-shaped object into the strict
 // compact wire shape. Every native-compact provider terminal calls this
 // before dispatching to its upstream's `/responses/compact` endpoint, so a
 // post-chain action pivot that arrived carrying generate-only fields
 // (tools/temperature/reasoning/...) cannot leak them onto the compact wire.
 // `model` and `store` are caller-supplied at the dispatch site (model is
-// the resolved upstream id; store is gateway-only).
-export const toCompactPayloadShape = (payload: Omit<CanonicalResponsesPayload, 'model'>): Omit<CanonicalResponsesCompactPayload, 'model' | 'store'> => ({
+// the resolved upstream id; store is gateway-only). `prompt_cache_retention`
+// only exists on the compact payload type today, so there is no
+// generate-side value to forward.
+export const toCompactPayloadShape = (payload: Omit<ResponsesPayload, 'model'>): Omit<ResponsesCompactPayload, 'model' | 'store'> => ({
   input: payload.input,
   ...(payload.instructions !== undefined && { instructions: payload.instructions }),
   ...(payload.previous_response_id !== undefined && { previous_response_id: payload.previous_response_id }),
   ...(payload.prompt_cache_key !== undefined && { prompt_cache_key: payload.prompt_cache_key }),
-  ...(payload.prompt_cache_options !== undefined && { prompt_cache_options: payload.prompt_cache_options }),
-  ...(payload.prompt_cache_retention !== undefined && { prompt_cache_retention: payload.prompt_cache_retention }),
   ...(payload.service_tier !== undefined && { service_tier: payload.service_tier }),
 });
 
@@ -140,15 +123,12 @@ export type ResponsesInputItem =
   | ResponsesMcpApprovalRequestItem
   | ResponsesMcpApprovalResponseItem;
 
-export type ResponsesMessagePhase = 'commentary' | 'final_answer' | (string & {}) | null;
-
 export interface ResponsesInputMessage {
   type: 'message';
   id?: string;
   status?: string;
   role: 'user' | 'assistant' | 'system' | 'developer';
   content: string | ResponsesInputContent[];
-  phase?: ResponsesMessagePhase;
 }
 
 // The Responses request schema's EasyInputMessage makes the constant
@@ -159,7 +139,6 @@ export interface ResponsesInputMessage {
 export interface ResponsesEasyInputMessage {
   content: string | ResponsesInputContent[];
   role: 'user' | 'assistant' | 'system' | 'developer';
-  phase?: ResponsesMessagePhase;
   type?: 'message';
 }
 
@@ -167,36 +146,24 @@ export type ResponsesRequestInputItem =
   | ResponsesEasyInputMessage
   | ResponsesInputItem;
 
-export type CanonicalResponsesPayload = Omit<ResponsesPayload, 'input'> & {
-  input: ResponsesInputItem[];
+export type ResponsesRequestPayload = Omit<ResponsesPayload, 'input'> & {
+  input: string | ResponsesRequestInputItem[];
 };
 
-export type ResponsesInputContent = ResponsesInputText | ResponsesInputImage | ResponsesInputFile;
-
-// Explicit content breakpoints inherit their lifetime from
-// `prompt_cache_options.ttl`. The mode stays open-string for forward
-// compatibility.
-// https://github.com/openai/openai-node/blob/61539248cbe04665de68a71e6fd878127ae4db87/src/resources/responses/responses.ts#L5009-L5038
-// https://github.com/openai/openai-node/blob/61539248cbe04665de68a71e6fd878127ae4db87/src/resources/responses/responses.ts#L3973-L3993
-// https://github.com/openai/openai-node/blob/61539248cbe04665de68a71e6fd878127ae4db87/src/resources/responses/responses.ts#L3864-L3884
-export interface ResponsesPromptCacheBreakpoint {
-  mode: 'explicit' | (string & {});
-}
+export type ResponsesInputContent = ResponsesInputText | ResponsesInputImage;
 
 export interface ResponsesInputText {
   type: 'input_text' | 'output_text';
   text: string;
-  prompt_cache_breakpoint?: ResponsesPromptCacheBreakpoint | null;
 }
 
 export interface ResponsesInputImage {
-  // https://github.com/openai/openai-node/blob/61539248cbe04665de68a71e6fd878127ae4db87/src/resources/responses/responses.ts#L3947-L3979
   type: 'input_image';
-  image_url?: string | null;
-  file_id?: string | null;
-  detail: 'auto' | 'low' | 'high' | 'original' | (string & {});
-  prompt_cache_breakpoint?: ResponsesPromptCacheBreakpoint | null;
+  image_url: string;
+  detail: 'auto' | 'low' | 'high';
 }
+
+export type ResponsesToolOutputContent = ResponsesInputText | ResponsesInputImage | ResponsesInputFile;
 
 export interface ResponsesInputFile {
   type: 'input_file';
@@ -205,7 +172,6 @@ export interface ResponsesInputFile {
   file_id?: string | null;
   file_url?: string;
   filename?: string;
-  prompt_cache_breakpoint?: ResponsesPromptCacheBreakpoint | null;
   [key: string]: unknown;
 }
 
@@ -265,7 +231,7 @@ export interface ResponsesCustomToolCallItem {
 export interface ResponsesCustomToolCallOutputItem {
   type: 'custom_tool_call_output';
   call_id: string;
-  output: string | ResponsesInputContent[];
+  output: string | ResponsesToolOutputContent[];
   id?: string;
   status?: string;
   caller?: ResponsesToolCaller | null;
@@ -725,7 +691,6 @@ export interface ResponsesOutputMessage {
   status?: string;
   role: 'assistant';
   content: ResponsesOutputContentBlock[];
-  phase?: ResponsesMessagePhase;
 }
 
 export type ResponsesOutputContentBlock = ResponsesOutputText | ResponsesOutputRefusal;

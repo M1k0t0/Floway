@@ -1,6 +1,22 @@
 import { TranslatorInputError } from '../../translator-input-error.ts';
 import type { ResponsesInputItem, ResponsesPayload } from '@floway-dev/protocols/responses';
 
+export const requiresNativeResponses = (payload: ResponsesPayload): boolean => {
+  const toolChoice = payload.tool_choice;
+  return Array.isArray(payload.input) && payload.input.some(item =>
+    item.type === 'additional_tools'
+    || item.type === 'program'
+    || item.type === 'program_output'
+    || item.type === 'agent_message'
+    || item.type === 'multi_agent_call'
+    || item.type === 'multi_agent_call_output'
+    || item.type === 'context_compaction'
+    || isProgramCaller(item))
+    || payload.tools?.some(hasProgrammaticCaller) === true
+    || payload.tools?.some(hasDeferredTool) === true
+    || toolChoice !== null && typeof toolChoice === 'object' && toolChoice.type === 'programmatic_tool_calling';
+};
+
 export const rejectProgrammaticResponsesPayload = (payload: ResponsesPayload, target: string): void => {
   const toolChoice = payload.tool_choice;
   if (payload.tools?.some(hasProgrammaticCaller) === true || (toolChoice !== null && typeof toolChoice === 'object' && toolChoice.type === 'programmatic_tool_calling')) {
@@ -26,10 +42,14 @@ const hasDeferredTool = (tool: unknown): boolean => {
   return Array.isArray(record.tools) && record.tools.some(hasDeferredTool);
 };
 
-export const rejectProgramCaller = (item: ResponsesInputItem): void => {
-  if (!('caller' in item)) return;
+const isProgramCaller = (item: ResponsesInputItem): item is ResponsesInputItem & { call_id: string; caller: { type: 'program'; caller_id: string } } => {
+  if (!('caller' in item)) return false;
   const caller = item.caller;
-  if (typeof caller === 'object' && caller !== null && 'type' in caller && caller.type === 'program') {
+  return typeof caller === 'object' && caller !== null && 'type' in caller && caller.type === 'program';
+};
+
+export const rejectProgramCaller = (item: ResponsesInputItem): void => {
+  if (isProgramCaller(item)) {
     throw new TranslatorInputError(`Cannot translate ${item.type} '${item.call_id}' with a program caller.`);
   }
 };

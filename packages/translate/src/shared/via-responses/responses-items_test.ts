@@ -19,7 +19,6 @@ test('canonicalizes string and implicit-message wire inputs', () => {
     model: 'gpt-test',
     input: [
       { role: 'system', content: 'rules', phase: 'future_phase' },
-      { role: 'user', content: [{ type: 'input_image', file_id: 'file_1', detail: 'original' }] },
       { type: 'message', role: 'user', content: 'hello' },
       { type: 'function_call_output', call_id: 'call_1', output: 'result' },
     ],
@@ -27,7 +26,6 @@ test('canonicalizes string and implicit-message wire inputs', () => {
     model: 'gpt-test',
     input: [
       { type: 'message', role: 'system', content: 'rules', phase: 'future_phase' },
-      { type: 'message', role: 'user', content: [{ type: 'input_image', file_id: 'file_1', detail: 'original' }] },
       { type: 'message', role: 'user', content: 'hello' },
       { type: 'function_call_output', call_id: 'call_1', output: 'result' },
     ],
@@ -40,9 +38,6 @@ test('rejects malformed untyped input items at the canonical boundary', () => {
     42,
     { content: 'missing role' },
     { role: 'unknown', content: 'invalid role' },
-    { role: 'user', content: [null] },
-    { role: 'user', content: [{}] },
-    { role: 'user', content: [{ type: 'input_text' }] },
   ]) {
     const error = assertThrows(
       () => canonicalizeResponsesPayload({
@@ -54,25 +49,6 @@ test('rejects malformed untyped input items at the canonical boundary', () => {
     ) as TranslatorInputError;
     assertEquals(error.param, 'input[0]');
   }
-});
-
-test('rejects a missing or malformed input container', () => {
-  for (const input of [undefined, null, 42, { role: 'user', content: 'hello' }]) {
-    const error = assertThrows(
-      () => canonicalizeResponsesPayload({ model: 'gpt-test', input } as unknown as ResponsesPayload),
-      TranslatorInputError,
-      'string or an array',
-    ) as TranslatorInputError;
-    assertEquals(error.param, 'input');
-  }
-});
-
-test('rejects a non-object top-level payload', () => {
-  assertThrows(
-    () => canonicalizeResponsesPayload(null as unknown as ResponsesPayload),
-    TranslatorInputError,
-    'payload must be an object',
-  );
 });
 
 test('mapAsResponsesItems maps Responses input items through the callback', async () => {

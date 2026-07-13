@@ -7,7 +7,6 @@ import type { StatefulResponsesStore } from '../items/store.ts';
 import type { InterceptorRun } from '@floway-dev/interceptor';
 import { eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type {
-  CanonicalResponsesPayload,
   ResponsesHostedTool,
   ResponsesInputItem,
   ResponsesOutputItem,
@@ -17,6 +16,7 @@ import type {
   ResponsesToolChoice,
 } from '@floway-dev/protocols/responses';
 import type { EventResultMetadata, ExecuteResult } from '@floway-dev/provider';
+import type { CanonicalResponsesPayload } from '@floway-dev/translate/via-responses/responses-items';
 
 export interface MergeUsage {
   input_tokens?: number;

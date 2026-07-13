@@ -13,7 +13,7 @@ import {
   putCodexQuota,
 } from './quota.ts';
 import type { CodexAccountCredential } from './state.ts';
-import type { CanonicalResponsesCompactPayload, CanonicalResponsesPayload, ResponsesInputItem, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { ResponsesCompactPayload, ResponsesPayload, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 import { parseResponsesStream } from '@floway-dev/protocols/responses';
 import { type ProviderModel, type ProviderStreamResult, streamingProviderCall, uuidV7, type UpstreamCallOptions } from '@floway-dev/provider';
 
@@ -38,20 +38,19 @@ interface CodexBackendCallBase {
   account: CodexAccountCredential;
   model: ProviderModel;
   headers: Headers;
+  turnMetadata?: CodexTurnMetadataOptions;
   signal?: AbortSignal;
   effects: CodexCallEffects;
   call: UpstreamCallOptions;
 }
 
 export interface CallCodexResponsesOptions extends CodexBackendCallBase {
-  body: Omit<CanonicalResponsesPayload, 'model'>;
+  body: Omit<ResponsesPayload, 'model'>;
 }
 
 export interface CallCodexResponsesCompactOptions extends CodexBackendCallBase {
-  body: Omit<CanonicalResponsesCompactPayload, 'model' | 'store'>;
+  body: Omit<ResponsesCompactPayload, 'model' | 'store'>;
 }
-
-type CodexResponsesBody = CallCodexResponsesOptions['body'] | CallCodexResponsesCompactOptions['body'];
 
 export const callCodexResponses = async (opts: CallCodexResponsesOptions): Promise<ProviderStreamResult<ResponsesStreamEvent>> => {
   const ready = await prepareCodexCall(opts);
@@ -95,18 +94,20 @@ interface CodexRequestIdentity {
   windowId: string;
 }
 
-interface CodexTurnMetadataOptions {
-  requestKind: 'turn' | 'compaction';
-  compaction?: {
-    trigger: 'manual' | 'auto';
-    reason: 'user_requested' | 'context_limit';
-    implementation: 'responses_compact' | 'responses_compaction_v2';
-    phase: 'standalone_turn' | 'mid_turn';
-    strategy: 'memento';
-  };
+export interface CodexCompactionTurnMetadata {
+  trigger: 'manual' | 'auto';
+  reason: 'user_requested' | 'context_limit';
+  implementation: 'responses_compact' | 'responses_compaction_v2';
+  phase: 'standalone_turn' | 'mid_turn';
+  strategy: 'memento';
 }
 
-const CODEX_RESPONSES_COMPACTION_V2_TURN_METADATA: CodexTurnMetadataOptions = {
+export interface CodexTurnMetadataOptions {
+  requestKind: 'turn' | 'compaction';
+  compaction?: CodexCompactionTurnMetadata;
+}
+
+export const CODEX_RESPONSES_COMPACTION_V2_TURN_METADATA: CodexTurnMetadataOptions = {
   requestKind: 'compaction',
   compaction: {
     trigger: 'manual',
@@ -133,8 +134,9 @@ const stringField = (record: Record<string, unknown> | null, key: string): strin
   return trimmed.length > 0 ? trimmed : null;
 };
 
-const clientCodexClientMetadata = (body: CodexResponsesBody): Record<string, unknown> => {
-  const candidate = (body as { client_metadata?: unknown }).client_metadata;
+const clientCodexClientMetadata = (body: unknown): Record<string, unknown> => {
+  if (!isPlainObject(body)) return {};
+  const candidate = body.client_metadata;
   return isPlainObject(candidate) ? candidate : {};
 };
 
@@ -163,7 +165,7 @@ const IDENTITY_MIRRORED_CLIENT_METADATA_KEYS = new Set<string>([
 
 const buildCodexRequestIdentity = async (
   opts: CodexBackendCallBase,
-  body: CodexResponsesBody,
+  body: unknown,
   clientMetadata: Record<string, unknown>,
   clientTurnMetadata: Record<string, unknown> | null,
 ): Promise<CodexRequestIdentity> => {
@@ -205,18 +207,34 @@ const buildCodexRequestIdentity = async (
 // code path with the input already expanded from the snapshot in
 // attempt.ts, so they hash the same prefix as the original turn and get
 // the same session id — no server-side session map required.
-const deriveSessionIdFromInput = async (body: CodexResponsesBody): Promise<string | null> => {
-  const collected: ResponsesInputItem[] = [];
-  for (const item of body.input) {
+const deriveSessionIdFromInput = async (body: unknown): Promise<string | null> => {
+  if (!isPlainObject(body)) return null;
+  const seed = seedUpToFirstUserMessage(body.input);
+  if (seed === null) return null;
+  const instructions = typeof body.instructions === 'string' ? body.instructions : '';
+  // U+0001 separates the two seed components so an empty instructions can't
+  // collide with the input prefix via string concatenation.
+  return await sha256Uuid(`${instructions}${JSON.stringify(seed)}`);
+};
+
+const seedUpToFirstUserMessage = (input: unknown): readonly unknown[] | null => {
+  if (typeof input === 'string') return [input];
+  if (!Array.isArray(input)) return null;
+  const collected: unknown[] = [];
+  for (const item of input) {
     collected.push(item);
-    if (item.type === 'message' && item.role === 'user') {
-      const instructions = typeof body.instructions === 'string' ? body.instructions : '';
-      // U+0001 separates the two seed components so an empty instructions can't
-      // collide with the input prefix via string concatenation.
-      return await sha256Uuid(`${instructions}${JSON.stringify(collected)}`);
-    }
+    if (isUserMessageItem(item)) return collected;
   }
   return null;
+};
+
+const isUserMessageItem = (item: unknown): boolean => {
+  if (typeof item !== 'object' || item === null) return false;
+  const obj = item as { type?: unknown; role?: unknown };
+  // Implicit `type: "message"` is valid per the OpenAI Responses schema;
+  // explicit non-message items (tool results, reasoning, etc.) skip.
+  if (obj.type !== undefined && obj.type !== 'message') return false;
+  return obj.role === 'user';
 };
 
 const buildCodexTurnMetadata = (
@@ -379,11 +397,8 @@ const performStreamingResponsesCall = async (
   const clientTurnMetadata = parseClientTurnMetadataJson(trimHeader(opts.headers, 'x-codex-turn-metadata'));
   const clientMetadata = clientCodexClientMetadata(opts.body);
   const identity = await buildCodexRequestIdentity(opts, opts.body, clientMetadata, clientTurnMetadata);
-  const turnMetadataJson = buildCodexTurnMetadataJson(
-    identity,
-    opts.body.input.some(item => item.type === 'compaction_trigger') ? CODEX_RESPONSES_COMPACTION_V2_TURN_METADATA : { requestKind: 'turn' },
-    clientTurnMetadata,
-  );
+  const metadata = opts.turnMetadata ?? (Array.isArray(opts.body.input) && opts.body.input.some(item => item.type === 'compaction_trigger') ? CODEX_RESPONSES_COMPACTION_V2_TURN_METADATA : { requestKind: 'turn' });
+  const turnMetadataJson = buildCodexTurnMetadataJson(identity, metadata, clientTurnMetadata);
   const upstreamFetch = dispatchCodexHttpCall(
     opts,
     accessToken,
@@ -413,7 +428,8 @@ const performUnaryCompactCall = async (
   const clientTurnMetadata = parseClientTurnMetadataJson(trimHeader(opts.headers, 'x-codex-turn-metadata'));
   const clientMetadata = clientCodexClientMetadata(opts.body);
   const identity = await buildCodexRequestIdentity(opts, opts.body, clientMetadata, clientTurnMetadata);
-  const turnMetadataJson = buildCodexTurnMetadataJson(identity, { requestKind: 'compaction' }, clientTurnMetadata);
+  const metadata = opts.turnMetadata ?? { requestKind: 'compaction' };
+  const turnMetadataJson = buildCodexTurnMetadataJson(identity, metadata, clientTurnMetadata);
   const response = await dispatchCodexHttpCall(
     opts,
     accessToken,
