@@ -150,7 +150,7 @@ export type ResponsesRequestInputItem =
   | ResponsesEasyInputMessage
   | ResponsesInputItem;
 
-export type ResponsesInputContent = ResponsesInputText | ResponsesInputImage;
+export type ResponsesInputContent = ResponsesInputText | ResponsesInputImage | ResponsesInputFile;
 
 export interface ResponsesInputText {
   type: 'input_text' | 'output_text';

@@ -33,7 +33,7 @@ const encoder = new TextEncoder();
 // against the retained budget).
 const normalizeContent = (content: ResponsesInputMessage['content']): ResponsesInputContent[] => {
   if (typeof content === 'string') return [{ type: 'input_text', text: content }];
-  return content.map(part => (part.type === 'input_image' ? part : { type: 'input_text', text: part.text }));
+  return content.map(part => (part.type === 'output_text' ? { ...part, type: 'input_text' } : part));
 };
 
 // OpenAI accepts input messages with the `type` field omitted (implicit
