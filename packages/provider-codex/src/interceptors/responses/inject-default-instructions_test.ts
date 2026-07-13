@@ -43,9 +43,6 @@ test('preserves a caller-supplied instructions string', async () => {
 });
 
 test('injects the default and preserves input items it does not own', async () => {
-  // Role conversion and leading-prefix hoisting are separate interceptors.
-  // This stage only guarantees that the Codex-required `instructions` field
-  // is present when earlier stages did not set one.
   const ctx = invocation({
     model: 'gpt-test',
     input: [
