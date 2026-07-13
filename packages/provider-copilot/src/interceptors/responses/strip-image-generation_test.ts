@@ -1,10 +1,21 @@
 import { test } from 'vitest';
 
-import { stripImageGenerationFromPayload } from './strip-image-generation.ts';
+import { withImageGenerationStripped } from './strip-image-generation.ts';
+import type { ResponsesBoundaryCtx } from './types.ts';
 import type { CanonicalResponsesPayload } from '@floway-dev/protocols/responses';
-import { assertEquals, assertFalse } from '@floway-dev/test-utils';
+import { assertEquals, assertFalse, stubProviderModel } from '@floway-dev/test-utils';
 
-test('stripImageGenerationFromPayload removes image_generation tools', () => {
+const apply = async (payload: CanonicalResponsesPayload): Promise<void> => {
+  const ctx: ResponsesBoundaryCtx = {
+    payload,
+    headers: new Headers(),
+    model: stubProviderModel({ endpoints: { responses: {} } }),
+    action: 'generate',
+  };
+  await withImageGenerationStripped(ctx, {}, async () => undefined);
+};
+
+test('removes image_generation tools', async () => {
   const payload = {
     model: 'gpt-test',
     input: [{ type: 'message', role: 'user', content: 'draw this' }],
@@ -20,14 +31,14 @@ test('stripImageGenerationFromPayload removes image_generation tools', () => {
     tool_choice: 'auto',
   } as CanonicalResponsesPayload;
 
-  stripImageGenerationFromPayload(payload);
+  await apply(payload);
 
   assertEquals(payload.tools?.length, 1);
   assertEquals(payload.tools?.[0].type, 'function');
   assertEquals(payload.tool_choice, 'auto');
 });
 
-test('stripImageGenerationFromPayload removes forced image_generation tool_choice', () => {
+test('removes forced image_generation tool_choice', async () => {
   const payload = {
     model: 'gpt-test',
     input: [{ type: 'message', role: 'user', content: 'draw this' }],
@@ -35,13 +46,13 @@ test('stripImageGenerationFromPayload removes forced image_generation tool_choic
     tool_choice: { type: 'image_generation' },
   } as CanonicalResponsesPayload;
 
-  stripImageGenerationFromPayload(payload);
+  await apply(payload);
 
   assertFalse('tools' in payload);
   assertFalse('tool_choice' in payload);
 });
 
-test('stripImageGenerationFromPayload removes required tool_choice when no tools remain', () => {
+test('removes required tool_choice when no tools remain', async () => {
   const payload = {
     model: 'gpt-test',
     input: [{ type: 'message', role: 'user', content: 'draw this' }],
@@ -49,13 +60,13 @@ test('stripImageGenerationFromPayload removes required tool_choice when no tools
     tool_choice: 'required',
   } as CanonicalResponsesPayload;
 
-  stripImageGenerationFromPayload(payload);
+  await apply(payload);
 
   assertFalse('tools' in payload);
   assertFalse('tool_choice' in payload);
 });
 
-test('stripImageGenerationFromPayload preserves Copilot-accepted hosted and deferred tools', () => {
+test('preserves Copilot-accepted hosted and deferred tools', async () => {
   // Codex uses `tool_search` and `namespace` for client-executed deferred tool
   // discovery and Copilot accepts `web_search`; the Copilot Responses target
   // must still see those entries even after image_generation is dropped.
@@ -77,13 +88,13 @@ test('stripImageGenerationFromPayload preserves Copilot-accepted hosted and defe
     tool_choice: 'auto',
   } as CanonicalResponsesPayload;
 
-  stripImageGenerationFromPayload(payload);
+  await apply(payload);
 
   assertEquals(payload.tools?.map(tool => tool.type), ['function', 'web_search', 'tool_search', 'namespace']);
   assertEquals(payload.tool_choice, 'auto');
 });
 
-test('stripImageGenerationFromPayload preserves forced non-image hosted and deferred tool_choices', () => {
+test('preserves forced non-image hosted and deferred tool_choices', async () => {
   for (const type of ['web_search', 'tool_search', 'namespace'] as const) {
     const payload = {
       model: 'gpt-test',
@@ -92,14 +103,14 @@ test('stripImageGenerationFromPayload preserves forced non-image hosted and defe
       tool_choice: { type },
     } as CanonicalResponsesPayload;
 
-    stripImageGenerationFromPayload(payload);
+    await apply(payload);
 
     assertEquals(payload.tools, [{ type }]);
     assertEquals(payload.tool_choice, { type });
   }
 });
 
-test('stripImageGenerationFromPayload preserves custom Freeform tools for downstream wrapping', () => {
+test('preserves custom Freeform tools for downstream wrapping', async () => {
   const payload = {
     model: 'gpt-test',
     input: [{ type: 'message', role: 'user', content: 'do x' }],
@@ -115,7 +126,7 @@ test('stripImageGenerationFromPayload preserves custom Freeform tools for downst
     tool_choice: { type: 'custom', name: 'freeform_other' },
   } as CanonicalResponsesPayload;
 
-  stripImageGenerationFromPayload(payload);
+  await apply(payload);
 
   assertEquals(payload.tools?.length, 2);
   assertEquals(payload.tools?.[1].type, 'custom');

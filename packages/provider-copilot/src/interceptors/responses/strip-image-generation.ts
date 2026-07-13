@@ -1,5 +1,4 @@
 import type { ResponsesBoundaryCtx } from './types.ts';
-import type { CanonicalResponsesPayload, ResponsesTool, ResponsesToolChoice } from '@floway-dev/protocols/responses';
 
 /**
  * Copilot's `/responses` endpoint rejects public `image_generation` tool
@@ -15,17 +14,17 @@ import type { CanonicalResponsesPayload, ResponsesTool, ResponsesToolChoice } fr
  * - https://github.com/openai/codex/blob/9f42c89c0112771dc29100a6f3fc904049b2655f/codex-rs/tools/src/tool_spec.rs#L17-L27
  * - https://github.com/caozhiyuan/copilot-api/blob/5d37d5b1ac6566c935a5c26d046396ee5fa423cc/src/routes/responses/handler.ts#L187-L204
  */
-const isImageGenerationTool = (tool: ResponsesTool): boolean => tool.type === 'image_generation';
-
-const isImageGenerationToolChoice = (choice: ResponsesToolChoice | null | undefined): boolean =>
-  typeof choice === 'object' && choice !== null && choice.type === 'image_generation';
-
-export const stripImageGenerationFromPayload = (payload: CanonicalResponsesPayload): void => {
+export const withImageGenerationStripped = async <TResult>(
+  ctx: ResponsesBoundaryCtx,
+  _request: object,
+  run: () => Promise<TResult>,
+): Promise<TResult> => {
+  const { payload } = ctx;
   let removedTool = false;
 
   if (Array.isArray(payload.tools)) {
     const tools = payload.tools.filter(tool => {
-      const drop = isImageGenerationTool(tool);
+      const drop = tool.type === 'image_generation';
       removedTool ||= drop;
       return !drop;
     });
@@ -37,23 +36,13 @@ export const stripImageGenerationFromPayload = (payload: CanonicalResponsesPaylo
     }
   }
 
-  if (isImageGenerationToolChoice(payload.tool_choice)) {
+  const toolChoice = payload.tool_choice;
+  if (typeof toolChoice === 'object' && toolChoice !== null && toolChoice.type === 'image_generation') {
     delete payload.tool_choice;
-    return;
-  }
-
-  // A forced `required` choice with no surviving tools would tell Copilot to
-  // invoke a tool that no longer exists; drop the choice along with the tools.
-  if (removedTool && payload.tool_choice === 'required' && (!Array.isArray(payload.tools) || payload.tools.length === 0)) {
+  } else if (removedTool && toolChoice === 'required' && (!Array.isArray(payload.tools) || payload.tools.length === 0)) {
+    // A forced choice with no surviving tools would reference nothing.
     delete payload.tool_choice;
   }
-};
 
-export const withImageGenerationStripped = async <TResult>(
-  ctx: ResponsesBoundaryCtx,
-  _request: object,
-  run: () => Promise<TResult>,
-): Promise<TResult> => {
-  stripImageGenerationFromPayload(ctx.payload);
   return await run();
 };
