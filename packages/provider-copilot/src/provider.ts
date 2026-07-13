@@ -471,6 +471,5 @@ export const createCopilotProvider = (record: UpstreamRecord): Provider => {
     disabledPublicModelIds: copilot.disabledPublicModelIds,
     modelPrefix: copilot.modelPrefix,
     instance,
-    supportsResponsesItemReference: false,
   };
 };
