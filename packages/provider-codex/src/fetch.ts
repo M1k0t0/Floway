@@ -136,9 +136,8 @@ const stringField = (record: Record<string, unknown> | null, key: string): strin
   return trimmed.length > 0 ? trimmed : null;
 };
 
-const clientCodexClientMetadata = (body: unknown): Record<string, unknown> => {
-  if (!isPlainObject(body)) return {};
-  const candidate = body.client_metadata;
+const clientCodexClientMetadata = (body: CodexResponsesBody): Record<string, unknown> => {
+  const candidate = (body as { client_metadata?: unknown }).client_metadata;
   return isPlainObject(candidate) ? candidate : {};
 };
 
@@ -210,19 +209,15 @@ const buildCodexRequestIdentity = async (
 // attempt.ts, so they hash the same prefix as the original turn and get
 // the same session id — no server-side session map required.
 const deriveSessionIdFromInput = async (body: CodexResponsesBody): Promise<string | null> => {
-  const seed = seedUpToFirstUserMessage(body.input);
-  if (seed === null) return null;
-  const instructions = typeof body.instructions === 'string' ? body.instructions : '';
-  // U+0001 separates the two seed components so an empty instructions can't
-  // collide with the input prefix via string concatenation.
-  return await sha256Uuid(`${instructions}${JSON.stringify(seed)}`);
-};
-
-const seedUpToFirstUserMessage = (input: readonly ResponsesInputItem[]): readonly ResponsesInputItem[] | null => {
   const collected: ResponsesInputItem[] = [];
-  for (const item of input) {
+  for (const item of body.input) {
     collected.push(item);
-    if (item.type === 'message' && item.role === 'user') return collected;
+    if (item.type === 'message' && item.role === 'user') {
+      const instructions = typeof body.instructions === 'string' ? body.instructions : '';
+      // U+0001 separates the two seed components so an empty instructions can't
+      // collide with the input prefix via string concatenation.
+      return await sha256Uuid(`${instructions}${JSON.stringify(collected)}`);
+    }
   }
   return null;
 };
