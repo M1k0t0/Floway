@@ -1502,6 +1502,17 @@ test('translateResponsesToChatCompletions rejects file tool output', () => {
   );
 });
 
+test('translateResponsesToChatCompletions rejects file assistant content', () => {
+  assertThrows(
+    () => translateResponsesToChatCompletions({
+      model: 'gpt-test',
+      input: [{ type: 'message', role: 'assistant', content: [{ type: 'input_file', file_id: 'file_1' }] }],
+    }),
+    Error,
+    'input_file assistant content',
+  );
+});
+
 test('translateResponsesToChatCompletions throws on a stray web_search_call input item (shim owns the reverse path)', () => {
   // The Responses web-search shim rewrites web_search_call input items into
   // upstream function_call + function_call_output pairs before this

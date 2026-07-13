@@ -137,6 +137,17 @@ test('translateResponsesToMessages rejects file message content', async () => {
   );
 });
 
+test('translateResponsesToMessages rejects file assistant content', async () => {
+  await assertRejects(
+    () => translateResponsesToMessages({
+      ...minimalPayload,
+      input: [{ type: 'message', role: 'assistant', content: [{ type: 'input_file', file_id: 'file_1' }] }],
+    }),
+    Error,
+    'input_file assistant content',
+  );
+});
+
 // ── service_tier → speed mapping ──
 
 test('translateResponsesToMessages maps service_tier:fast to speed:fast (no service_tier on target)', async () => {

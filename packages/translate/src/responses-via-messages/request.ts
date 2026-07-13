@@ -107,6 +107,9 @@ const translateAssistantMessage = (message: ResponsesInputMessage): MessagesAssi
   const content: MessagesAssistantContentBlock[] = [];
 
   for (const block of message.content) {
+    if (block.type === 'input_file') {
+      throw new TranslatorInputError('Cannot translate input_file assistant content to Messages.');
+    }
     if (block.type === 'output_text') {
       content.push({ type: 'text', text: (block as ResponsesInputText).text });
     }

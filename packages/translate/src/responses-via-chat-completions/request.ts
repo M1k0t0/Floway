@@ -214,6 +214,9 @@ export const translateResponsesToChatCompletions = (source: ResponsesPayload): R
     }
 
     if (item.role === 'assistant') {
+      if (Array.isArray(item.content) && item.content.some(part => part.type === 'input_file')) {
+        throw new TranslatorInputError('Cannot translate input_file assistant content to Chat Completions.');
+      }
       assistant = appendAssistantText(assistant, responsesContentToText(item.content));
       continue;
     }
