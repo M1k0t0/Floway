@@ -123,13 +123,15 @@ export type ResponsesInputItem =
   | ResponsesMcpApprovalRequestItem
   | ResponsesMcpApprovalResponseItem;
 
+export type ResponsesMessagePhase = 'commentary' | 'final_answer' | (string & {}) | null;
+
 export interface ResponsesInputMessage {
   type: 'message';
   id?: string;
   status?: string;
   role: 'user' | 'assistant' | 'system' | 'developer';
   content: string | ResponsesInputContent[];
-  phase?: 'commentary' | 'final_answer' | (string & {}) | null;
+  phase?: ResponsesMessagePhase;
 }
 
 // The Responses request schema's EasyInputMessage makes the constant
@@ -140,7 +142,7 @@ export interface ResponsesInputMessage {
 export interface ResponsesEasyInputMessage {
   content: string | ResponsesInputContent[];
   role: 'user' | 'assistant' | 'system' | 'developer';
-  phase?: 'commentary' | 'final_answer' | (string & {}) | null;
+  phase?: ResponsesMessagePhase;
   type?: 'message';
 }
 
@@ -689,6 +691,7 @@ export interface ResponsesOutputMessage {
   status?: string;
   role: 'assistant';
   content: ResponsesOutputContentBlock[];
+  phase?: ResponsesMessagePhase;
 }
 
 export type ResponsesOutputContentBlock = ResponsesOutputText | ResponsesOutputRefusal;
