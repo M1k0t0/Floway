@@ -6,7 +6,7 @@ import { InMemoryRepo } from '../../../repo/memory.ts';
 import { mockChatGatewayCtx } from '../../../test-helpers/gateway-ctx.ts';
 import type { ChatCompletionsStreamEvent } from '@floway-dev/protocols/chat-completions';
 import { doneFrame, eventFrame, type ModelEndpoints, type ProtocolFrame } from '@floway-dev/protocols/common';
-import type { MessagesPayload, MessagesStreamEvent } from '@floway-dev/protocols/messages';
+import type { MessagesClientTool, MessagesPayload, MessagesStreamEvent } from '@floway-dev/protocols/messages';
 import type { CanonicalResponsesPayload, ResponsesResult } from '@floway-dev/protocols/responses';
 import { type ModelCandidate, directFetcher, type ProviderCallResult, type ProviderResponsesResult, type ProviderStreamResult, type ResponsesAction, type UpstreamCallOptions } from '@floway-dev/provider';
 import type { FlagId } from '@floway-dev/provider/flags';
@@ -354,7 +354,7 @@ test('countTokens prepares the same web-search tool shape as generation', async 
   });
 
   assertEquals(result.type, 'plain');
-  const tool = observedBodies[0]?.tools?.[0];
+  const tool = observedBodies[0]?.tools?.[0] as MessagesClientTool | undefined;
   if (tool === undefined) throw new Error('expected rewritten web-search tool');
   assertEquals(tool.name, 'web_search');
   assertEquals('type' in tool, false);
