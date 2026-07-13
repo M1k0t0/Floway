@@ -1,11 +1,9 @@
 import type { ResponsesBoundaryCtx } from './types.ts';
 
-// Codex backend rejects /responses requests that lack a non-empty
-// `instructions` field with a 4xx ("Instructions are required"). Native
-// /v1/responses callers may omit it, and translated requests may have neither
-// caller-supplied instructions nor a hoistable leading developer prefix after
-// the required system-to-developer conversion. Inject a neutral default at the
-// Codex target boundary so every request shape satisfies the upstream contract.
+// ChatGPT-subscription catalog models reject missing or empty `instructions`.
+// Native and translated callers may omit the field, so the provider supplies a
+// neutral value at its boundary.
+// https://github.com/im4codes/imcodes/blob/5f769d933dfd679e3a4d670183b0384a1baf62cd/src/agent/providers/codex-sdk.ts#L560-L579
 export const injectDefaultInstructions = async <TResult>(
   ctx: ResponsesBoundaryCtx,
   _request: object,

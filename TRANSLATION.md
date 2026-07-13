@@ -194,12 +194,16 @@ role; item order, content-part boundaries, ids, and status remain intact. This
 also covers a multi-block Messages `system` field after generic translation has
 preserved it as one multi-part input message. Native Responses instructions,
 Gemini `systemInstruction`, and a string or single-block Messages `system`
-already occupy the top-level `instructions` field and remain unchanged.
+already occupy the top-level `instructions` field and remain unchanged. The
+developer representation matches the official Codex Responses Lite wire:
+https://github.com/openai/codex/blob/1f17e7512f0e47625f2cad416f14870688a99814/codex-rs/core/src/client.rs#L829-L849
 
 The Codex boundary then runs these steps:
 
-- injects a default `instructions` string when none is supplied (the upstream
-  rejects empty / missing `instructions`)
+- injects a default `instructions` string when none is supplied; current
+  ChatGPT-subscription catalog models reject an empty or missing field (live
+  probe record:
+  https://github.com/im4codes/imcodes/blob/5f769d933dfd679e3a4d670183b0384a1baf62cd/src/agent/providers/codex-sdk.ts#L560-L579)
 - strips fields the upstream rejects with `Unsupported parameter`:
   `max_output_tokens`, `temperature`, `top_p`, `frequency_penalty`,
   `presence_penalty`, `user`, `metadata`, `prompt_cache_retention`,

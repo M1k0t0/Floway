@@ -12,9 +12,8 @@ export const CODEX_DEFAULT_FLAGS: FlagDefaults = {
   'disable-reasoning-on-forced-tool-choice': false,
   'demote-interleaved-system-to-user': false,
   'demote-developer-to-system': false,
-  // Codex's Responses Lite wire carries base instructions as leading
-  // developer messages, so converting unsupported system input preserves the
-  // representation used by the official client.
+  // Codex's Responses Lite wire carries base instructions as leading developer
+  // messages. Use the same representation for system-role input.
   // https://github.com/openai/codex/blob/1f17e7512f0e47625f2cad416f14870688a99814/codex-rs/core/src/client.rs#L829-L849
   'promote-system-to-developer': true,
   'strip-billing-attribution': true,
