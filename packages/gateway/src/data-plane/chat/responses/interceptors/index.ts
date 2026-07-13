@@ -1,6 +1,6 @@
+import { withRoleCompatibilityApplied } from './apply-role-compatibility.ts';
 import { withResponsesOutputItemsCanonicalized } from './canonicalize-output-items.ts';
 import { withResponsesCompactShim } from './compact-shim.ts';
-import { withRoleCompatibilityApplied } from './apply-role-compatibility.ts';
 import { withReasoningDisabledOnForcedToolChoice } from './disable-reasoning-on-forced-tool-choice.ts';
 import { withCyberPolicyRetried } from './retry-cyber-policy.ts';
 import { withResponsesServerToolShim } from './server-tool-shim.ts';

@@ -35,8 +35,8 @@ export const canonicalizeResponsesPayload = (payload: ResponsesPayload): Canonic
   input: typeof payload.input === 'string'
     ? [{ type: 'message', role: 'user', content: payload.input }]
     : payload.input.map(item => isImplicitEasyInputMessage(item)
-      ? { ...item, type: 'message' }
-      : item as ResponsesInputItem),
+        ? { ...item, type: 'message' }
+        : item as ResponsesInputItem),
 });
 
 export type ResponsesItemMapper = (
