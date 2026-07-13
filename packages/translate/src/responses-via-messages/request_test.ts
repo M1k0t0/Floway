@@ -29,7 +29,10 @@ test('translateResponsesToMessages accepts an implicit message discriminator', a
   });
 
   assertEquals(result.target.messages, [
-    { role: 'user', content: 'hello' },
+    {
+      role: 'user',
+      content: [{ type: 'text', text: 'hello', cache_control: { type: 'ephemeral' } }],
+    },
   ]);
 });
 
