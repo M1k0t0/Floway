@@ -283,6 +283,42 @@ test('countTokens proxies the upstream response as a plain result', async () => 
   assertEquals(callMessagesCountTokens.mock.calls.length, 1);
 });
 
+test('countTokens applies role compatibility before the provider boundary', async () => {
+  installRepo();
+  const observedBodies: Array<Omit<MessagesPayload, 'model'>> = [];
+  const callMessagesCountTokens = vi.fn(async (_model, body): Promise<ProviderCallResult> => {
+    observedBodies.push(body as Omit<MessagesPayload, 'model'>);
+    return {
+      response: new Response(JSON.stringify({ input_tokens: 9 }), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) }),
+      modelKey: 'k',
+    };
+  });
+
+  const result = await messagesAttempt.countTokens({
+    payload: makePayload({
+      messages: [
+        { role: 'system', content: 'inline rules' },
+        { role: 'user', content: 'hello' },
+      ],
+    }),
+    ctx: makeGatewayCtx(),
+    candidate: makeCandidate({
+      callMessagesCountTokens,
+      enabledFlags: new Set<FlagId>(['demote-interleaved-system-to-user']),
+    }),
+    headers: new Headers(),
+  });
+
+  assertEquals(result.type, 'plain');
+  assertEquals(observedBodies, [{
+    max_tokens: 32,
+    messages: [
+      { role: 'user', content: 'inline rules' },
+      { role: 'user', content: 'hello' },
+    ],
+  }]);
+});
+
 test('countTokens refuses a non-messages candidate', async () => {
   installRepo();
   let thrown: unknown = null;
