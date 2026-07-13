@@ -2,7 +2,7 @@ import { withRoleCompatibilityApplied } from './apply-role-compatibility.ts';
 import { withReasoningDisabledOnForcedToolChoice } from './disable-reasoning-on-forced-tool-choice.ts';
 import { stripBillingAttribution } from './strip-billing-attribution.ts';
 import type { MessagesCountTokensInterceptor, MessagesInterceptor, MessagesPayloadInterceptor } from './types.ts';
-import { withMessagesWebSearchShim } from './web-search-shim.ts';
+import { withMessagesWebSearchRequestPrepared, withMessagesWebSearchShim } from './web-search-shim.ts';
 
 // Unified Messages generation chain. All entries are attached to every
 // candidate; each interceptor decides whether to act from the selected target
@@ -11,10 +11,12 @@ import { withMessagesWebSearchShim } from './web-search-shim.ts';
 // Translated requests re-enter the selected target protocol's chain. The role
 // compatibility entry therefore acts only when Messages is the final target.
 //
-//   - withMessagesWebSearchShim: generation-only and registered first so its replay rewrite and
-//     intercept loop wrap the rest of the chain. Unconditional for translated
-//     targets (Responses / Chat Completions cannot carry Anthropic server
-//     tools); gated by `messages-web-search-shim` for native Messages targets.
+//   - withMessagesWebSearchShim: registered first so its request preparation,
+//     replay rewrite, and intercept loop wrap the rest of the generation chain.
+//     Unconditional for translated targets (Responses / Chat Completions cannot
+//     carry Anthropic server tools); gated by `messages-web-search-shim` for
+//     native Messages targets. count_tokens runs the same request preparation
+//     without the stream-response wrapper.
 //   - stripBillingAttribution: gated by `strip-billing-attribution` (default
 //     on for copilot/azure/custom, off for claude-code). On candidates
 //     where it runs, it scrubs Claude Code's `x-anthropic-billing-header` /
@@ -42,5 +44,6 @@ export const messagesInterceptors: readonly MessagesInterceptor[] = [
 ];
 
 export const messagesCountTokensInterceptors: readonly MessagesCountTokensInterceptor[] = [
+  withMessagesWebSearchRequestPrepared,
   ...messagesPayloadInterceptors,
 ];

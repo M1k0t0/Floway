@@ -9,6 +9,7 @@ import {
   type MessagesWebSearchShimState,
   prepareMessagesWebSearchShimRequest,
   rewriteMessagesWebSearchEventsToNative,
+  withMessagesWebSearchRequestPrepared,
   withMessagesWebSearchShim,
 } from './web-search-shim.ts';
 import { initRepo } from '../../../../repo/index.ts';
@@ -569,6 +570,54 @@ const initDisabledSearchRepo = async (): Promise<void> => {
   initRepo(repo);
   await repo.searchConfig.save(DEFAULT_SEARCH_CONFIG);
 };
+
+const initEnabledSearchRepo = async (): Promise<void> => {
+  const repo = new InMemoryRepo();
+  initRepo(repo);
+  await repo.searchConfig.save({
+    ...DEFAULT_SEARCH_CONFIG,
+    provider: 'tavily',
+    tavily: { apiKey: 'test-key' },
+  });
+};
+
+test('generation and count_tokens prepare identical web-search tools and replay history', async () => {
+  await initEnabledSearchRepo();
+  const source = makeNativeReplayPayload();
+  const generationInvocation = invocation(structuredClone(source));
+  const countInvocation = invocation(structuredClone(source));
+
+  await withMessagesWebSearchShim(generationInvocation, mockChatGatewayCtx(), () => Promise.resolve({
+    type: 'events',
+    events: toAsyncIterable<ProtocolFrame<MessagesStreamEvent>>([]),
+    modelIdentity: testTelemetryModelIdentity,
+  }));
+  const countResponse = await withMessagesWebSearchRequestPrepared(
+    countInvocation,
+    mockChatGatewayCtx(),
+    () => Promise.resolve(new Response(null, { status: 204 })),
+  );
+
+  assertEquals(countResponse.status, 204);
+  assertEquals(countInvocation.payload, generationInvocation.payload);
+  const rewrittenTool = generationInvocation.payload.tools?.[0] as MessagesClientTool;
+  assertEquals(rewrittenTool.name, 'web_search');
+  assertEquals('type' in rewrittenTool, false);
+  assertEquals(
+    generationInvocation.payload.messages.some(message =>
+      message.role === 'assistant'
+      && Array.isArray(message.content)
+      && message.content.some(block => block.type === 'tool_use' && block.name === 'web_search')),
+    true,
+  );
+  assertEquals(
+    generationInvocation.payload.messages.some(message =>
+      message.role === 'user'
+      && Array.isArray(message.content)
+      && message.content.some(block => block.type === 'tool_result' && block.tool_use_id === 'toolu_1')),
+    true,
+  );
+});
 
 const runReplayOnlyShim = async (messageId: string): Promise<ProtocolFrame<MessagesStreamEvent>[]> => {
   await initDisabledSearchRepo();

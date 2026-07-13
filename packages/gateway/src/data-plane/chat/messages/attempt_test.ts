@@ -286,7 +286,7 @@ test('countTokens proxies the upstream response as a plain result', async () => 
 test('countTokens applies the generation payload transforms before the provider boundary', async () => {
   installRepo();
   const observedBodies: Array<Omit<MessagesPayload, 'model'>> = [];
-  const callMessagesCountTokens = vi.fn(async (_model, body): Promise<ProviderCallResult> => {
+  const callMessagesCountTokens = vi.fn(async (_model: unknown, body: unknown): Promise<ProviderCallResult> => {
     observedBodies.push(body as Omit<MessagesPayload, 'model'>);
     return {
       response: new Response(JSON.stringify({ input_tokens: 9 }), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) }),
@@ -328,6 +328,41 @@ test('countTokens applies the generation payload transforms before the provider 
     thinking: { type: 'disabled' },
     tool_choice: { type: 'tool', name: 'lookup' },
   }]);
+});
+
+test('countTokens prepares the same web-search tool shape as generation', async () => {
+  installRepo();
+  const observedBodies: Array<Omit<MessagesPayload, 'model'>> = [];
+  const callMessagesCountTokens = vi.fn(async (_model: unknown, body: unknown): Promise<ProviderCallResult> => {
+    observedBodies.push(body as Omit<MessagesPayload, 'model'>);
+    return {
+      response: Response.json({ input_tokens: 11 }),
+      modelKey: 'k',
+    };
+  });
+
+  const result = await messagesAttempt.countTokens({
+    payload: makePayload({
+      tools: [{ type: 'web_search_20260209', max_uses: 3 }],
+    }),
+    ctx: makeGatewayCtx(),
+    candidate: makeCandidate({
+      callMessagesCountTokens,
+      enabledFlags: new Set<FlagId>(['messages-web-search-shim']),
+    }),
+    headers: new Headers(),
+  });
+
+  assertEquals(result.type, 'plain');
+  const tool = observedBodies[0]?.tools?.[0];
+  if (tool === undefined) throw new Error('expected rewritten web-search tool');
+  assertEquals(tool.name, 'web_search');
+  assertEquals('type' in tool, false);
+  assertEquals(tool.input_schema, {
+    type: 'object',
+    properties: { query: { type: 'string', description: 'Search query' } },
+    required: ['query'],
+  });
 });
 
 test('countTokens refuses a non-messages candidate', async () => {
