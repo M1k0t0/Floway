@@ -86,13 +86,14 @@ export const withInlineImagesCompressed = async <TResult>(
       block.type === 'tool_result'
       && Array.isArray(block.content)
       && block.content.some(hasCompressedImage);
-    const rewriteToolResultContent = (content: MessagesToolResultContentBlock[]): MessagesToolResultContentBlock[] =>
-      content.map(block => hasCompressedImage(block) ? rewriteImage(block) : block);
     const rewriteUserContent = (content: MessagesUserContentBlock[]): MessagesUserContentBlock[] =>
       content.map(block => {
         if (hasCompressedImage(block)) return rewriteImage(block);
         if (!hasCompressedToolResultImage(block)) return block;
-        return { ...block, content: rewriteToolResultContent(block.content) };
+        return {
+          ...block,
+          content: block.content.map(inner => hasCompressedImage(inner) ? rewriteImage(inner) : inner),
+        };
       });
 
     ctx.payload = {
