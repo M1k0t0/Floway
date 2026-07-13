@@ -140,99 +140,95 @@ export const translateResponsesToChatCompletions = (source: ResponsesPayload): R
   const responseFormat = buildChatCompletionsResponseFormat(payload.text);
   const messages: ChatCompletionsMessage[] = payload.instructions ? [{ role: 'system', content: payload.instructions }] : [];
 
-  if (typeof payload.input === 'string') {
-    messages.push({ role: 'user', content: payload.input });
-  } else {
-    let assistant: AssistantAccumulator | null = null;
-    const flushAssistant = () => {
-      if (!assistant) return;
+  let assistant: AssistantAccumulator | null = null;
+  const flushAssistant = () => {
+    if (!assistant) return;
+    messages.push({
+      ...assistant.message,
+      ...chatCompletionsReasoningProjectionFields(assistant.reasoning),
+    });
+    assistant = null;
+  };
+
+  for (const item of payload.input) {
+    rejectProgramCaller(item);
+    if (item.type === 'reasoning') {
+      assistant = ensureAssistant(assistant);
+      addResponsesReasoningToChatCompletionsProjection(assistant.reasoning, item);
+      continue;
+    }
+
+    if (item.type === 'function_call') {
+      assistant = appendAssistantToolCall(assistant, item);
+      continue;
+    }
+
+    if (item.type === 'function_call_output') {
+      flushAssistant();
+      // FIXME: a multimodal function_call_output becomes a tool-role message
+      // with image_url content parts. Verify GitHub Copilot's chat upstream
+      // accepts image content on tool messages before relying on this path.
       messages.push({
-        ...assistant.message,
-        ...chatCompletionsReasoningProjectionFields(assistant.reasoning),
+        role: 'tool',
+        tool_call_id: item.call_id,
+        content: responsesContentToChatCompletionsContent(item.output),
       });
-      assistant = null;
-    };
+      continue;
+    }
 
-    for (const item of payload.input) {
-      rejectProgramCaller(item);
-      if (item.type === 'reasoning') {
-        assistant = ensureAssistant(assistant);
-        addResponsesReasoningToChatCompletionsProjection(assistant.reasoning, item);
-        continue;
+    if (item.type === 'custom_tool_call') {
+      // Project the freeform invocation into the wrapped function-tool shape
+      // so the translated target sees a coherent tool-call history.
+      assistant = appendAssistantToolCall(assistant, {
+        call_id: item.call_id,
+        name: item.name,
+        arguments: JSON.stringify({ input: item.input }),
+      });
+      continue;
+    }
+
+    if (item.type === 'custom_tool_call_output') {
+      if (typeof item.output !== 'string') {
+        throw new TranslatorInputError(`Cannot translate multimodal custom_tool_call_output '${item.call_id}'.`);
       }
-
-      if (item.type === 'function_call') {
-        assistant = appendAssistantToolCall(assistant, item);
-        continue;
-      }
-
-      if (item.type === 'function_call_output') {
-        flushAssistant();
-        // FIXME: a multimodal function_call_output becomes a tool-role message
-        // with image_url content parts. Verify GitHub Copilot's chat upstream
-        // accepts image content on tool messages before relying on this path.
-        messages.push({
-          role: 'tool',
-          tool_call_id: item.call_id,
-          content: responsesContentToChatCompletionsContent(item.output),
-        });
-        continue;
-      }
-
-      if (item.type === 'custom_tool_call') {
-        // Project the freeform invocation into the wrapped function-tool shape
-        // so the translated target sees a coherent tool-call history.
-        assistant = appendAssistantToolCall(assistant, {
-          call_id: item.call_id,
-          name: item.name,
-          arguments: JSON.stringify({ input: item.input }),
-        });
-        continue;
-      }
-
-      if (item.type === 'custom_tool_call_output') {
-        if (typeof item.output !== 'string') {
-          throw new TranslatorInputError(`Cannot translate multimodal custom_tool_call_output '${item.call_id}'.`);
-        }
-        flushAssistant();
-        messages.push({
-          role: 'tool',
-          tool_call_id: item.call_id,
-          content: item.output,
-        });
-        continue;
-      }
-
-      // item_reference items are connection-bound pointers with no inline
-      // content to translate; skip them.
-      if (item.type === 'item_reference') continue;
-
-      // The shim must translate echoed web_search_call input items
-      // into function_call + function_call_output pairs before this
-      // translator runs. Reaching here means the reverse path was
-      // skipped.
-      if (item.type === 'web_search_call') {
-        throw new TranslatorInputError("Invalid input item type 'web_search_call'.");
-      }
-
-      if (item.type !== 'message') {
-        throw new TranslatorInputError(`Invalid input item type '${item.type}'.`);
-      }
-
-      if (item.role === 'assistant') {
-        assistant = appendAssistantText(assistant, responsesContentToText(item.content));
-        continue;
-      }
-
       flushAssistant();
       messages.push({
-        role: item.role,
-        content: responsesContentToChatCompletionsContent(item.content),
+        role: 'tool',
+        tool_call_id: item.call_id,
+        content: item.output,
       });
+      continue;
+    }
+
+    // item_reference items are connection-bound pointers with no inline
+    // content to translate; skip them.
+    if (item.type === 'item_reference') continue;
+
+    // The shim must translate echoed web_search_call input items
+    // into function_call + function_call_output pairs before this
+    // translator runs. Reaching here means the reverse path was
+    // skipped.
+    if (item.type === 'web_search_call') {
+      throw new TranslatorInputError("Invalid input item type 'web_search_call'.");
+    }
+
+    if (item.type !== 'message') {
+      throw new TranslatorInputError(`Invalid input item type '${item.type}'.`);
+    }
+
+    if (item.role === 'assistant') {
+      assistant = appendAssistantText(assistant, responsesContentToText(item.content));
+      continue;
     }
 
     flushAssistant();
+    messages.push({
+      role: item.role,
+      content: responsesContentToChatCompletionsContent(item.content),
+    });
   }
+
+  flushAssistant();
 
   const tools = translateResponsesTools(payload.tools, customToolNames);
   // Same-purpose OpenAI fields pass through directly here, while broader

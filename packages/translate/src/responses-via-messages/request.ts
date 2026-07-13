@@ -175,14 +175,7 @@ const unexpectedResponsesInputItem = (value: ResponsesInputItem): never => {
   throw new TranslatorInputError(`Invalid input item: ${JSON.stringify(value)}`);
 };
 
-const translateResponsesInput = async (input: string | ResponsesInputItem[], loadRemoteImage: RemoteImageLoader): Promise<{ messages: MessagesMessage[]; systemBlocks: MessagesTextBlock[] }> => {
-  if (typeof input === 'string') {
-    return {
-      messages: [{ role: 'user', content: input }],
-      systemBlocks: [],
-    };
-  }
-
+const translateResponsesInput = async (input: ResponsesInputItem[], loadRemoteImage: RemoteImageLoader): Promise<{ messages: MessagesMessage[]; systemBlocks: MessagesTextBlock[] }> => {
   // Hoist the leading contiguous run of system/developer input messages into
   // systemBlocks (→ top-level Messages.system), preserving each input_text
   // part as its own MessagesTextBlock so part boundaries survive the hoist.
