@@ -46,16 +46,18 @@ export const responsesContentToChatCompletionsContent = (content: string | Respo
               throw new TranslatorInputError('Cannot translate file_id-only image content to Chat Completions.');
             }
             let detail: 'auto' | 'low' | 'high';
-            if (part.detail === 'auto' || part.detail === 'low' || part.detail === 'high') {
-              detail = part.detail;
-            } else {
+            switch (part.detail) {
+            case 'auto': detail = 'auto'; break;
+            case 'low': detail = 'low'; break;
+            case 'high': detail = 'high'; break;
+            default:
               throw new TranslatorInputError(`Cannot translate image detail '${part.detail}' to Chat Completions.`);
             }
             return {
               type: 'image_url',
               image_url: {
-                  url: part.image_url,
-                  detail,
+                url: part.image_url,
+                detail,
               },
             };
           }
