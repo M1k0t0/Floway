@@ -33,6 +33,6 @@ export const messagesInterceptors: readonly MessagesInterceptor[] = [
   withRoleCompatibilityApplied,
 ];
 
-export const messagesCountTokensInterceptors = [
+export const messagesCountTokensInterceptors: readonly MessagesCountTokensInterceptor[] = [
   withRoleCompatibilityApplied,
-] as const satisfies readonly MessagesCountTokensInterceptor[];
+];
