@@ -3,6 +3,16 @@
 
 // ── Request types ──
 
+// Supported for gpt-5.6+. Slots remain open-string so future modes and
+// lifetimes reach the upstream unchanged.
+// https://github.com/openai/openai-python/blob/f16fbbd2bd25dc1ff150b5f78dbd15ff6bab6d91/src/openai/types/responses/response_compact_params.py#L144-L184
+export interface ResponsesPromptCacheOptions {
+  mode?: 'implicit' | 'explicit' | (string & {});
+  ttl?: '30m' | (string & {});
+}
+
+export type ResponsesPromptCacheRetention = 'in_memory' | '24h' | (string & {});
+
 export interface ResponsesPayload {
   model: string;
   input: string | ResponsesRequestInputItem[];
@@ -44,6 +54,8 @@ export interface ResponsesPayload {
   // Reference: https://platform.openai.com/docs/api-reference/responses/create
   text?: { format?: Record<string, unknown> | null; verbosity?: string | null } | null;
   prompt_cache_key?: string | null;
+  prompt_cache_options?: ResponsesPromptCacheOptions | null;
+  prompt_cache_retention?: ResponsesPromptCacheRetention | null;
   safety_identifier?: string | null;
   service_tier?: 'default' | 'auto' | 'flex' | 'priority' | 'scale' | (string & {}) | null;
 }
@@ -62,14 +74,8 @@ export interface ResponsesCompactPayload {
   instructions?: string | null;
   previous_response_id?: string | null;
   prompt_cache_key?: string | null;
-  // Supported for gpt-5.6+. Both slots remain open-string so future modes and
-  // lifetimes reach the upstream unchanged.
-  // https://github.com/openai/openai-python/blob/f16fbbd2bd25dc1ff150b5f78dbd15ff6bab6d91/src/openai/types/responses/response_compact_params.py#L144-L184
-  prompt_cache_options?: {
-    mode?: 'implicit' | 'explicit' | (string & {});
-    ttl?: '30m' | (string & {});
-  } | null;
-  prompt_cache_retention?: 'in_memory' | '24h' | null;
+  prompt_cache_options?: ResponsesPromptCacheOptions | null;
+  prompt_cache_retention?: ResponsesPromptCacheRetention | null;
   service_tier?: 'default' | 'auto' | 'flex' | 'priority' | 'scale' | (string & {}) | null;
   // Gateway-only: controls whether the compact response's output items + the
   // committed snapshot persist. Forwarded NEITHER to upstream nor to the
@@ -163,8 +169,6 @@ export type ResponsesRequestInputItem =
 
 export type CanonicalResponsesPayload = Omit<ResponsesPayload, 'input'> & {
   input: ResponsesInputItem[];
-  prompt_cache_options?: ResponsesCompactPayload['prompt_cache_options'];
-  prompt_cache_retention?: ResponsesCompactPayload['prompt_cache_retention'];
 };
 
 export type ResponsesInputContent = ResponsesInputText | ResponsesInputImage;

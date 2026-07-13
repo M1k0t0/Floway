@@ -320,7 +320,7 @@ const responsesPayloadFromClientSource = (source: object): CanonicalResponsesPay
     throw new WebSocketClientMessageError('response.create requires response.input to be a string or an array.');
   }
   // stamp stream: true — the WS transport always streams.
-  return { ...canonicalizeResponsesPayload(source as ResponsesPayload), stream: true };
+  return { ...canonicalizeResponsesPayload(source), stream: true };
 };
 
 const respondResponsesWebSocket = async (input: {
