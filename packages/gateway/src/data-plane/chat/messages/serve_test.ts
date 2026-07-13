@@ -513,11 +513,18 @@ test('generate failover preserves billing blocks for a strip-off candidate', asy
     { type: 'text' as const, text: "You are Claude Code, Anthropic's official CLI for Claude." },
   ];
   const expectedSystem = structuredClone(system);
-  const firstCall = vi.fn(async (): Promise<ProviderStreamResult<MessagesStreamEvent>> => ({
-    ok: false,
-    response: new Response('unavailable', { status: 503 }),
-    modelKey: 'first-key',
-  }));
+  const messages = [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'original user text' }] }];
+  const expectedMessages = structuredClone(messages);
+  const firstCall = vi.fn(async (_model: unknown, body: unknown): Promise<ProviderStreamResult<MessagesStreamEvent>> => {
+    const message = (body as Omit<MessagesPayload, 'model'>).messages[0];
+    if (!Array.isArray(message.content) || message.content[0]?.type !== 'text') throw new Error('expected text content');
+    message.content[0].text = 'mutated by first provider';
+    return {
+      ok: false,
+      response: new Response('unavailable', { status: 503 }),
+      modelKey: 'first-key',
+    };
+  });
   const observedBodies: Array<Omit<MessagesPayload, 'model'>> = [];
   const secondCall = vi.fn(async (_model: unknown, body: unknown): Promise<ProviderStreamResult<MessagesStreamEvent>> => {
     observedBodies.push(body as Omit<MessagesPayload, 'model'>);
@@ -542,14 +549,16 @@ test('generate failover preserves billing blocks for a strip-off candidate', asy
     }),
   ]);
 
-  const payload = makePayload({ system });
+  const payload = makePayload({ system, messages });
   const result = await messagesServe.generate({ payload, ctx: makeGatewayCtx(), headers: new Headers() });
   await collectEvents(assertResultType(result, 'events').events);
 
   assertEquals(firstCall.mock.calls.length, 1);
   assertEquals(secondCall.mock.calls.length, 1);
   assertEquals(observedBodies[0]?.system, expectedSystem);
+  assertEquals(observedBodies[0]?.messages, expectedMessages);
   assertEquals(payload.system, expectedSystem);
+  assertEquals(payload.messages, expectedMessages);
 });
 
 test('countTokens failover preserves billing blocks for a strip-off candidate', async () => {
@@ -559,10 +568,17 @@ test('countTokens failover preserves billing blocks for a strip-off candidate', 
     { type: 'text' as const, text: 'Count this prompt.' },
   ];
   const expectedSystem = structuredClone(system);
-  const firstCall = vi.fn(async (): Promise<ProviderCallResult> => ({
-    response: new Response('unavailable', { status: 503 }),
-    modelKey: 'first-key',
-  }));
+  const messages = [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'original user text' }] }];
+  const expectedMessages = structuredClone(messages);
+  const firstCall = vi.fn(async (_model: unknown, body: unknown): Promise<ProviderCallResult> => {
+    const message = (body as Omit<MessagesPayload, 'model'>).messages[0];
+    if (!Array.isArray(message.content) || message.content[0]?.type !== 'text') throw new Error('expected text content');
+    message.content[0].text = 'mutated by first provider';
+    return {
+      response: new Response('unavailable', { status: 503 }),
+      modelKey: 'first-key',
+    };
+  });
   const observedBodies: Array<Omit<MessagesPayload, 'model'>> = [];
   const secondCall = vi.fn(async (_model: unknown, body: unknown): Promise<ProviderCallResult> => {
     observedBodies.push(body as Omit<MessagesPayload, 'model'>);
@@ -584,14 +600,16 @@ test('countTokens failover preserves billing blocks for a strip-off candidate', 
     }),
   ]);
 
-  const payload = makePayload({ system });
+  const payload = makePayload({ system, messages });
   const result = await messagesServe.countTokens({ payload, ctx: makeGatewayCtx(), headers: new Headers() });
 
   assertEquals(assertResultType(result, 'plain').status, 200);
   assertEquals(firstCall.mock.calls.length, 1);
   assertEquals(secondCall.mock.calls.length, 1);
   assertEquals(observedBodies[0]?.system, expectedSystem);
+  assertEquals(observedBodies[0]?.messages, expectedMessages);
   assertEquals(payload.system, expectedSystem);
+  assertEquals(payload.messages, expectedMessages);
 });
 
 test('alias resolution swaps the inbound model id for the target and overlays rules onto the Messages IR', async () => {
