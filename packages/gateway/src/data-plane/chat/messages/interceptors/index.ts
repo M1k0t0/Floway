@@ -33,8 +33,6 @@ export const messagesInterceptors: readonly MessagesInterceptor[] = [
   withRoleCompatibilityApplied,
 ];
 
-// The shipped Messages interceptors all inspect post-`run()` event streams,
-// which the non-streaming count_tokens path cannot supply — so the list
-// stays empty today. Kept as a separate readonly array so the count-tokens
-// attempt has a clear extension point.
+// No count-tokens-specific request mutator is registered today. Keep a
+// separate readonly array so that path has an explicit extension point.
 export const messagesCountTokensInterceptors: readonly MessagesCountTokensInterceptor[] = [];

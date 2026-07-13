@@ -13,7 +13,7 @@ import { withVendorQwenChatCompletionsNormalize } from './vendor-qwen-normalize.
 // entries early-return on `providerModelOf(ctx.candidate).enabledFlags.has(flagId)`).
 //
 // Translated requests re-enter the selected target protocol's chain. The role
-// compatibility entries therefore act only when Chat Completions is the final
+// compatibility entry therefore acts only when Chat Completions is the final
 // target, after pairwise translation has finished.
 //
 //   - withUsageStreamOptionsIncluded, withUsageNormalized: unconditional.

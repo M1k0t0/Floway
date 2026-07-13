@@ -16,7 +16,7 @@ import { withVendorQwenResponsesNormalize } from './vendor-qwen-normalize.ts';
 // early-return on `providerModelOf(ctx.candidate).enabledFlags.has(flagId)`).
 //
 // Translated requests re-enter the selected target protocol's chain. The role
-// compatibility entries therefore act only when Responses is the final target,
+// compatibility entry therefore acts only when Responses is the final target,
 // after pairwise translation has finished.
 //
 // Order matters: earlier entries wrap later ones.
@@ -39,7 +39,7 @@ import { withVendorQwenResponsesNormalize } from './vendor-qwen-normalize.ts';
 //     normalizers so vendor-specific translation sees the already-stripped
 //     canonical payload.
 //   - withVendor*ResponsesNormalize: gated by `vendor-<X>`. Registered after
-//     the demotion entries so each gets the final say on the outbound wire
+//     the role-compatibility entry so each gets the final say on the outbound wire
 //     body.
 //   - withResponsesOutputItemsCanonicalized: runs innermost (last entry)
 //     so it observes the raw upstream event stream first, before any outer

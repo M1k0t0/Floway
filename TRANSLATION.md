@@ -201,8 +201,8 @@ https://github.com/openai/codex/blob/1f17e7512f0e47625f2cad416f14870688a99814/co
 The Codex boundary then runs these steps:
 
 - injects a default `instructions` string when none is supplied; current
-  ChatGPT-subscription catalog models reject an empty or missing field (live
-  probe record:
+  ChatGPT-subscription catalog models reject an empty or missing field (third-
+  party implementation record:
   https://github.com/im4codes/imcodes/blob/5f769d933dfd679e3a4d670183b0384a1baf62cd/src/agent/providers/codex-sdk.ts#L560-L579)
 - strips fields the upstream rejects with `Unsupported parameter`:
   `max_output_tokens`, `temperature`, `top_p`, `frequency_penalty`,
@@ -367,8 +367,10 @@ Known losses:
 
 Request mapping:
 
-- `instructions` and input `system` / `developer` messages become top-level
-  Messages `system`, joined with blank lines.
+- `instructions` and the leading contiguous input `system` / `developer`
+  prefix become top-level Messages `system`; each source and content part stays
+  a separate text block. Later system/developer messages remain inline to
+  preserve chronology.
 - string input becomes one user message.
 - user `input_text` becomes Messages text; `input_image` URLs are resolved via
   the shared remote-image loader and converted to base64 image blocks when
