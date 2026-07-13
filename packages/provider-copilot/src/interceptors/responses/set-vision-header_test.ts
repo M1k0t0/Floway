@@ -3,7 +3,7 @@ import { test } from 'vitest';
 import { withVisionHeaderSet } from './set-vision-header.ts';
 import type { ResponsesBoundaryCtx } from './types.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
-import type { CanonicalResponsesPayload, ResponsesInputItem, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { CanonicalResponsesPayload, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 import type { ExecuteResult } from '@floway-dev/provider';
 import { eventResult } from '@floway-dev/provider';
 import { assertEquals, stubProviderModel, testTelemetryModelIdentity } from '@floway-dev/test-utils';
@@ -40,9 +40,7 @@ test('Responses vision header set when an input_image block is present on a top-
   assertEquals(ctx.headers.get('copilot-vision-request'), 'true');
 });
 
-test('Responses vision header set when an input_image is nested inside a non-message item', async () => {
-  // Recursive scan: hosted-tool outputs (and other future input shapes) may
-  // carry image content under `content`, not at the top-level message layer.
+test('Responses vision header set for an image in function_call_output', async () => {
   const ctx = invocation({
     model: 'gpt-test',
     input: [
@@ -52,13 +50,10 @@ test('Responses vision header set when an input_image is nested inside a non-mes
         content: [{ type: 'input_text', text: 'analyze' }],
       },
       {
-        type: 'custom_tool_call_output',
+        type: 'function_call_output',
         call_id: 'call_1',
-        // Real hosted-tool outputs do not currently carry images, but the
-        // shim path can stuff arbitrary content blocks here, and caozhiyuan's
-        // detector treats any nested `input_image` as vision input.
-        content: [{ type: 'input_image', image_url: 'data:image/png;base64,BBBB' }],
-      } as unknown as ResponsesInputItem,
+        output: [{ type: 'input_image', image_url: 'data:image/png;base64,BBBB', detail: 'auto' }],
+      },
     ],
   });
 
