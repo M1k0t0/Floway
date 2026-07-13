@@ -36,12 +36,8 @@ const normalizeContent = (content: ResponsesInputMessage['content']): ResponsesI
   return content.map(part => (part.type === 'input_image' ? part : { type: 'input_text', text: part.text }));
 };
 
-// OpenAI accepts input messages with the `type` field omitted (implicit
-// `type: "message"`); accept the same so a hand-rolled client that emits
-// `{role, content}` without `type` still routes correctly.
 const isRetainedMessage = (item: ResponsesInputItem): item is ResponsesInputMessage =>
-  (item.type === 'message' || (item.type === undefined && 'role' in (item as { role?: unknown })))
-  && RETAINED_ROLES.has((item as ResponsesInputMessage).role);
+  item.type === 'message' && RETAINED_ROLES.has(item.role);
 
 // The retained items are input-shaped messages (role + `input_text` content),
 // which is what `/responses/compact` echoes so the client can resend `output`
@@ -68,10 +64,9 @@ export const compactionResponse = (input: ResponsesInputItem[], generated: Respo
     if (used > RETAINED_BUDGET_TOKENS && kept.length > 0) break;
 
     kept.push({
-      type: 'message',
+      ...item,
       id: item.id ?? `msg_${crypto.randomUUID().replace(/-/g, '')}`,
       status: item.status ?? 'completed',
-      role: item.role,
       content,
     });
   }
