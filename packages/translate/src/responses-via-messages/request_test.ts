@@ -115,6 +115,83 @@ test('translateResponsesToMessages rejects multimodal custom tool output', async
   );
 });
 
+test('translateResponsesToMessages rejects file tool output', async () => {
+  await assertRejects(
+    () => translateResponsesToMessages({
+      ...minimalPayload,
+      input: [{ type: 'function_call_output', call_id: 'call_1', output: [{ type: 'input_file', file_id: 'file_1' }] }],
+    }),
+    Error,
+    'input_file tool output',
+  );
+});
+
+test('translateResponsesToMessages rejects file message content', async () => {
+  await assertRejects(
+    () => translateResponsesToMessages({
+      ...minimalPayload,
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_file', file_id: 'file_1' }] }],
+    }),
+    Error,
+    'input_file message content',
+  );
+});
+
+test('translateResponsesToMessages rejects file assistant content', async () => {
+  await assertRejects(
+    () => translateResponsesToMessages({
+      ...minimalPayload,
+      input: [{ type: 'message', role: 'assistant', content: [{ type: 'input_file', file_id: 'file_1' }] }],
+    }),
+    Error,
+    'input_file assistant content',
+  );
+});
+
+test('translateResponsesToMessages preserves assistant input_text', async () => {
+  const result = await translateResponsesToMessages({
+    ...minimalPayload,
+    input: [{ type: 'message', role: 'assistant', content: [{ type: 'input_text', text: 'prior reply' }] }],
+  });
+
+  assertEquals(result.target.messages, [
+    { role: 'assistant', content: [{ type: 'text', text: 'prior reply', cache_control: { type: 'ephemeral' } }] },
+  ]);
+});
+
+test('translateResponsesToMessages rejects assistant images', async () => {
+  await assertRejects(
+    () => translateResponsesToMessages({
+      ...minimalPayload,
+      input: [{ type: 'message', role: 'assistant', content: [{ type: 'input_image', image_url: 'https://example.com/a.png', detail: 'auto' }] }],
+    }),
+    Error,
+    'input_image assistant content',
+  );
+});
+
+test('translateResponsesToMessages rejects file_id-only images', async () => {
+  await assertRejects(
+    () => translateResponsesToMessages({
+      ...minimalPayload,
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_image', file_id: 'file_1', detail: 'auto' }] }],
+    }),
+    Error,
+    'file_id-only image content',
+  );
+});
+
+test('translateResponsesToMessages rejects file_id-only image tool output', async () => {
+  await assertRejects(
+    () => translateResponsesToMessages({
+      ...minimalPayload,
+      input: [{ type: 'function_call_output', call_id: 'call_1', output: [{ type: 'input_image', file_id: 'file_1', detail: 'auto' }] }],
+    }),
+    Error,
+    'file_id-only image tool output',
+  );
+});
+
 // ── service_tier → speed mapping ──
 
 test('translateResponsesToMessages maps service_tier:fast to speed:fast (no service_tier on target)', async () => {

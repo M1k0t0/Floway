@@ -217,6 +217,12 @@ export const translateResponsesToChatCompletions = (source: ResponsesRequestPayl
     }
 
     if (item.role === 'assistant') {
+      if (Array.isArray(item.content)) {
+        const unsupported = item.content.find(part => part.type === 'input_file' || part.type === 'input_image');
+        if (unsupported !== undefined) {
+          throw new TranslatorInputError(`Cannot translate ${unsupported.type} assistant content to Chat Completions.`);
+        }
+      }
       assistant = appendAssistantText(assistant, responsesContentToText(item.content));
       continue;
     }
