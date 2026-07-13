@@ -246,7 +246,6 @@ test('generate defers role promotion until after translation to Chat Completions
       disabledPublicModelIds: [],
       modelPrefix: null,
       instance: stubProvider({ callChatCompletions }),
-      supportsResponsesItemReference: true,
     },
     model: stubInternalModel({
       endpoints,
