@@ -45,14 +45,17 @@ export const responsesContentToChatCompletionsContent = (content: string | Respo
             if (typeof part.image_url !== 'string') {
               throw new TranslatorInputError('Cannot translate file_id-only image content to Chat Completions.');
             }
-            if (part.detail !== 'auto' && part.detail !== 'low' && part.detail !== 'high') {
+            let detail: 'auto' | 'low' | 'high';
+            if (part.detail === 'auto' || part.detail === 'low' || part.detail === 'high') {
+              detail = part.detail;
+            } else {
               throw new TranslatorInputError(`Cannot translate image detail '${part.detail}' to Chat Completions.`);
             }
             return {
               type: 'image_url',
               image_url: {
-                url: part.image_url,
-                detail: part.detail,
+                  url: part.image_url,
+                  detail,
               },
             };
           }
