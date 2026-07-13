@@ -3,7 +3,7 @@ import { responsesReasoningToMessagesBlock, unpackReasoningSignature } from '../
 import type { ChatCompletionsReasoningItem, ChatCompletionsMessage } from '@floway-dev/protocols/chat-completions';
 import type { GeminiContent } from '@floway-dev/protocols/gemini';
 import type { MessagesAssistantContentBlock, MessagesMessage } from '@floway-dev/protocols/messages';
-import type { ResponsesInputItem, ResponsesPayload, ResponsesRequestInputItem } from '@floway-dev/protocols/responses';
+import type { ResponsesInputItem, ResponsesPayload } from '@floway-dev/protocols/responses';
 
 // Wire `ResponsesPayload.input` accepts a bare string and EasyInputMessage
 // objects whose `type: "message"` discriminator is omitted. The gateway's
@@ -18,11 +18,6 @@ export type CanonicalResponsesPayload = Omit<ResponsesPayload, 'input'> & {
   input: ResponsesInputItem[];
 };
 
-const canonicalizeResponsesInputItem = (item: ResponsesRequestInputItem): ResponsesInputItem =>
-  item.type === undefined
-    ? { ...item, type: 'message' }
-    : item as ResponsesInputItem;
-
 // Lifts a wire `ResponsesPayload` to canonical form. Called at every wire
 // boundary that produces a payload destined for internal use and by direct
 // Responses-source translators; cross-protocol translators already construct
@@ -31,7 +26,9 @@ export const canonicalizeResponsesPayload = (payload: ResponsesPayload): Canonic
   ...payload,
   input: typeof payload.input === 'string'
     ? [{ type: 'message', role: 'user', content: payload.input }]
-    : payload.input.map(canonicalizeResponsesInputItem),
+    : payload.input.map(item => item.type === undefined
+      ? { ...item, type: 'message' }
+      : item as ResponsesInputItem),
 });
 
 export type ResponsesItemMapper = (
@@ -52,9 +49,7 @@ export type ResponsesItemVisitor = (item: ResponsesInputItem) => void | Promise<
 // The mapped form of a source-items type is always its source minus the
 // top-level `readonly`: the view owns the per-attempt payload clone, so it
 // hands back a freely-mutable container. The mapped type is therefore derived
-// rather than carried as a second generic. Distributing over unions keeps
-// `Mutable<string | readonly ResponsesInputItem[]>` equal to
-// `string | ResponsesInputItem[]`.
+// rather than carried as a second generic.
 type Mutable<T> = T extends readonly (infer E)[] ? E[] : T;
 
 export interface ResponsesItemsView<TSourceItems> {
@@ -68,18 +63,15 @@ export interface ResponsesItemsView<TSourceItems> {
 
 export const responsesItemsView = {
   visitAsResponsesItems: async (
-    input: string | readonly ResponsesInputItem[],
+    input: readonly ResponsesInputItem[],
     visitor: ResponsesItemVisitor,
   ): Promise<void> => {
-    if (typeof input === 'string') return;
     for (const item of input) await visitor(item);
   },
   mapAsResponsesItems: async (
-    input: string | readonly ResponsesInputItem[],
+    input: readonly ResponsesInputItem[],
     mapper: ResponsesItemMapper,
-  ): Promise<string | ResponsesInputItem[]> => {
-    if (typeof input === 'string') return input;
-
+  ): Promise<ResponsesInputItem[]> => {
     const out: ResponsesInputItem[] = [];
     for (const item of input) {
       const mapped = await mapper(item);
@@ -87,7 +79,7 @@ export const responsesItemsView = {
     }
     return out;
   },
-} satisfies ResponsesItemsView<string | readonly ResponsesInputItem[]>;
+} satisfies ResponsesItemsView<readonly ResponsesInputItem[]>;
 
 // ---------------------------------------------------------------------------
 // Messages source
