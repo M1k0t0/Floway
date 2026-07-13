@@ -96,6 +96,24 @@ test('compresses base64 images inside function_call_output tool outputs', async 
   assertEquals(output?.find(part => part.type === 'input_image')?.image_url, 'data:image/webp;base64,AQID');
 });
 
+test('compresses base64 images inside custom_tool_call_output', async () => {
+  initImageProcessor(fixedProcessor);
+
+  const ctx = invocation({
+    model: 'gpt-test',
+    input: [{
+      type: 'custom_tool_call_output',
+      call_id: 'call_1',
+      output: [{ type: 'input_image', image_url: 'data:image/png;base64,AAAA', detail: 'high' }],
+    }],
+  });
+
+  await withInlineImagesCompressed(ctx, stubRequest, okEvents);
+
+  const output = (ctx.payload.input[0] as { output: Array<{ type: string; image_url?: string }> }).output;
+  assertEquals(output.find(part => part.type === 'input_image')?.image_url, 'data:image/webp;base64,AQID');
+});
+
 test('compresses each unique inline image only once when the same data URL appears multiple times', async () => {
   let calls = 0;
   initImageProcessor({
