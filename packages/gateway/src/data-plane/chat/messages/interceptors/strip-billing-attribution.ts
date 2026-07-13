@@ -27,14 +27,15 @@ export const stripBillingAttribution: MessagesPayloadInterceptor = (ctx, _gatewa
   const { payload } = ctx;
 
   if (typeof payload.system === 'string') {
-    payload.system = stripText(payload.system);
-    if (!payload.system) delete payload.system;
+    const system = stripText(payload.system);
+    const { system: _system, ...rest } = payload;
+    ctx.payload = system.length > 0 ? { ...rest, system } : rest;
   } else if (Array.isArray(payload.system)) {
-    for (const block of payload.system) {
-      block.text = stripText(block.text);
-    }
-    payload.system = payload.system.filter(block => block.text.length > 0);
-    if (payload.system.length === 0) delete payload.system;
+    const system = payload.system
+      .map(block => ({ ...block, text: stripText(block.text) }))
+      .filter(block => block.text.length > 0);
+    const { system: _system, ...rest } = payload;
+    ctx.payload = system.length > 0 ? { ...rest, system } : rest;
   }
 
   return run();
