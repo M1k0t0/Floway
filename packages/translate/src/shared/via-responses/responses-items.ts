@@ -29,6 +29,7 @@ export function canonicalizeResponsesPayload(value: unknown): CanonicalResponses
     const message = item as Record<string, unknown>;
     if (message.type !== undefined) return false;
     if (message.role !== 'user' && message.role !== 'assistant' && message.role !== 'system' && message.role !== 'developer') return false;
+    if (message.phase !== undefined && message.phase !== null && typeof message.phase !== 'string') return false;
     return typeof message.content === 'string'
       || (Array.isArray(message.content) && message.content.every(part => {
         if (typeof part !== 'object' || part === null) return false;
