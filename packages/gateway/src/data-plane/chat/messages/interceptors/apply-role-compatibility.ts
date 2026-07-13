@@ -1,7 +1,7 @@
-import type { MessagesPayloadInterceptor } from './types.ts';
+import type { MessagesInterceptor } from './types.ts';
 import { providerModelOf } from '@floway-dev/provider';
 
-export const withRoleCompatibilityApplied: MessagesPayloadInterceptor = (ctx, _gatewayCtx, run) => {
+export const withRoleCompatibilityApplied: MessagesInterceptor = (ctx, _gatewayCtx, run) => {
   if (ctx.targetApi !== 'messages') return run();
   if (!providerModelOf(ctx.candidate).enabledFlags.has('demote-interleaved-system-to-user')) return run();
 

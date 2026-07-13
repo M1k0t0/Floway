@@ -38,6 +38,9 @@ test('rejects malformed untyped input items at the canonical boundary', () => {
     42,
     { content: 'missing role' },
     { role: 'unknown', content: 'invalid role' },
+    { role: 'user', content: [null] },
+    { role: 'user', content: [{}] },
+    { role: 'user', content: [{ type: 'input_text' }] },
   ]) {
     const error = assertThrows(
       () => canonicalizeResponsesPayload({

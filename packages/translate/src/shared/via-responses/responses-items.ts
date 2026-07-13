@@ -24,7 +24,20 @@ const isImplicitEasyInputMessage = (value: unknown): value is ResponsesEasyInput
   const message = value as Record<string, unknown>;
   if (message.type !== undefined) return false;
   if (message.role !== 'user' && message.role !== 'assistant' && message.role !== 'system' && message.role !== 'developer') return false;
-  return typeof message.content === 'string' || Array.isArray(message.content);
+  return typeof message.content === 'string'
+    || (Array.isArray(message.content) && message.content.every(part => {
+      if (typeof part !== 'object' || part === null) return false;
+      const content = part as Record<string, unknown>;
+      switch (content.type) {
+      case 'input_text':
+      case 'output_text':
+        return typeof content.text === 'string';
+      case 'input_image':
+        return typeof content.image_url === 'string' && typeof content.detail === 'string';
+      default:
+        return false;
+      }
+    }));
 };
 
 // Lifts a wire `ResponsesPayload` to canonical form. Called at every wire

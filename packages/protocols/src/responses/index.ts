@@ -70,6 +70,10 @@ export interface ResponsesCompactPayload {
   store?: boolean | null;
 }
 
+export type ResponsesCompactRequestPayload = Omit<ResponsesCompactPayload, 'input'> & {
+  input: string | ResponsesRequestInputItem[];
+};
+
 // Project a (possibly-wider) ResponsesPayload-shaped object into the strict
 // compact wire shape. Every native-compact provider terminal calls this
 // before dispatching to its upstream's `/responses/compact` endpoint, so a
@@ -129,7 +133,10 @@ export interface ResponsesInputMessage {
   status?: string;
   role: 'user' | 'assistant' | 'system' | 'developer';
   content: string | ResponsesInputContent[];
+  phase?: ResponsesMessagePhase;
 }
+
+export type ResponsesMessagePhase = 'commentary' | 'final_answer' | (string & {}) | null;
 
 // The Responses request schema's EasyInputMessage makes the constant
 // `type: "message"` discriminator optional. Wire-facing payloads accept that
@@ -139,6 +146,7 @@ export interface ResponsesInputMessage {
 export interface ResponsesEasyInputMessage {
   content: string | ResponsesInputContent[];
   role: 'user' | 'assistant' | 'system' | 'developer';
+  phase?: ResponsesMessagePhase;
   type?: 'message';
 }
 

@@ -185,9 +185,9 @@ The same boundary runs for both `/v1/responses` (streaming) and
 
 Codex (ChatGPT subscription) only serves Responses; Messages, Chat
 Completions, and Gemini reach Codex through translation. The same boundary
-runs for both `/v1/responses` and the synthesized `/v1/responses/compact`
-path (Codex has no native compact endpoint; the provider drives `compaction_trigger`
-inline and rebuilds the envelope client-side).
+runs for streaming `/v1/responses` and non-streaming `/v1/responses/compact`.
+The compact action is narrowed to the compact request shape and dispatched
+directly to the subscription backend's `/codex/responses/compact` endpoint.
 
 Before the provider boundary, the target Responses interceptor rewrites
 `role: "system"` input messages to `role: "developer"`. It changes only the

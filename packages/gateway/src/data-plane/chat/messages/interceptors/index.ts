@@ -33,6 +33,6 @@ export const messagesInterceptors: readonly MessagesInterceptor[] = [
   withRoleCompatibilityApplied,
 ];
 
-export const messagesCountTokensInterceptors: readonly MessagesCountTokensInterceptor[] = [
-  withRoleCompatibilityApplied,
-];
+// No count-tokens-specific request mutator is registered today. Keep a
+// separate readonly array so that path has an explicit extension point.
+export const messagesCountTokensInterceptors: readonly MessagesCountTokensInterceptor[] = [];
