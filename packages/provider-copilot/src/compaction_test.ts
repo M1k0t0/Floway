@@ -130,6 +130,26 @@ test('preserves input_image parts verbatim in retained content', () => {
   ]);
 });
 
+test('preserves input_file parts and prompt cache breakpoints', () => {
+  const input: ResponsesInputItem[] = [{
+    type: 'message',
+    role: 'user',
+    content: [{
+      type: 'input_file',
+      file_id: 'file_1',
+      prompt_cache_breakpoint: { mode: 'explicit' },
+    }],
+  }];
+
+  const result = compactionResponse(input, generatedResult([compaction]));
+
+  expect((result.output[0] as unknown as { content: unknown[] }).content).toEqual([{
+    type: 'input_file',
+    file_id: 'file_1',
+    prompt_cache_breakpoint: { mode: 'explicit' },
+  }]);
+});
+
 test('input_image parts do not consume token budget', () => {
   // The token heuristic costs images at 0 — codex parity. A retained turn
   // dominated by an image must not push out earlier turns that would
