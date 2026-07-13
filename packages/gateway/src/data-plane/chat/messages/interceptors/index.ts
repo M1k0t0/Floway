@@ -1,4 +1,4 @@
-import { withInterleavedSystemDemotedToUser } from './demote-interleaved-system-to-user.ts';
+import { withRoleCompatibilityApplied } from './apply-role-compatibility.ts';
 import { withReasoningDisabledOnForcedToolChoice } from './disable-reasoning-on-forced-tool-choice.ts';
 import { stripBillingAttribution } from './strip-billing-attribution.ts';
 import type { MessagesCountTokensInterceptor, MessagesInterceptor } from './types.ts';
@@ -23,18 +23,14 @@ import { withMessagesWebSearchShim } from './web-search-shim.ts';
 //     because Anthropic uses it for plan-tier billing.
 //   - withReasoningDisabledOnForcedToolChoice: gated by
 //     `disable-reasoning-on-forced-tool-choice`.
-//   - withInterleavedSystemDemotedToUser: gated by
-//     `demote-interleaved-system-to-user`. Anthropic's top-level
-//     `payload.system` is conceptually the first-position system slot, so
-//     every inline `role: 'system'` message in `payload.messages` is by
-//     definition interleaved and gets rewritten to `role: 'user'` at a native
-//     Messages target. Translated targets apply their own role chain after
-//     translation.
+//   - withRoleCompatibilityApplied: Anthropic's top-level `payload.system` is
+//     the only first-position system slot, so the interleaved-system flag
+//     rewrites every inline system message to user.
 export const messagesInterceptors: readonly MessagesInterceptor[] = [
   withMessagesWebSearchShim,
   stripBillingAttribution,
   withReasoningDisabledOnForcedToolChoice,
-  withInterleavedSystemDemotedToUser,
+  withRoleCompatibilityApplied,
 ];
 
 // The shipped Messages interceptors all inspect post-`run()` event streams,

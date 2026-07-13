@@ -1,9 +1,7 @@
-import { withDemoteDeveloperToSystem } from './demote-developer-to-system.ts';
-import { withInterleavedSystemDemotedToUser } from './demote-interleaved-system-to-user.ts';
+import { withRoleCompatibilityApplied } from './apply-role-compatibility.ts';
 import { withReasoningDisabledOnForcedToolChoice } from './disable-reasoning-on-forced-tool-choice.ts';
 import { withUsageStreamOptionsIncluded } from './include-usage-stream-options.ts';
 import { withUsageNormalized } from './normalize-usage.ts';
-import { withPromoteSystemToDeveloper } from './promote-system-to-developer.ts';
 import { withPromptCacheKeyStripped } from './strip-prompt-cache-key.ts';
 import type { ChatCompletionsInterceptor } from './types.ts';
 import { withVendorDeepseekChatCompletionsNormalize } from './vendor-deepseek-normalize.ts';
@@ -24,18 +22,9 @@ import { withVendorQwenChatCompletionsNormalize } from './vendor-qwen-normalize.
 //   - withReasoningDisabledOnForcedToolChoice: gated by
 //     `disable-reasoning-on-forced-tool-choice`. Emits the gateway's canonical
 //     "no reasoning" sentinel only; vendor wire form is the vendor's job.
-//   - withPromoteSystemToDeveloper: gated by `promote-system-to-developer`.
-//     Rewrites system messages to the developer role accepted by the selected
-//     upstream when Chat Completions is the target; translated targets own role
-//     handling inside their own chain.
-//   - withDemoteDeveloperToSystem: gated by `demote-developer-to-system`.
-//     Runs after promotion, so enabling both makes demotion authoritative.
-//   - withInterleavedSystemDemotedToUser: gated by
-//     `demote-interleaved-system-to-user`. Rewrites any `role: 'system'` that
-//     appears after the leading contiguous system run to `role: 'user'` so
-//     upstreams that reject mid-stream system messages still accept the body.
-//     With all three role flags enabled, the ordered chain is
-//     `system → developer → system → user` for interleaved messages.
+//   - withRoleCompatibilityApplied: applies role flags in the fixed order
+//     `system → developer → system → user`; later demotions are authoritative
+//     when flags overlap, and the final step affects only interleaved system.
 //   - withPromptCacheKeyStripped: gated by `strip-prompt-cache-key`. Drops
 //     the top-level `prompt_cache_key` field for upstreams that reject it as
 //     an unknown argument (e.g. Azure DeepSeek). Runs before vendor
@@ -52,9 +41,7 @@ export const chatCompletionsInterceptors: readonly ChatCompletionsInterceptor[] 
   withUsageStreamOptionsIncluded,
   withUsageNormalized,
   withReasoningDisabledOnForcedToolChoice,
-  withPromoteSystemToDeveloper,
-  withDemoteDeveloperToSystem,
-  withInterleavedSystemDemotedToUser,
+  withRoleCompatibilityApplied,
   withPromptCacheKeyStripped,
   withVendorDeepseekChatCompletionsNormalize,
   withVendorQwenChatCompletionsNormalize,
