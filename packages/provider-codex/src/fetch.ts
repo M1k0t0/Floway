@@ -222,13 +222,10 @@ const seedUpToFirstUserMessage = (input: readonly ResponsesInputItem[]): readonl
   const collected: ResponsesInputItem[] = [];
   for (const item of input) {
     collected.push(item);
-    if (isUserMessageItem(item)) return collected;
+    if (item.type === 'message' && item.role === 'user') return collected;
   }
   return null;
 };
-
-const isUserMessageItem = (item: ResponsesInputItem): boolean =>
-  item.type === 'message' && item.role === 'user';
 
 const buildCodexTurnMetadata = (
   identity: CodexRequestIdentity,
