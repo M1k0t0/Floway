@@ -18,9 +18,7 @@ const ensureAssistant = (assistant: AssistantAccumulator | null): AssistantAccum
     reasoning: createChatCompletionsReasoningProjection(),
   };
 
-const appendAssistantText = (assistant: AssistantAccumulator | null, text: string): AssistantAccumulator | null => {
-  if (!text) return assistant;
-
+const appendAssistantText = (assistant: AssistantAccumulator | null, text: string): AssistantAccumulator => {
   const next = ensureAssistant(assistant);
   next.message.content = typeof next.message.content === 'string' ? next.message.content + text : text;
   return next;

@@ -16,6 +16,17 @@ test('translateResponsesToChatCompletions accepts an implicit message discrimina
   ]);
 });
 
+test('translateResponsesToChatCompletions preserves an explicit empty assistant message', () => {
+  const result = translateResponsesToChatCompletions({
+    model: 'gpt-test',
+    input: [{ type: 'message', role: 'assistant', content: '' }],
+  });
+
+  assertEquals(result.target.messages, [
+    { role: 'assistant', content: '' },
+  ]);
+});
+
 test('translateResponsesToChatCompletions merges adjacent assistant reasoning text and tool calls', () => {
   const result = translateResponsesToChatCompletions({
     model: 'gpt-test',
