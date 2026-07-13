@@ -132,8 +132,7 @@ const createResponsesWebSocketEvents = (c: AuthedContext): ResponsesWebSocketHan
   // genuinely empty, which is bounded because `closed = true` short-
   // circuits future message handlers at the top of `handleClientMessage`.
   const pendingWork = new Set<Promise<unknown>>();
-  let sessionClosedResolve: (() => void) | undefined;
-  const sessionClosed = new Promise<void>(resolve => { sessionClosedResolve = resolve; });
+  const { promise: sessionClosed, resolve: resolveSessionClosed } = Promise.withResolvers<void>();
   const sessionScheduler: BackgroundScheduler = promise => {
     const tracked: Promise<unknown> = Promise.resolve(promise)
       .catch(err => console.error('[ws-background]', err))
@@ -150,7 +149,7 @@ const createResponsesWebSocketEvents = (c: AuthedContext): ResponsesWebSocketHan
   const closeActiveRequest = (): void => {
     closed = true;
     activeAbortController?.abort();
-    sessionClosedResolve?.();
+    resolveSessionClosed();
   };
 
   return {
