@@ -283,7 +283,7 @@ test('countTokens proxies the upstream response as a plain result', async () => 
   assertEquals(callMessagesCountTokens.mock.calls.length, 1);
 });
 
-test('countTokens applies role compatibility before the provider boundary', async () => {
+test('countTokens applies the generation payload transforms before the provider boundary', async () => {
   installRepo();
   const observedBodies: Array<Omit<MessagesPayload, 'model'>> = [];
   const callMessagesCountTokens = vi.fn(async (_model, body): Promise<ProviderCallResult> => {
@@ -296,15 +296,23 @@ test('countTokens applies role compatibility before the provider boundary', asyn
 
   const result = await messagesAttempt.countTokens({
     payload: makePayload({
+      system: 'x-anthropic-billing-header: token\ncch=deadbeef1234;\nbase rules',
       messages: [
         { role: 'system', content: 'inline rules' },
         { role: 'user', content: 'hello' },
       ],
+      thinking: { type: 'enabled', budget_tokens: 1024 },
+      output_config: { effort: 'high' },
+      tool_choice: { type: 'tool', name: 'lookup' },
     }),
     ctx: makeGatewayCtx(),
     candidate: makeCandidate({
       callMessagesCountTokens,
-      enabledFlags: new Set<FlagId>(['demote-interleaved-system-to-user']),
+      enabledFlags: new Set<FlagId>([
+        'strip-billing-attribution',
+        'disable-reasoning-on-forced-tool-choice',
+        'demote-interleaved-system-to-user',
+      ]),
     }),
     headers: new Headers(),
   });
@@ -312,10 +320,13 @@ test('countTokens applies role compatibility before the provider boundary', asyn
   assertEquals(result.type, 'plain');
   assertEquals(observedBodies, [{
     max_tokens: 32,
+    system: 'base rules',
     messages: [
       { role: 'user', content: 'inline rules' },
       { role: 'user', content: 'hello' },
     ],
+    thinking: { type: 'disabled' },
+    tool_choice: { type: 'tool', name: 'lookup' },
   }]);
 });
 
