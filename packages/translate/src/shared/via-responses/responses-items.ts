@@ -25,7 +25,7 @@ export function canonicalizeResponsesPayload(value: unknown): CanonicalResponses
         case 'output_text':
           return typeof content.text === 'string';
         case 'input_image':
-          return typeof content.image_url === 'string' && typeof content.detail === 'string';
+          return (typeof content.image_url === 'string' || typeof content.file_id === 'string') && typeof content.detail === 'string';
         case 'input_file':
           return true;
         default:

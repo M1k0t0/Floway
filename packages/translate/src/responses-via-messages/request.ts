@@ -71,7 +71,11 @@ const translateUserMessage = async (message: ResponsesInputMessage, loadRemoteIm
 
     if (block.type !== 'input_image') continue;
 
-    const image = await resolveImageUrlToMessagesImage((block as ResponsesInputImage).image_url, loadRemoteImage);
+    const imageUrl = (block as ResponsesInputImage).image_url;
+    if (typeof imageUrl !== 'string') {
+      throw new TranslatorInputError('Cannot translate file_id-only image content to Messages.');
+    }
+    const image = await resolveImageUrlToMessagesImage(imageUrl, loadRemoteImage);
     if (image) content.push(image);
   }
 
@@ -87,6 +91,9 @@ const translateToolOutput = async (output: string | ResponsesInputContent[], loa
   const blocks: MessagesToolResultContentBlock[] = [];
   for (const part of output) {
     if (part.type === 'input_image') {
+      if (typeof part.image_url !== 'string') {
+        throw new TranslatorInputError('Cannot translate file_id-only image tool output to Messages.');
+      }
       const image = await resolveImageUrlToMessagesImage(part.image_url, loadRemoteImage);
       if (image) blocks.push(image);
     } else if (part.type === 'input_file') {
