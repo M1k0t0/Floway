@@ -95,20 +95,18 @@ interface CodexRequestIdentity {
   windowId: string;
 }
 
-export interface CodexCompactionTurnMetadata {
-  trigger: 'manual' | 'auto';
-  reason: 'user_requested' | 'context_limit';
-  implementation: 'responses_compact' | 'responses_compaction_v2';
-  phase: 'standalone_turn' | 'mid_turn';
-  strategy: 'memento';
-}
-
-export interface CodexTurnMetadataOptions {
+interface CodexTurnMetadataOptions {
   requestKind: 'turn' | 'compaction';
-  compaction?: CodexCompactionTurnMetadata;
+  compaction?: {
+    trigger: 'manual' | 'auto';
+    reason: 'user_requested' | 'context_limit';
+    implementation: 'responses_compact' | 'responses_compaction_v2';
+    phase: 'standalone_turn' | 'mid_turn';
+    strategy: 'memento';
+  };
 }
 
-export const CODEX_RESPONSES_COMPACTION_V2_TURN_METADATA: CodexTurnMetadataOptions = {
+const CODEX_RESPONSES_COMPACTION_V2_TURN_METADATA: CodexTurnMetadataOptions = {
   requestKind: 'compaction',
   compaction: {
     trigger: 'manual',
