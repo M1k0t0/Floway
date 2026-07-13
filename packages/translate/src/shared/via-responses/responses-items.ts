@@ -4,7 +4,7 @@ import { responsesReasoningToMessagesBlock, unpackReasoningSignature } from '../
 import type { ChatCompletionsReasoningItem, ChatCompletionsMessage } from '@floway-dev/protocols/chat-completions';
 import type { GeminiContent } from '@floway-dev/protocols/gemini';
 import type { MessagesAssistantContentBlock, MessagesMessage } from '@floway-dev/protocols/messages';
-import type { CanonicalResponsesPayload, ResponsesEasyInputMessage, ResponsesInputItem, ResponsesPayload } from '@floway-dev/protocols/responses';
+import type { CanonicalResponsesPayload, ResponsesCompactPayload, ResponsesEasyInputMessage, ResponsesInputItem, ResponsesPayload } from '@floway-dev/protocols/responses';
 
 const isImplicitEasyInputMessage = (value: unknown): value is ResponsesEasyInputMessage & { type?: undefined } => {
   if (typeof value !== 'object' || value === null) return false;
@@ -19,7 +19,7 @@ const isImplicitEasyInputMessage = (value: unknown): value is ResponsesEasyInput
 // boundary that produces a payload destined for internal use and by direct
 // Responses-source translators; cross-protocol translators already construct
 // `CanonicalResponsesPayload` with explicit message discriminators.
-export const canonicalizeResponsesPayload = (payload: ResponsesPayload): CanonicalResponsesPayload => {
+export const canonicalizeResponsesPayload = (payload: ResponsesPayload | ResponsesCompactPayload): CanonicalResponsesPayload => {
   const input: unknown = payload.input;
   if (typeof input !== 'string' && !Array.isArray(input)) {
     throw new TranslatorInputError('Responses input must be a string or an array.', { param: 'input' });
