@@ -153,7 +153,8 @@ const finalizeCopilotModels = (
 
   const models: ProviderModel[] = [];
   for (const mergedModel of merged.data) {
-    const variants = groups.get(mergedModel.id) ?? [mergedModel];
+    const variants = groups.get(mergedModel.id);
+    if (variants === undefined) throw new Error(`Merged Copilot model '${mergedModel.id}' has no raw variants`);
     const endpoints = copilotModelEndpoints(variants);
     const cost = pricingForCopilotPublicModelId(mergedModel.id);
     const draft: Omit<ProviderModel, 'enabledFlags'> = {
