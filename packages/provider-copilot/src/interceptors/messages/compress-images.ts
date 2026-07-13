@@ -1,6 +1,6 @@
 import type { MessagesBoundaryCtx, MessagesCountTokensBoundaryCtx } from './types.ts';
 import { type ImageSizeCalculator, type SizeCaps, fitWithin } from '@floway-dev/platform';
-import type { MessagesImageBlock, MessagesMessage, MessagesToolResultContentBlock, MessagesUserContentBlock } from '@floway-dev/protocols/messages';
+import type { MessagesImageBlock, MessagesMessage, MessagesToolResultBlock, MessagesToolResultContentBlock, MessagesUserContentBlock } from '@floway-dev/protocols/messages';
 import { memoizedBase64Compressor } from '@floway-dev/provider';
 
 // Per-model image caps for the Claude (Messages) egress, measured from the real
@@ -80,7 +80,9 @@ export const withInlineImagesCompressed = async <TResult>(
     };
     const hasCompressedImage = (block: MessagesToolResultContentBlock | MessagesUserContentBlock): block is MessagesImageBlock =>
       block.type === 'image' && compressedData.has(block);
-    const hasCompressedToolResultImage = (block: MessagesUserContentBlock): boolean =>
+    const hasCompressedToolResultImage = (
+      block: MessagesUserContentBlock,
+    ): block is MessagesToolResultBlock & { content: MessagesToolResultContentBlock[] } =>
       block.type === 'tool_result'
       && Array.isArray(block.content)
       && block.content.some(hasCompressedImage);
@@ -89,7 +91,7 @@ export const withInlineImagesCompressed = async <TResult>(
     const rewriteUserContent = (content: MessagesUserContentBlock[]): MessagesUserContentBlock[] =>
       content.map(block => {
         if (hasCompressedImage(block)) return rewriteImage(block);
-        if (!hasCompressedToolResultImage(block) || !Array.isArray(block.content)) return block;
+        if (!hasCompressedToolResultImage(block)) return block;
         return { ...block, content: rewriteToolResultContent(block.content) };
       });
 
