@@ -19,7 +19,12 @@ const isImplicitEasyInputMessage = (value: unknown): value is ResponsesEasyInput
 // boundary that produces a payload destined for internal use and by direct
 // Responses-source translators; cross-protocol translators already construct
 // `CanonicalResponsesPayload` with explicit message discriminators.
-export const canonicalizeResponsesPayload = (payload: ResponsesPayload | ResponsesCompactPayload): CanonicalResponsesPayload => {
+export function canonicalizeResponsesPayload(payload: ResponsesPayload | ResponsesCompactPayload): CanonicalResponsesPayload;
+export function canonicalizeResponsesPayload(value: unknown): CanonicalResponsesPayload {
+  if (typeof value !== 'object' || value === null) {
+    throw new TranslatorInputError('Responses payload must be an object.');
+  }
+  const payload = value as ResponsesPayload | ResponsesCompactPayload;
   const input: unknown = payload.input;
   if (typeof input !== 'string' && !Array.isArray(input)) {
     throw new TranslatorInputError('Responses input must be a string or an array.', { param: 'input' });
@@ -36,7 +41,7 @@ export const canonicalizeResponsesPayload = (payload: ResponsesPayload | Respons
           return item as ResponsesInputItem;
         }),
   };
-};
+}
 
 export type ResponsesItemMapper = (
   item: ResponsesInputItem,

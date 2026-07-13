@@ -256,6 +256,19 @@ test('POST /v1/responses rejects a malformed input container', async () => {
   assertEquals(body.error.param, 'input');
 });
 
+test('POST /v1/responses rejects a null payload', async () => {
+  installRepo();
+  const response = await makeApp().request('/v1/responses', {
+    method: 'POST',
+    headers: new Headers({ 'content-type': 'application/json' }),
+    body: 'null',
+  });
+
+  assertEquals(response.status, 400);
+  const body = await response.json() as { error: { message: string } };
+  assertEquals(body.error.message, 'Responses payload must be an object.');
+});
+
 test('POST /v1/responses returns a single JSON body when stream is omitted', async () => {
   installRepo();
   queueCompletedResponse('resp_nonstream');

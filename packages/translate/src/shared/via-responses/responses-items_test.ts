@@ -63,6 +63,14 @@ test('rejects a missing or malformed input container', () => {
   }
 });
 
+test('rejects a non-object top-level payload', () => {
+  assertThrows(
+    () => canonicalizeResponsesPayload(null as unknown as ResponsesPayload),
+    TranslatorInputError,
+    'payload must be an object',
+  );
+});
+
 test('mapAsResponsesItems maps Responses input items through the callback', async () => {
   const payload = canonicalizeResponsesPayload({
     model: 'gpt-test',
