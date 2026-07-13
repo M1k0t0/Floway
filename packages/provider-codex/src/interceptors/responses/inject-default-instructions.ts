@@ -10,7 +10,7 @@ export const injectDefaultInstructions = async <TResult>(
   run: () => Promise<TResult>,
 ): Promise<TResult> => {
   const instructions = ctx.payload.instructions;
-  if (typeof instructions !== 'string' || instructions.length === 0) {
+  if (instructions === undefined || instructions === null || instructions === '') {
     ctx.payload = { ...ctx.payload, instructions: "You're a helpful assistant." };
   }
   return await run();

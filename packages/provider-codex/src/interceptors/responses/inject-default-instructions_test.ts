@@ -42,6 +42,18 @@ test('preserves a caller-supplied instructions string', async () => {
   assertEquals(ctx.payload.instructions, 'You are a pirate.');
 });
 
+test('preserves malformed instructions for upstream validation', async () => {
+  const ctx = invocation({
+    model: 'gpt-test',
+    input: 'hello',
+    instructions: 42 as unknown as string,
+  });
+
+  await injectDefaultInstructions(ctx, stubRequest, okEvents);
+
+  assertEquals(ctx.payload.instructions, 42);
+});
+
 test('injects the default and preserves input items it does not own', async () => {
   const ctx = invocation({
     model: 'gpt-test',
