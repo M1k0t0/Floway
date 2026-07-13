@@ -38,6 +38,7 @@ test('rejects malformed untyped input items at the canonical boundary', () => {
     42,
     { content: 'missing role' },
     { role: 'unknown', content: 'invalid role' },
+    { role: 'user', content: [null] },
   ]) {
     const error = assertThrows(
       () => canonicalizeResponsesPayload({
@@ -48,6 +49,17 @@ test('rejects malformed untyped input items at the canonical boundary', () => {
       'valid role and content',
     ) as TranslatorInputError;
     assertEquals(error.param, 'input[0]');
+  }
+});
+
+test('rejects a missing or malformed input container', () => {
+  for (const input of [undefined, null, 42, { role: 'user', content: 'hello' }]) {
+    const error = assertThrows(
+      () => canonicalizeResponsesPayload({ model: 'gpt-test', input } as unknown as ResponsesPayload),
+      TranslatorInputError,
+      'string or an array',
+    ) as TranslatorInputError;
+    assertEquals(error.param, 'input');
   }
 });
 

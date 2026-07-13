@@ -11,25 +11,32 @@ const isImplicitEasyInputMessage = (value: unknown): value is ResponsesEasyInput
   const message = value as Record<string, unknown>;
   if (message.type !== undefined) return false;
   if (message.role !== 'user' && message.role !== 'assistant' && message.role !== 'system' && message.role !== 'developer') return false;
-  return typeof message.content === 'string' || Array.isArray(message.content);
+  return typeof message.content === 'string'
+    || (Array.isArray(message.content) && message.content.every(part => typeof part === 'object' && part !== null));
 };
 
 // Lifts a wire `ResponsesPayload` to canonical form. Called at every wire
 // boundary that produces a payload destined for internal use and by direct
 // Responses-source translators; cross-protocol translators already construct
 // `CanonicalResponsesPayload` with explicit message discriminators.
-export const canonicalizeResponsesPayload = (payload: ResponsesPayload): CanonicalResponsesPayload => ({
-  ...payload,
-  input: typeof payload.input === 'string'
-    ? [{ type: 'message', role: 'user', content: payload.input }]
-    : payload.input.map((item, index) => {
-        if (isImplicitEasyInputMessage(item)) return { ...item, type: 'message' };
-        if (typeof item !== 'object' || item === null || (item as { type?: unknown }).type === undefined) {
-          throw new TranslatorInputError('Untyped Responses input items require a valid role and content.', { param: `input[${index}]` });
-        }
-        return item as ResponsesInputItem;
-      }),
-});
+export const canonicalizeResponsesPayload = (payload: ResponsesPayload): CanonicalResponsesPayload => {
+  const input: unknown = payload.input;
+  if (typeof input !== 'string' && !Array.isArray(input)) {
+    throw new TranslatorInputError('Responses input must be a string or an array.', { param: 'input' });
+  }
+  return {
+    ...payload,
+    input: typeof input === 'string'
+      ? [{ type: 'message', role: 'user', content: input }]
+      : input.map((item, index) => {
+          if (isImplicitEasyInputMessage(item)) return { ...item, type: 'message' };
+          if (typeof item !== 'object' || item === null || (item as { type?: unknown }).type === undefined) {
+            throw new TranslatorInputError('Untyped Responses input items require a valid role and content.', { param: `input[${index}]` });
+          }
+          return item as ResponsesInputItem;
+        }),
+  };
+};
 
 export type ResponsesItemMapper = (
   item: ResponsesInputItem,
