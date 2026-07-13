@@ -144,10 +144,8 @@ const responsesSystemBlocks = (message: ResponsesInputMessage): MessagesTextBloc
       throw new TranslatorInputError(`Invalid 'input_image' content part in ${message.role} message. Only 'input_text' content parts are supported in ${message.role} messages on this model.`);
     }
     if (block.type !== 'input_text' && block.type !== 'output_text') {
-      // Exhaustiveness guard: today ResponsesInputContent is
-      // input_text|input_image|output_text; a future variant must opt into
-      // translator behavior rather than be silently dropped from system
-      // content.
+      // Every non-text content variant must opt into translator behavior
+      // rather than be silently dropped from system content.
       throw new TranslatorInputError(`Invalid content block type '${(block as { type: string }).type}' in ${message.role} message.`);
     }
     blocks.push({ type: 'text', text: block.text });
@@ -206,7 +204,7 @@ const translateResponsesInput = async (input: ResponsesInputItem[], loadRemoteIm
       case 'system':
       case 'developer': {
         // The leading prefix was lifted above; keep later instruction messages
-        // inline so chronology reaches the target role-compatibility pass.
+        // inline to preserve chronology.
         const blocks = responsesSystemBlocks(item);
         messages.push({ role: 'system', content: blocks.length > 0 ? blocks : '' });
         break;
