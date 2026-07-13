@@ -1,3 +1,4 @@
+import { TranslatorInputError } from '../../translator-input-error.ts';
 import type { ChatCompletionsContentPart } from '@floway-dev/protocols/chat-completions';
 import type { ResponsesInputContent } from '@floway-dev/protocols/responses';
 
@@ -34,18 +35,21 @@ export const responsesContentToText = (content: string | ResponsesInputContent[]
 export const responsesContentToChatCompletionsContent = (content: string | ResponsesInputContent[]): string | ChatCompletionsContentPart[] => {
   if (typeof content === 'string') return content;
 
-  return content.some(part => part.type === 'input_image')
+  return content.some(part => part.type === 'input_image' || part.type === 'input_file')
     ? content.map(
-        (part): ChatCompletionsContentPart =>
-          part.type === 'input_image'
-            ? {
-                type: 'image_url',
-                image_url: {
-                  url: part.image_url,
-                  detail: part.detail,
-                },
-              }
-            : { type: 'text', text: part.text },
+        (part): ChatCompletionsContentPart => {
+          if (part.type === 'input_image') {
+            return {
+              type: 'image_url',
+              image_url: {
+                url: part.image_url,
+                detail: part.detail,
+              },
+            };
+          }
+          if (part.type === 'input_file') throw new TranslatorInputError('Cannot translate input_file content to Chat Completions.');
+          return { type: 'text', text: part.text };
+        },
       )
     : contentPartsToText(content);
 };
