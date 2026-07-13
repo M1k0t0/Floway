@@ -12,14 +12,14 @@ import type { ResponsesInputItem } from '@floway-dev/protocols/responses';
  *   plus any future hosted-tool output shape). Classify all of them as agent.
  * - An assistant message replayed back into `input` is also agent-driven.
  *
- * Everything else (user / system / developer messages, plain string input)
- * means the user just spoke, so initiator = user.
+ * User / system / developer messages mean the user just spoke, so initiator =
+ * user.
  *
  * The header name is lowercase `x-initiator`; HTTP header names are
  * case-insensitive on the wire, so the casing is cosmetic.
  *
  * References:
- * - https://github.com/caozhiyuan/copilot-api/blob/main/src/routes/responses/utils.ts#L60-L73
+ * - https://github.com/caozhiyuan/copilot-api/blob/cd8207cb70ede07771bf37a04accfbf2af76d980/src/routes/responses/utils.ts#L75-L87
  *   (`hasAgentInitiator`)
  */
 export const withInitiatorHeaderSet = async <TResult>(
