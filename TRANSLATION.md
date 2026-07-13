@@ -590,6 +590,11 @@ Known losses:
 - Freeform `custom` tool `format.definition` is preserved as a
   `Lark grammar: ${definition}` description on the wrapped `input` parameter;
   other `format` fields are not preserved.
+- `input_file` message/tool-output content and assistant-side files or images
+  have no Chat counterpart and are rejected.
+- File-id-only images cannot be materialized by the pure translator and are
+  rejected. Chat image detail supports only `auto`, `low`, and `high`; other
+  Responses values such as `original` are rejected.
 - opaque Responses reasoning state is not requested, translated, or preserved on
   Chat fallback paths.
 

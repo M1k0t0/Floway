@@ -22,15 +22,15 @@ const RETAINED_ROLES = new Set(['user', 'assistant', 'developer', 'system']);
 
 // codex's retained-message budget (its comment notes it mirrors the server-side
 // `/responses/compact` default) and its token heuristic `ceil(utf8_bytes / 4)`,
-// with images costing nothing.
+// with non-text content costing nothing.
 const RETAINED_BUDGET_TOKENS = 64_000;
 const APPROX_BYTES_PER_TOKEN = 4;
 const encoder = new TextEncoder();
 
 // Native compact echoes every text part — including assistant `output_text` —
 // as `input_text` so the client can resend `output` verbatim as next-turn
-// `input`. Normalize unconditionally; images pass through (and cost 0 tokens
-// against the retained budget).
+// `input`. Normalize unconditionally; non-text content passes through and costs
+// 0 tokens against the retained budget.
 const normalizeContent = (content: ResponsesInputMessage['content']): ResponsesInputContent[] => {
   if (typeof content === 'string') return [{ type: 'input_text', text: content }];
   return content.map(part => (part.type === 'output_text' ? { ...part, type: 'input_text' } : part));
