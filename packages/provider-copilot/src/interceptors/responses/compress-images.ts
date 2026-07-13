@@ -18,7 +18,9 @@ export const withInlineImagesCompressed = async <TResult>(
   const targets: ResponsesInputImage[] = [];
   if (Array.isArray(ctx.payload.input)) {
     for (const item of ctx.payload.input) {
-      const parts = item.type === 'message' ? item.content : item.type === 'function_call_output' ? item.output : undefined;
+      const parts = item.type === undefined || item.type === 'message'
+        ? item.content
+        : item.type === 'function_call_output' ? item.output : undefined;
       if (!Array.isArray(parts)) continue;
       for (const part of parts) {
         if (part.type === 'input_image' && isBase64ImageDataUrl(part.image_url)) targets.push(part);

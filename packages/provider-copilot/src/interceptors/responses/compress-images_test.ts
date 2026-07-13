@@ -26,8 +26,8 @@ const invocation = (payload: ResponsesPayload): ResponsesBoundaryCtx => ({
 });
 
 const firstImageUrl = (payload: ResponsesPayload): string => {
-  const input = payload.input as Array<{ type: string; content?: Array<{ type: string; image_url?: string }> }>;
-  const message = input.find(item => item.type === 'message');
+  const input = payload.input as Array<{ type?: string; content?: Array<{ type: string; image_url?: string }> }>;
+  const message = input.find(item => item.type === undefined || item.type === 'message');
   const image = message?.content?.find(part => part.type === 'input_image');
   return image?.image_url ?? '';
 };
@@ -47,6 +47,22 @@ test('rewrites a base64 input_image data URL to a WebP data URL', async () => {
         ],
       },
     ],
+  });
+
+  await withInlineImagesCompressed(ctx, stubRequest, okEvents);
+
+  assertEquals(firstImageUrl(ctx.payload), 'data:image/webp;base64,AQID');
+});
+
+test('rewrites an image inside an EasyInputMessage without a type field', async () => {
+  initImageProcessor(fixedProcessor);
+
+  const ctx = invocation({
+    model: 'gpt-test',
+    input: [{
+      role: 'user',
+      content: [{ type: 'input_image', image_url: 'data:image/png;base64,AAAA', detail: 'auto' }],
+    }],
   });
 
   await withInlineImagesCompressed(ctx, stubRequest, okEvents);
