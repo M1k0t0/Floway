@@ -5,7 +5,7 @@ import { rejectProgramCaller, rejectProgrammaticResponsesPayload } from '../shar
 import { canonicalizeResponsesPayload } from '../shared/via-responses/responses-items.ts';
 import { TranslatorInputError } from '../translator-input-error.ts';
 import type { ChatCompletionsPayload, ChatCompletionsMessage, ChatCompletionsTool, ChatCompletionsToolCall } from '@floway-dev/protocols/chat-completions';
-import type { ResponsesPayload, ResponsesTool, ResponsesToolChoice } from '@floway-dev/protocols/responses';
+import type { ResponsesPayload, ResponsesRequestPayload, ResponsesTool, ResponsesToolChoice } from '@floway-dev/protocols/responses';
 
 interface AssistantAccumulator {
   message: ChatCompletionsMessage;
@@ -133,7 +133,7 @@ export interface ResponsesToChatCompletionsResult {
   customToolNames: Set<string>;
 }
 
-export const translateResponsesToChatCompletions = (source: ResponsesPayload): ResponsesToChatCompletionsResult => {
+export const translateResponsesToChatCompletions = (source: ResponsesRequestPayload): ResponsesToChatCompletionsResult => {
   const payload = canonicalizeResponsesPayload(source);
   rejectProgrammaticResponsesPayload(payload, 'Chat Completions');
   const customToolNames = new Set<string>();

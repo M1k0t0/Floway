@@ -5,7 +5,7 @@
 
 export interface ResponsesPayload {
   model: string;
-  input: string | ResponsesRequestInputItem[];
+  input: string | ResponsesInputItem[];
   previous_response_id?: string | null;
   instructions?: string | null;
   temperature?: number | null;
@@ -58,7 +58,7 @@ export interface ResponsesPayload {
 // Reference: https://developers.openai.com/api/reference/resources/responses/methods/compact
 export interface ResponsesCompactPayload {
   model: string;
-  input: string | ResponsesRequestInputItem[];
+  input: string | ResponsesInputItem[];
   instructions?: string | null;
   previous_response_id?: string | null;
   prompt_cache_key?: string | null;
@@ -149,6 +149,10 @@ export interface ResponsesEasyInputMessage {
 export type ResponsesRequestInputItem =
   | ResponsesEasyInputMessage
   | ResponsesInputItem;
+
+export type ResponsesRequestPayload = Omit<ResponsesPayload, 'input'> & {
+  input: string | ResponsesRequestInputItem[];
+};
 
 export type ResponsesInputContent = ResponsesInputText | ResponsesInputImage | ResponsesInputFile;
 

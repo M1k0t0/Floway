@@ -1,5 +1,5 @@
 import { TranslatorInputError } from '../../translator-input-error.ts';
-import type { ResponsesInputItem, ResponsesPayload, ResponsesRequestInputItem } from '@floway-dev/protocols/responses';
+import type { ResponsesInputItem, ResponsesPayload } from '@floway-dev/protocols/responses';
 
 export const requiresNativeResponses = (payload: ResponsesPayload): boolean => {
   const toolChoice = payload.tool_choice;
@@ -42,13 +42,13 @@ const hasDeferredTool = (tool: unknown): boolean => {
   return Array.isArray(record.tools) && record.tools.some(hasDeferredTool);
 };
 
-const isProgramCaller = (item: ResponsesRequestInputItem): item is ResponsesInputItem & { call_id: string; caller: { type: 'program'; caller_id: string } } => {
+const isProgramCaller = (item: ResponsesInputItem): item is ResponsesInputItem & { call_id: string; caller: { type: 'program'; caller_id: string } } => {
   if (!('caller' in item)) return false;
   const caller = item.caller;
   return typeof caller === 'object' && caller !== null && 'type' in caller && caller.type === 'program';
 };
 
-export const rejectProgramCaller = (item: ResponsesRequestInputItem): void => {
+export const rejectProgramCaller = (item: ResponsesInputItem): void => {
   if (isProgramCaller(item)) {
     throw new TranslatorInputError(`Cannot translate ${item.type} '${item.call_id}' with a program caller.`);
   }

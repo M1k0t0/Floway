@@ -26,6 +26,7 @@ import type {
   ResponsesInputMessage,
   ResponsesInputText,
   ResponsesPayload,
+  ResponsesRequestPayload,
   ResponsesTool,
   ResponsesToolChoice,
 } from '@floway-dev/protocols/responses';
@@ -337,7 +338,7 @@ const translateToolChoice = (toolChoice: ResponsesToolChoice | null | undefined)
   return undefined;
 };
 
-export const translateResponsesToMessages = async (source: ResponsesPayload, options: TranslateResponsesToMessagesOptions = {}): Promise<ResponsesToMessagesResult> => {
+export const translateResponsesToMessages = async (source: ResponsesRequestPayload, options: TranslateResponsesToMessagesOptions = {}): Promise<ResponsesToMessagesResult> => {
   const payload = canonicalizeResponsesPayload(source);
   rejectProgrammaticResponsesPayload(payload, 'Messages');
   const customToolNames = new Set<string>();
@@ -410,5 +411,5 @@ export const translateResponsesToMessages = async (source: ResponsesPayload, opt
   return { target, customToolNames };
 };
 
-export const buildTargetRequest = (payload: ResponsesPayload, options: { fallbackMaxOutputTokens?: number }): Promise<ResponsesToMessagesResult> =>
+export const buildTargetRequest = (payload: ResponsesRequestPayload, options: { fallbackMaxOutputTokens?: number }): Promise<ResponsesToMessagesResult> =>
   translateResponsesToMessages(payload, options);

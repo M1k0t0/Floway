@@ -16,7 +16,7 @@ import { DOWNSTREAM_KEEP_ALIVE_INTERVAL_MS, type StreamCompletion } from '../sha
 import type { BackgroundScheduler } from '@floway-dev/platform';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import { RESPONSES_MISSING_TERMINAL_MESSAGE } from '@floway-dev/protocols/responses';
-import { isResponsesTerminalEvent, type ResponsesPayload, type ResponsesResult, type ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import { isResponsesTerminalEvent, type ResponsesRequestPayload, type ResponsesResult, type ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 import type { ExecuteResult } from '@floway-dev/provider';
 import { toInternalDebugError } from '@floway-dev/provider';
 import { TranslatorInputError } from '@floway-dev/translate';
@@ -69,7 +69,7 @@ declare const WebSocketPair: {
 interface ResponsesWebSocketClientEvent {
   type: string;
   event_id?: string;
-  response?: Partial<ResponsesPayload>;
+  response?: Partial<ResponsesRequestPayload>;
   [key: string]: unknown;
 }
 
@@ -321,7 +321,7 @@ const responsesPayloadFromClientSource = (source: object): CanonicalResponsesPay
     throw new WebSocketClientMessageError('response.create requires response.input to be a string or an array.');
   }
   // stamp stream: true — the WS transport always streams.
-  return { ...canonicalizeResponsesPayload(source as ResponsesPayload), stream: true };
+  return { ...canonicalizeResponsesPayload(source as ResponsesRequestPayload), stream: true };
 };
 
 const respondResponsesWebSocket = async (input: {

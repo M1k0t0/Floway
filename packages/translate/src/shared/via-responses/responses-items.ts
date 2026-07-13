@@ -4,9 +4,9 @@ import { TranslatorInputError } from '../../translator-input-error.ts';
 import type { ChatCompletionsReasoningItem, ChatCompletionsMessage } from '@floway-dev/protocols/chat-completions';
 import type { GeminiContent } from '@floway-dev/protocols/gemini';
 import type { MessagesAssistantContentBlock, MessagesMessage } from '@floway-dev/protocols/messages';
-import type { ResponsesEasyInputMessage, ResponsesInputItem, ResponsesPayload } from '@floway-dev/protocols/responses';
+import type { ResponsesEasyInputMessage, ResponsesInputItem, ResponsesRequestPayload } from '@floway-dev/protocols/responses';
 
-// Wire `ResponsesPayload.input` accepts a bare string and EasyInputMessage
+// Wire `ResponsesRequestPayload.input` accepts a bare string and EasyInputMessage
 // objects whose `type: "message"` discriminator is omitted. The gateway's
 // canonical internal shape is an explicitly discriminated item array: every
 // consumer past HTTP / WS entry normalization or cross-protocol translation
@@ -15,11 +15,11 @@ import type { ResponsesEasyInputMessage, ResponsesInputItem, ResponsesPayload } 
 // shape directly — their `buildTargetRequest` always constructs an array —
 // so the boundary between "wire" and "canonical" naturally sits at the
 // translator's return type.
-export type CanonicalResponsesPayload = Omit<ResponsesPayload, 'input'> & {
+export type CanonicalResponsesPayload = Omit<ResponsesRequestPayload, 'input'> & {
   input: ResponsesInputItem[];
 };
 
-// Lifts a wire `ResponsesPayload` to canonical form. Called at every wire
+// Lifts a wire `ResponsesRequestPayload` to canonical form. Called at every wire
 // boundary that produces a payload destined for internal use and by direct
 // Responses-source translators; cross-protocol translators already construct
 // `CanonicalResponsesPayload` with explicit message discriminators.
@@ -50,7 +50,7 @@ export function canonicalizeResponsesPayload(value: unknown): CanonicalResponses
   if (typeof value !== 'object' || value === null) {
     throw new TranslatorInputError('Responses payload must be an object.');
   }
-  const payload = value as ResponsesPayload;
+  const payload = value as ResponsesRequestPayload;
   const input: unknown = payload.input;
   if (typeof input !== 'string' && !Array.isArray(input)) {
     throw new TranslatorInputError('Responses input must be a string or an array.', { param: 'input' });
