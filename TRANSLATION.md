@@ -59,7 +59,8 @@ the gateway returns a Gemini-shaped unsupported-model error.
 - Responses wire input accepts OpenAI's EasyInputMessage shorthand without a
   `type` field. HTTP, WebSocket, and direct Responses-source translator
   boundaries normalize it to an explicit `type: "message"` before storage,
-  interception, or translation.
+  interception, or translation. Malformed untyped items are rejected as caller
+  input errors at the same boundary.
 - Translators do not synthesize defaults merely to satisfy a target shape.
   Examples: no translated-only `temperature: 1`, `store: false`,
   `parallel_tool_calls: true`, or `reasoning.summary: "detailed"`.

@@ -1,5 +1,6 @@
 import { parseToolArgumentsObject } from '../messages/tool-arguments.ts';
 import { responsesReasoningToMessagesBlock, unpackReasoningSignature } from '../messages-and-responses/reasoning.ts';
+import { TranslatorInputError } from '../../translator-input-error.ts';
 import type { ChatCompletionsReasoningItem, ChatCompletionsMessage } from '@floway-dev/protocols/chat-completions';
 import type { GeminiContent } from '@floway-dev/protocols/gemini';
 import type { MessagesAssistantContentBlock, MessagesMessage } from '@floway-dev/protocols/messages';
@@ -34,9 +35,13 @@ export const canonicalizeResponsesPayload = (payload: ResponsesPayload): Canonic
   ...payload,
   input: typeof payload.input === 'string'
     ? [{ type: 'message', role: 'user', content: payload.input }]
-    : payload.input.map(item => isImplicitEasyInputMessage(item)
-      ? { ...item, type: 'message' }
-      : item as ResponsesInputItem),
+    : payload.input.map((item, index) => {
+        if (isImplicitEasyInputMessage(item)) return { ...item, type: 'message' };
+        if (typeof item !== 'object' || item === null || (item as { type?: unknown }).type === undefined) {
+          throw new TranslatorInputError('Untyped Responses input items require a valid role and content.', { param: `input[${index}]` });
+        }
+        return item as ResponsesInputItem;
+      }),
 });
 
 export type ResponsesItemMapper = (
