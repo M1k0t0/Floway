@@ -19,6 +19,7 @@ test('canonicalizes string and implicit-message wire inputs', () => {
     model: 'gpt-test',
     input: [
       { role: 'system', content: 'rules', phase: 'future_phase' },
+      { role: 'user', content: [{ type: 'input_image', file_id: 'file_1', detail: 'original' }] },
       { type: 'message', role: 'user', content: 'hello' },
       { type: 'function_call_output', call_id: 'call_1', output: 'result' },
     ],
@@ -26,6 +27,7 @@ test('canonicalizes string and implicit-message wire inputs', () => {
     model: 'gpt-test',
     input: [
       { type: 'message', role: 'system', content: 'rules', phase: 'future_phase' },
+      { type: 'message', role: 'user', content: [{ type: 'input_image', file_id: 'file_1', detail: 'original' }] },
       { type: 'message', role: 'user', content: 'hello' },
       { type: 'function_call_output', call_id: 'call_1', output: 'result' },
     ],
