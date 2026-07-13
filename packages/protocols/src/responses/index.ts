@@ -196,8 +196,6 @@ export interface ResponsesInputImage {
   prompt_cache_breakpoint?: ResponsesPromptCacheBreakpoint | null;
 }
 
-export type ResponsesToolOutputContent = ResponsesInputText | ResponsesInputImage | ResponsesInputFile;
-
 export interface ResponsesInputFile {
   type: 'input_file';
   detail?: 'auto' | 'low' | 'high';
@@ -265,7 +263,7 @@ export interface ResponsesCustomToolCallItem {
 export interface ResponsesCustomToolCallOutputItem {
   type: 'custom_tool_call_output';
   call_id: string;
-  output: string | ResponsesToolOutputContent[];
+  output: string | ResponsesInputContent[];
   id?: string;
   status?: string;
   caller?: ResponsesToolCaller | null;

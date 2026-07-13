@@ -6,20 +6,20 @@ import type { GeminiContent } from '@floway-dev/protocols/gemini';
 import type { MessagesAssistantContentBlock, MessagesMessage } from '@floway-dev/protocols/messages';
 import type { CanonicalResponsesPayload, ResponsesEasyInputMessage, ResponsesInputItem, ResponsesPayload } from '@floway-dev/protocols/responses';
 
-const isImplicitEasyInputMessage = (value: unknown): value is ResponsesEasyInputMessage & { type?: undefined } => {
-  if (typeof value !== 'object' || value === null) return false;
-  const message = value as Record<string, unknown>;
-  if (message.type !== undefined) return false;
-  if (message.role !== 'user' && message.role !== 'assistant' && message.role !== 'system' && message.role !== 'developer') return false;
-  return typeof message.content === 'string'
-    || (Array.isArray(message.content) && message.content.every(part => typeof part === 'object' && part !== null));
-};
-
 // Lifts a wire `ResponsesPayload` to canonical form. Called at every wire
 // boundary that produces a payload destined for internal use and by direct
 // Responses-source translators; cross-protocol translators already construct
 // `CanonicalResponsesPayload` with explicit message discriminators.
 export function canonicalizeResponsesPayload(value: unknown): CanonicalResponsesPayload {
+  const isImplicitEasyInputMessage = (item: unknown): item is ResponsesEasyInputMessage & { type?: undefined } => {
+    if (typeof item !== 'object' || item === null) return false;
+    const message = item as Record<string, unknown>;
+    if (message.type !== undefined) return false;
+    if (message.role !== 'user' && message.role !== 'assistant' && message.role !== 'system' && message.role !== 'developer') return false;
+    return typeof message.content === 'string'
+      || (Array.isArray(message.content) && message.content.every(part => typeof part === 'object' && part !== null));
+  };
+
   if (typeof value !== 'object' || value === null) {
     throw new TranslatorInputError('Responses payload must be an object.');
   }

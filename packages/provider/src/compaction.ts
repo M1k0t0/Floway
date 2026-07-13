@@ -20,15 +20,6 @@ const RETAINED_BUDGET_TOKENS = 64_000;
 const APPROX_BYTES_PER_TOKEN = 4;
 const encoder = new TextEncoder();
 
-// Native compact echoes every text part — including assistant `output_text` —
-// as `input_text` so the client can resend `output` verbatim as next-turn
-// `input`. Normalize unconditionally; images pass through (and cost 0 tokens
-// against the retained budget).
-const normalizeContent = (content: ResponsesInputMessage['content']): ResponsesInputContent[] => {
-  if (typeof content === 'string') return [{ type: 'input_text', text: content }];
-  return content.map(part => (part.type === 'output_text' ? { ...part, type: 'input_text' } : part));
-};
-
 // The retained items are input-shaped messages (role + `input_text` content),
 // which is what `/responses/compact` echoes so the client can resend `output`
 // as the next turn's `input`. `ResponsesOutputItem` does not model user/system
@@ -48,7 +39,11 @@ export const compactionResponse = (input: ResponsesInputItem[], generated: Respo
     const item = input[i];
     if (item.type !== 'message') continue;
 
-    const content = normalizeContent(item.content);
+    // Native compact echoes assistant output_text as input_text; every other
+    // canonical content part remains unchanged for the next turn.
+    const content: ResponsesInputContent[] = typeof item.content === 'string'
+      ? [{ type: 'input_text', text: item.content }]
+      : item.content.map(part => part.type === 'output_text' ? { ...part, type: 'input_text' } : part);
     const tokens = content.reduce((sum, part) => (part.type === 'input_image' ? sum : sum + Math.ceil(encoder.encode(part.text).length / APPROX_BYTES_PER_TOKEN)), 0);
     used += Math.max(tokens, 1);
     if (used > RETAINED_BUDGET_TOKENS && kept.length > 0) break;

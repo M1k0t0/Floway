@@ -26,14 +26,10 @@ const hasDeferredTool = (tool: unknown): boolean => {
   return Array.isArray(record.tools) && record.tools.some(hasDeferredTool);
 };
 
-const isProgramCaller = (item: ResponsesInputItem): item is ResponsesInputItem & { call_id: string; caller: { type: 'program'; caller_id: string } } => {
-  if (!('caller' in item)) return false;
-  const caller = item.caller;
-  return typeof caller === 'object' && caller !== null && 'type' in caller && caller.type === 'program';
-};
-
 export const rejectProgramCaller = (item: ResponsesInputItem): void => {
-  if (isProgramCaller(item)) {
+  if (!('caller' in item)) return;
+  const caller = item.caller;
+  if (typeof caller === 'object' && caller !== null && 'type' in caller && caller.type === 'program') {
     throw new TranslatorInputError(`Cannot translate ${item.type} '${item.call_id}' with a program caller.`);
   }
 };
