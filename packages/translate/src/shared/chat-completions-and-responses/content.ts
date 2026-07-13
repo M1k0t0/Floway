@@ -42,6 +42,12 @@ export const responsesContentToChatCompletionsContent = (content: string | Respo
     ? content.map(
         (part): ChatCompletionsContentPart => {
           if (part.type === 'input_image') {
+            if (typeof part.image_url !== 'string') {
+              throw new TranslatorInputError('Cannot translate file_id-only image content to Chat Completions.');
+            }
+            if (part.detail !== 'auto' && part.detail !== 'low' && part.detail !== 'high') {
+              throw new TranslatorInputError(`Cannot translate image detail '${part.detail}' to Chat Completions.`);
+            }
             return {
               type: 'image_url',
               image_url: {

@@ -145,6 +145,28 @@ test('translateResponsesToMessages rejects file assistant content', async () => 
   );
 });
 
+test('translateResponsesToMessages rejects file_id-only images', async () => {
+  await assertRejects(
+    () => translateResponsesToMessages({
+      ...minimalPayload,
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_image', file_id: 'file_1', detail: 'auto' }] }],
+    }),
+    Error,
+    'file_id-only image content',
+  );
+});
+
+test('translateResponsesToMessages rejects file_id-only image tool output', async () => {
+  await assertRejects(
+    () => translateResponsesToMessages({
+      ...minimalPayload,
+      input: [{ type: 'function_call_output', call_id: 'call_1', output: [{ type: 'input_image', file_id: 'file_1', detail: 'auto' }] }],
+    }),
+    Error,
+    'file_id-only image tool output',
+  );
+});
+
 // ── service_tier → speed mapping ──
 
 test('translateResponsesToMessages maps service_tier:fast to speed:fast (no service_tier on target)', async () => {

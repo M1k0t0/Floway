@@ -158,9 +158,11 @@ export interface ResponsesInputText {
 }
 
 export interface ResponsesInputImage {
+  // https://github.com/openai/openai-node/blob/61539248cbe04665de68a71e6fd878127ae4db87/src/resources/responses/responses.ts#L3947-L3979
   type: 'input_image';
-  image_url: string;
-  detail: 'auto' | 'low' | 'high';
+  image_url?: string | null;
+  file_id?: string | null;
+  detail: 'auto' | 'low' | 'high' | 'original' | (string & {});
 }
 
 export type ResponsesToolOutputContent = ResponsesInputText | ResponsesInputImage | ResponsesInputFile;
