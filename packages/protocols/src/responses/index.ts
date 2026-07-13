@@ -129,6 +129,7 @@ export interface ResponsesInputMessage {
   status?: string;
   role: 'user' | 'assistant' | 'system' | 'developer';
   content: string | ResponsesInputContent[];
+  phase?: 'commentary' | 'final_answer' | (string & {}) | null;
 }
 
 // The Responses request schema's EasyInputMessage makes the constant
@@ -136,13 +137,16 @@ export interface ResponsesInputMessage {
 // shorthand; gateway and translator boundaries normalize it before internal
 // item processing so the canonical union remains explicitly discriminated.
 // https://github.com/openai/openai-node/blob/61539248cbe04665de68a71e6fd878127ae4db87/src/resources/responses/responses.ts#L697-L721
-export type ResponsesEasyInputMessage = Omit<ResponsesInputMessage, 'type'> & {
+export interface ResponsesEasyInputMessage {
+  content: string | ResponsesInputContent[];
+  role: 'user' | 'assistant' | 'system' | 'developer';
+  phase?: 'commentary' | 'final_answer' | (string & {}) | null;
   type?: 'message';
-};
+}
 
 export type ResponsesRequestInputItem =
   | ResponsesEasyInputMessage
-  | Exclude<ResponsesInputItem, ResponsesInputMessage>;
+  | ResponsesInputItem;
 
 export type ResponsesInputContent = ResponsesInputText | ResponsesInputImage;
 
