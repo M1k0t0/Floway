@@ -45,7 +45,7 @@ export const compactionResponse = (input: ResponsesInputItem[], generated: Respo
       ? [{ type: 'input_text', text: item.content }]
       : item.content.map(part => part.type === 'output_text' ? { ...part, type: 'input_text' } : part);
     const tokens = content.reduce((sum, part) =>
-      part.type === 'input_text' || part.type === 'output_text'
+      part.type === 'input_text'
         ? sum + Math.ceil(encoder.encode(part.text).length / APPROX_BYTES_PER_TOKEN)
         : sum, 0);
     used += Math.max(tokens, 1);
