@@ -39,7 +39,7 @@ const normalizeContent = (content: ResponsesInputMessage['content']): ResponsesI
 const isRetainedMessage = (item: ResponsesInputItem): item is ResponsesInputMessage =>
   item.type === 'message' && RETAINED_ROLES.has(item.role);
 
-// The retained items are input-shaped messages (role + `input_text` content),
+// The retained items are input-shaped messages with canonical input content,
 // which is what `/responses/compact` echoes so the client can resend `output`
 // as the next turn's `input`. `ResponsesOutputItem` does not model user/system
 // roles, so the final cast records that the compaction envelope's `output` is
