@@ -22,6 +22,17 @@ const minimalPayload = {
   parallel_tool_calls: true,
 };
 
+test('translateResponsesToMessages accepts an implicit message discriminator', async () => {
+  const result = await translateResponsesToMessages({
+    ...minimalPayload,
+    input: [{ role: 'user', content: 'hello' }],
+  });
+
+  assertEquals(result.target.messages, [
+    { role: 'user', content: 'hello' },
+  ]);
+});
+
 test.each([
   { name: 'additional_tools', input: [{ type: 'additional_tools', role: 'developer', tools: [] as ResponsesTool[] }] },
   { name: 'program', input: [{ type: 'program', id: 'prog_1', call_id: 'call_prog_1', code: 'return 1', fingerprint: 'opaque' }] },

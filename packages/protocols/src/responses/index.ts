@@ -5,7 +5,7 @@
 
 export interface ResponsesPayload {
   model: string;
-  input: string | ResponsesInputItem[];
+  input: string | ResponsesRequestInputItem[];
   previous_response_id?: string | null;
   instructions?: string | null;
   temperature?: number | null;
@@ -58,7 +58,7 @@ export interface ResponsesPayload {
 // Reference: https://developers.openai.com/api/reference/resources/responses/methods/compact
 export interface ResponsesCompactPayload {
   model: string;
-  input: string | ResponsesInputItem[];
+  input: string | ResponsesRequestInputItem[];
   instructions?: string | null;
   previous_response_id?: string | null;
   prompt_cache_key?: string | null;
@@ -130,6 +130,19 @@ export interface ResponsesInputMessage {
   role: 'user' | 'assistant' | 'system' | 'developer';
   content: string | ResponsesInputContent[];
 }
+
+// The Responses request schema's EasyInputMessage makes the constant
+// `type: "message"` discriminator optional. Wire-facing payloads accept that
+// shorthand; gateway and translator boundaries normalize it before internal
+// item processing so the canonical union remains explicitly discriminated.
+// https://github.com/openai/openai-node/blob/61539248cbe04665de68a71e6fd878127ae4db87/src/resources/responses/responses.ts#L697-L721
+export type ResponsesEasyInputMessage = Omit<ResponsesInputMessage, 'type'> & {
+  type?: 'message';
+};
+
+export type ResponsesRequestInputItem =
+  | ResponsesEasyInputMessage
+  | Exclude<ResponsesInputItem, ResponsesInputMessage>;
 
 export type ResponsesInputContent = ResponsesInputText | ResponsesInputImage;
 

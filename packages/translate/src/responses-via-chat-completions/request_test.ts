@@ -5,6 +5,17 @@ import { createResponsesToChatCompletionsStreamState, translateResponsesEventToC
 import { assertEquals, assertThrows } from '../test-assert.ts';
 import type { ResponsesAgentMessageContent, ResponsesInputMultiAgentCallOutputItem, ResponsesTool, ResponsesToolChoice } from '@floway-dev/protocols/responses';
 
+test('translateResponsesToChatCompletions accepts an implicit message discriminator', () => {
+  const result = translateResponsesToChatCompletions({
+    model: 'gpt-test',
+    input: [{ role: 'system', content: 'rules' }],
+  });
+
+  assertEquals(result.target.messages, [
+    { role: 'system', content: 'rules' },
+  ]);
+});
+
 test('translateResponsesToChatCompletions merges adjacent assistant reasoning text and tool calls', () => {
   const result = translateResponsesToChatCompletions({
     model: 'gpt-test',
