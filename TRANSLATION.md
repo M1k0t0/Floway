@@ -478,8 +478,9 @@ Known losses:
 
 Request mapping:
 
-- Chat `system` and `developer` messages become top-level Messages `system`,
-  joined with blank lines.
+- the leading contiguous Chat `system` / `developer` prefix becomes top-level
+  Messages `system`, preserving each source content part as a separate text
+  block. Later instruction messages remain inline in chronological order.
 - Chat user text and supported images become Messages user blocks. Remote images
   are resolved through the shared loader.
 - Chat assistant `content` becomes assistant text.
