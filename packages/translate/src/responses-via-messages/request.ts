@@ -12,7 +12,6 @@ import {
   type MessagesAssistantMessage,
   type MessagesMessage,
   type MessagesPayload,
-  type MessagesSystemMessage,
   type MessagesTextBlock,
   type MessagesTool,
   type MessagesToolResultBlock,
@@ -137,18 +136,6 @@ const responsesSystemBlocks = (message: ResponsesInputMessage): MessagesTextBloc
   return blocks;
 };
 
-// Inline path for non-leading system / developer Responses input messages
-// (the leading prefix was hoisted earlier). Anthropic upstreams diverge on
-// inline role:'system' here (Bedrock accepts it under placement rules;
-// Vertex rejects it outright), so the gateway's
-// `demote-interleaved-system-to-user` interceptor flag is the safety net
-// for any inline system that would otherwise reach an upstream that does
-// not accept it.
-const translateSystemMessage = (message: ResponsesInputMessage): MessagesSystemMessage => {
-  const blocks = responsesSystemBlocks(message);
-  return { role: 'system', content: blocks.length > 0 ? blocks : '' };
-};
-
 const appendAssistantBlock = (messages: MessagesMessage[], block: MessagesAssistantContentBlock): void => {
   const lastMessage = messages[messages.length - 1];
 
@@ -169,10 +156,6 @@ const appendUserBlock = (messages: MessagesMessage[], block: MessagesToolResultB
   }
 
   messages.push({ role: 'user', content: [block] });
-};
-
-const unexpectedResponsesInputItem = (value: ResponsesInputItem): never => {
-  throw new TranslatorInputError(`Invalid input item: ${JSON.stringify(value)}`);
 };
 
 const translateResponsesInput = async (input: ResponsesInputItem[], loadRemoteImage: RemoteImageLoader): Promise<{ messages: MessagesMessage[]; systemBlocks: MessagesTextBlock[] }> => {
@@ -202,9 +185,13 @@ const translateResponsesInput = async (input: ResponsesInputItem[], loadRemoteIm
         messages.push(translateAssistantMessage(item));
         break;
       case 'system':
-      case 'developer':
-        messages.push(translateSystemMessage(item));
+      case 'developer': {
+        // The leading prefix was lifted above; keep later instruction messages
+        // inline so chronology reaches the target role-compatibility pass.
+        const blocks = responsesSystemBlocks(item);
+        messages.push({ role: 'system', content: blocks.length > 0 ? blocks : '' });
         break;
+      }
       default:
         throw new TranslatorInputError(`Invalid role '${(item as { role: string }).role}' in input message.`);
       }
@@ -265,7 +252,7 @@ const translateResponsesInput = async (input: ResponsesInputItem[], loadRemoteIm
     default:
       // Exhaustiveness guard: a future ResponsesInputItem variant must
       // explicitly opt into translator behavior.
-      unexpectedResponsesInputItem(item);
+      throw new TranslatorInputError(`Invalid input item: ${JSON.stringify(item)}`);
     }
   }
 
