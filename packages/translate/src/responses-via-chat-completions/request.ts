@@ -4,7 +4,7 @@ import { buildCustomToolInputSchema } from '../shared/responses-via/custom-tool-
 import { rejectProgramCaller, rejectProgrammaticResponsesPayload } from '../shared/responses-via/programmatic-tooling.ts';
 import { canonicalizeResponsesPayload } from '../shared/via-responses/responses-items.ts';
 import { TranslatorInputError } from '../translator-input-error.ts';
-import { CHAT_COMPLETIONS_INTERNAL_METADATA, type ChatCompletionsContentPart, type ChatCompletionsPayload, type ChatCompletionsMessage, type ChatCompletionsTool, type ChatCompletionsToolCall } from '@floway-dev/protocols/chat-completions';
+import { CHAT_COMPLETIONS_LIFTED_TOOL_OUTPUT_IMAGES, type ChatCompletionsContentPart, type ChatCompletionsPayload, type ChatCompletionsMessage, type ChatCompletionsTool, type ChatCompletionsToolCall } from '@floway-dev/protocols/chat-completions';
 import type { ResponsesFunctionCallOutputItem, ResponsesInputImage, ResponsesInputText, ResponsesPayload, ResponsesTool, ResponsesToolChoice } from '@floway-dev/protocols/responses';
 
 interface AssistantAccumulator {
@@ -305,7 +305,7 @@ export const translateResponsesToChatCompletions = (source: ResponsesPayload): R
     tools,
     tool_choice: translateResponsesToolChoice(payload.tool_choice),
     ...(endsWithLiftedToolOutputImages
-      ? { [CHAT_COMPLETIONS_INTERNAL_METADATA]: { liftedToolOutputImages: true as const } }
+      ? { [CHAT_COMPLETIONS_LIFTED_TOOL_OUTPUT_IMAGES]: true as const }
       : {}),
   };
 
