@@ -20,10 +20,14 @@ const okEvents = () =>
     ),
   );
 
-const invocation = (payload: CanonicalResponsesPayload, enabledFlags: ReadonlySet<FlagId> = new Set(['demote-developer-to-system'])): ResponsesInvocation => ({
+const invocation = (
+  payload: CanonicalResponsesPayload,
+  enabledFlags: ReadonlySet<FlagId> = new Set(['demote-developer-to-system']),
+  targetApi: ResponsesInvocation['targetApi'] = 'responses',
+): ResponsesInvocation => ({
   payload,
   candidate: stubModelCandidate({ enabledFlags }),
-  targetApi: 'responses',
+  targetApi,
   headers: new Headers(),
   action: 'generate',
 });
@@ -93,4 +97,23 @@ test('early-returns when flag is not set', async () => {
 
   const items = input.payload.input as Array<{ role: string }>;
   assertEquals(items[0].role, 'developer');
+});
+
+test('defers demotion when Chat Completions is the target', async () => {
+  const input = invocation(
+    {
+      model: 'deepseek-chat',
+      input: [{ type: 'message', role: 'developer', content: 'instructions' }],
+    },
+    new Set(['demote-developer-to-system']),
+    'chat-completions',
+  );
+
+  await withDemoteDeveloperToSystem(input, stubCtx, okEvents);
+
+  assertEquals(input.payload.input[0], {
+    type: 'message',
+    role: 'developer',
+    content: 'instructions',
+  });
 });

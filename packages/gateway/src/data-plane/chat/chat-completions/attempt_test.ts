@@ -120,6 +120,49 @@ test('generate native chat-completions target calls provider.callChatCompletions
   assertEquals(callChatCompletions.mock.calls.length, 1);
 });
 
+test('generate native target applies role compatibility flags in target-chain order', async () => {
+  installRepo();
+  let observedBody: Omit<ChatCompletionsPayload, 'model'> | undefined;
+  const callChatCompletions = vi.fn(async (_model, body): Promise<ProviderStreamResult<ChatCompletionsStreamEvent>> => {
+    observedBody = body as Omit<ChatCompletionsPayload, 'model'>;
+    return {
+      ok: true,
+      events: makeProtocolFrames(makeChatCompletionsEvents()),
+      modelKey: 'k',
+      headers: new Headers(),
+    };
+  });
+  const result = await chatCompletionsAttempt.generate({
+    payload: makePayload({
+      messages: [
+        { role: 'system', content: 'base instructions' },
+        { role: 'user', content: 'hello' },
+        { role: 'system', content: 'inline instructions' },
+      ],
+    }),
+    ctx: makeGatewayCtx(),
+    candidate: makeCandidate({
+      callChatCompletions,
+      endpoints: { chatCompletions: {} },
+      enabledFlags: new Set([
+        'demote-developer-to-system',
+        'demote-interleaved-system-to-user',
+        'promote-system-to-developer',
+      ]),
+    }),
+    headers: new Headers(),
+  });
+
+  assertEquals(result.type, 'events');
+  if (result.type !== 'events') throw new Error('unreachable');
+  await collectEvents(result.events);
+  assertEquals(observedBody?.messages, [
+    { role: 'system', content: 'base instructions' },
+    { role: 'user', content: 'hello' },
+    { role: 'user', content: 'inline instructions' },
+  ]);
+});
+
 test('generate translates through the Messages target when only that endpoint is exposed', async () => {
   installRepo();
   const callMessages = vi.fn(async (): Promise<ProviderStreamResult<MessagesStreamEvent>> => ({
@@ -167,7 +210,7 @@ test('generate translates through the Responses target when only that endpoint i
   assertEquals(callResponses.mock.calls.length, 1);
 });
 
-test('generate promotes every system message before Responses translation', async () => {
+test('generate preserves translated instructions before promoting inline system messages', async () => {
   installRepo();
   const observedBodies: Omit<ResponsesPayload, 'model'>[] = [];
   const callResponses = vi.fn(async (_model, body): Promise<ProviderResponsesResult> => {
@@ -208,12 +251,11 @@ test('generate promotes every system message before Responses translation', asyn
   await collectEvents(result.events);
   const observedBody = observedBodies[0];
   if (!observedBody) throw new Error('expected observed Responses body');
-  assertEquals(observedBody.instructions, undefined);
+  assertEquals(observedBody.instructions, 'base instructions');
   const input = observedBody.input;
   if (!Array.isArray(input)) throw new Error('expected Responses input array');
-  assertEquals(input[0], { type: 'message', role: 'developer', content: 'base instructions' });
-  assertEquals(input[1], { type: 'message', role: 'user', content: 'hello' });
-  assertEquals(input[2], { type: 'message', role: 'developer', content: 'inline instructions' });
+  assertEquals(input[0], { type: 'message', role: 'user', content: 'hello' });
+  assertEquals(input[1], { type: 'message', role: 'developer', content: 'inline instructions' });
 });
 
 test('generate propagates upstream response headers onto the EventResult so respond can forward them', async () => {

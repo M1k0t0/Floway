@@ -14,10 +14,11 @@ const okEvents = () => Promise.resolve(eventResult((async function* () {})(), te
 const invocation = (
   payload: ChatCompletionsPayload,
   enabledFlags: ReadonlySet<FlagId> = new Set(['demote-interleaved-system-to-user']),
+  targetApi: ChatCompletionsInvocation['targetApi'] = 'chat-completions',
 ): ChatCompletionsInvocation => ({
   payload,
   candidate: stubModelCandidate({ enabledFlags }),
-  targetApi: 'chat-completions',
+  targetApi,
   headers: new Headers(),
 });
 
@@ -28,6 +29,22 @@ test('leaves the payload untouched when the flag is not set', async () => {
     { role: 'system' as const, content: 'sys-b' },
   ];
   const input = invocation({ model: 'm', messages: messages.map(m => ({ ...m })) }, new Set());
+
+  await withInterleavedSystemDemotedToUser(input, stubCtx, okEvents);
+
+  assertEquals(input.payload.messages, messages);
+});
+
+test('defers demotion when Responses is the target', async () => {
+  const messages = [
+    { role: 'user' as const, content: 'hi' },
+    { role: 'system' as const, content: 'inline instructions' },
+  ];
+  const input = invocation(
+    { model: 'm', messages: messages.map(message => ({ ...message })) },
+    new Set(['demote-interleaved-system-to-user']),
+    'responses',
+  );
 
   await withInterleavedSystemDemotedToUser(input, stubCtx, okEvents);
 

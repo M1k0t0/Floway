@@ -2,25 +2,13 @@ import { test } from 'vitest';
 
 import { withPromoteSystemToDeveloper } from './promote-system-to-developer.ts';
 import type { ChatCompletionsInvocation } from './types.ts';
-import { createNonResponsesSourceStore } from '../../responses/items/store.ts';
-import type { ChatGatewayCtx } from '../../shared/gateway-ctx.ts';
+import { mockChatGatewayCtx } from '../../../../test-helpers/gateway-ctx.ts';
 import type { ChatCompletionsPayload } from '@floway-dev/protocols/chat-completions';
 import { eventResult } from '@floway-dev/provider';
 import type { FlagId } from '@floway-dev/provider/flags';
 import { assertEquals, stubModelCandidate, testTelemetryModelIdentity } from '@floway-dev/test-utils';
 
-const stubCtx: ChatGatewayCtx = {
-  apiKeyId: 'test-key',
-  upstreamIds: null,
-  wantsStream: false,
-  runtimeLocation: 'TEST',
-  currentColo: 'TEST',
-  dump: null,
-  responseHeaders: new Headers(),
-  backgroundScheduler: () => {},
-  requestStartedAt: 0,
-  store: createNonResponsesSourceStore('test-key'),
-};
+const stubCtx = mockChatGatewayCtx();
 
 const invocation = (
   payload: ChatCompletionsPayload,
@@ -75,7 +63,7 @@ test('promotes every system message for native Chat Completions targets', async 
   assertEquals(observed!.messages[1].role, 'user');
 });
 
-test('promotes every system message for Responses targets', async () => {
+test('defers promotion when Responses is the target', async () => {
   const ctx = invocation(
     {
       model: 'gpt-5.4',
@@ -95,10 +83,10 @@ test('promotes every system message for Responses targets', async () => {
     return okEvents();
   });
 
-  assertEquals(observed!.messages[0].role, 'developer');
+  assertEquals(observed!.messages[0].role, 'system');
   assertEquals(observed!.messages[0].content, 'base instructions');
   assertEquals(observed!.messages[1].role, 'user');
-  assertEquals(observed!.messages[2].role, 'developer');
+  assertEquals(observed!.messages[2].role, 'system');
   assertEquals(observed!.messages[2].content, 'inline instructions');
 });
 

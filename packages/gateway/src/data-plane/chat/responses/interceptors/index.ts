@@ -17,6 +17,10 @@ import { withVendorQwenResponsesNormalize } from './vendor-qwen-normalize.ts';
 // candidate; each interceptor's body decides whether to act (flag-gated entries
 // early-return on `providerModelOf(ctx.candidate).enabledFlags.has(flagId)`).
 //
+// Translated requests re-enter the selected target protocol's chain. The role
+// compatibility entries therefore act only when Responses is the final target,
+// after pairwise translation has finished.
+//
 // Order matters: earlier entries wrap later ones.
 //   - withResponsesCompactShim: runs outermost so the action pivot
 //     ('compact' → 'generate' for the inner summarization turn) is visible
@@ -30,17 +34,17 @@ import { withVendorQwenResponsesNormalize } from './vendor-qwen-normalize.ts';
 //     `disable-reasoning-on-forced-tool-choice`.
 //   - withPromoteSystemToDeveloper: gated by `promote-system-to-developer`.
 //     Rewrites system input messages to the developer role accepted by the
-//     selected upstream.
+//     selected upstream when Responses is the target; translated targets own
+//     role handling inside their own chain.
 //   - withDemoteDeveloperToSystem: gated by `demote-developer-to-system`.
-//     Runs before withInterleavedSystemDemotedToUser so when both flags are
-//     on, a `developer` role first lands as `system`, then any system that
-//     ends up after the leading run is rewritten to `user` — the chain
-//     `developer → system → user` covers the strictest upstreams.
+//     Runs after promotion, so enabling both makes demotion authoritative.
 //   - withInterleavedSystemDemotedToUser: gated by
 //     `demote-interleaved-system-to-user`. Walks the input items and
 //     rewrites any `role: 'system'` message item that follows the leading
 //     contiguous system run to `role: 'user'` so upstreams that reject
-//     mid-stream system messages still accept the body.
+//     mid-stream system messages still accept the body. With all three role
+//     flags enabled, the ordered chain is
+//     `system → developer → system → user` for interleaved messages.
 //   - withPromptCacheKeyStripped: gated by `strip-prompt-cache-key`. Drops
 //     the top-level `prompt_cache_key` field for upstreams that reject it
 //     as an unknown argument (e.g. Azure DeepSeek). Runs before vendor

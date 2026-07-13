@@ -9,10 +9,14 @@ import { assertEquals, stubModelCandidate, testTelemetryModelIdentity } from '@f
 
 const stubCtx = mockChatGatewayCtx();
 
-const invocation = (payload: ChatCompletionsPayload, enabledFlags: ReadonlySet<FlagId> = new Set(['demote-developer-to-system'])): ChatCompletionsInvocation => ({
+const invocation = (
+  payload: ChatCompletionsPayload,
+  enabledFlags: ReadonlySet<FlagId> = new Set(['demote-developer-to-system']),
+  targetApi: ChatCompletionsInvocation['targetApi'] = 'chat-completions',
+): ChatCompletionsInvocation => ({
   payload,
   candidate: stubModelCandidate({ enabledFlags }),
-  targetApi: 'chat-completions',
+  targetApi,
   headers: new Headers(),
 });
 
@@ -96,6 +100,21 @@ test('early-returns when flag is not set', async () => {
   });
 
   assertEquals(observed!.messages[0].role, 'developer');
+});
+
+test('defers demotion when Responses is the target', async () => {
+  const ctx = invocation(
+    {
+      model: 'deepseek-chat',
+      messages: [{ role: 'developer', content: 'instructions' }],
+    },
+    new Set(['demote-developer-to-system']),
+    'responses',
+  );
+
+  await withDemoteDeveloperToSystem(ctx, stubCtx, okEvents);
+
+  assertEquals(ctx.payload.messages[0].role, 'developer');
 });
 
 test('handles mixed roles with multiple developer messages', async () => {

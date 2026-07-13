@@ -11,21 +11,19 @@ import { providerModelOf } from '@floway-dev/provider';
 // `role: 'system'` message item is rewritten to `role: 'user'` with its
 // content kept verbatim.
 export const withInterleavedSystemDemotedToUser: ResponsesInterceptor = (ctx, _gatewayCtx, run) => {
+  if (ctx.targetApi !== 'responses') return run();
   if (!providerModelOf(ctx.candidate).enabledFlags.has('demote-interleaved-system-to-user')) return run();
 
-  const { input } = ctx.payload;
   let crossedLeadingRun = false;
-  for (let i = 0; i < input.length; i++) {
-    const item = input[i];
-    const isSystemMessage = item.type === 'message' && item.role === 'system';
-    if (!crossedLeadingRun && !isSystemMessage) {
-      crossedLeadingRun = true;
-      continue;
-    }
-    if (crossedLeadingRun && isSystemMessage) {
-      input[i] = { ...item, role: 'user' };
-    }
-  }
+  ctx.payload = {
+    ...ctx.payload,
+    input: ctx.payload.input.map(item => {
+      const isSystemMessage = item.type === 'message' && item.role === 'system';
+      if (!crossedLeadingRun && !isSystemMessage) crossedLeadingRun = true;
+      if (crossedLeadingRun && isSystemMessage) return { ...item, role: 'user' as const };
+      return item;
+    }),
+  };
 
   return run();
 };

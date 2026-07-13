@@ -23,10 +23,11 @@ const okEvents = () =>
 const invocation = (
   payload: CanonicalResponsesPayload,
   enabledFlags: ReadonlySet<FlagId> = new Set(['demote-interleaved-system-to-user']),
+  targetApi: ResponsesInvocation['targetApi'] = 'responses',
 ): ResponsesInvocation => ({
   payload,
   candidate: stubModelCandidate({ enabledFlags }),
-  targetApi: 'responses',
+  targetApi,
   headers: new Headers(),
   action: 'generate',
 });
@@ -42,6 +43,22 @@ test('leaves the payload untouched when the flag is not set', async () => {
   await withInterleavedSystemDemotedToUser(input, stubCtx, okEvents);
 
   assertEquals(input.payload.input, input_);
+});
+
+test('defers demotion when Chat Completions is the target', async () => {
+  const inputItems = [
+    { type: 'message' as const, role: 'user' as const, content: 'hi' },
+    { type: 'message' as const, role: 'system' as const, content: 'inline instructions' },
+  ];
+  const input = invocation(
+    { model: 'm', input: inputItems.map(item => ({ ...item })) },
+    new Set(['demote-interleaved-system-to-user']),
+    'chat-completions',
+  );
+
+  await withInterleavedSystemDemotedToUser(input, stubCtx, okEvents);
+
+  assertEquals(input.payload.input, inputItems);
 });
 
 test('keeps the leading contiguous system run intact when no non-system follows', async () => {

@@ -142,7 +142,7 @@ test('generate translate-to-responses branch routes through responsesAttempt', a
   assertEquals(callResponses.mock.calls.length, 1);
 });
 
-test('generate translate-to-responses branch runs target role promotion after Messages translation', async () => {
+test('generate lets target promotion take precedence over source demotion', async () => {
   installRepo();
   const observedBodies: Omit<ResponsesPayload, 'model'>[] = [];
   const callResponses = vi.fn(async (_model, body): Promise<ProviderResponsesResult> => {
@@ -180,7 +180,10 @@ test('generate translate-to-responses branch runs target role promotion after Me
     candidate: makeCandidate({
       callResponses,
       endpoints: { responses: {} },
-      enabledFlags: new Set<FlagId>(['promote-system-to-developer']),
+      enabledFlags: new Set<FlagId>([
+        'demote-interleaved-system-to-user',
+        'promote-system-to-developer',
+      ]),
     }),
     headers: new Headers(),
   });

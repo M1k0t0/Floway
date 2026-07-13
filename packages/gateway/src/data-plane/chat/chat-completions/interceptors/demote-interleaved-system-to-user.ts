@@ -7,20 +7,18 @@ import { providerModelOf } from '@floway-dev/provider';
 // any non-system role, every later `role: 'system'` is rewritten to
 // `role: 'user'` with content preserved.
 export const withInterleavedSystemDemotedToUser: ChatCompletionsInterceptor = (ctx, _gatewayCtx, run) => {
+  if (ctx.targetApi !== 'chat-completions') return run();
   if (!providerModelOf(ctx.candidate).enabledFlags.has('demote-interleaved-system-to-user')) return run();
 
-  const { messages } = ctx.payload;
   let crossedLeadingRun = false;
-  for (let i = 0; i < messages.length; i++) {
-    const message = messages[i];
-    if (!crossedLeadingRun && message.role !== 'system') {
-      crossedLeadingRun = true;
-      continue;
-    }
-    if (crossedLeadingRun && message.role === 'system') {
-      messages[i] = { ...message, role: 'user' };
-    }
-  }
+  ctx.payload = {
+    ...ctx.payload,
+    messages: ctx.payload.messages.map(message => {
+      if (!crossedLeadingRun && message.role !== 'system') crossedLeadingRun = true;
+      if (crossedLeadingRun && message.role === 'system') return { ...message, role: 'user' as const };
+      return message;
+    }),
+  };
 
   return run();
 };

@@ -6,16 +6,15 @@ import { providerModelOf } from '@floway-dev/provider';
 // conceptually-first system slot on the top-level `payload.system` field;
 // any inline message with `role: 'system'` is therefore by definition
 // interleaved, and gets demoted to `role: 'user'` with content preserved.
-export const demoteInterleavedSystemToUser: MessagesInterceptor = (ctx, _gatewayCtx, run) => {
+export const withInterleavedSystemDemotedToUser: MessagesInterceptor = (ctx, _gatewayCtx, run) => {
+  if (ctx.targetApi !== 'messages') return run();
   if (!providerModelOf(ctx.candidate).enabledFlags.has('demote-interleaved-system-to-user')) return run();
 
-  const { messages } = ctx.payload;
-  for (let i = 0; i < messages.length; i++) {
-    const message = messages[i];
-    if (message.role === 'system') {
-      messages[i] = { role: 'user', content: message.content };
-    }
-  }
+  ctx.payload = {
+    ...ctx.payload,
+    messages: ctx.payload.messages.map(message =>
+      message.role === 'system' ? { role: 'user' as const, content: message.content } : message),
+  };
 
   return run();
 };
