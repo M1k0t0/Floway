@@ -78,7 +78,7 @@ the gateway returns a Gemini-shaped unsupported-model error.
 - Each provider runs its own boundary interceptor chain inside its `call*`
   method, after the gateway-side chain and immediately before the wire. The
   boundary chain owns provider-specific quirks: image compression, header
-  shaping (`x-vision-request`, `x-initiator`, anthropic-beta filtering),
+  shaping (`copilot-vision-request`, `x-initiator`, anthropic-beta filtering),
   field stripping (Copilot Responses `service_tier`, `image_generation`,
   `store: false` forcing), Copilot Messages `cache_control.scope` scrubbing,
   and similar.
@@ -180,7 +180,7 @@ The same boundary runs for both `/v1/responses` (streaming) and
   persistence; the original `store` is captured by the entry adapter before
   the chain runs, so durable storage is unaffected
 - compresses inline base64 image data URLs to WebP
-- injects `x-vision-request` and `x-initiator` headers
+- injects `copilot-vision-request` and `x-initiator` headers
 - on `/v1/responses` only: retries expired connection-bound input IDs once
   with deterministic rewrites, and synchronizes mismatched stream output
   item IDs
