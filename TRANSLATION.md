@@ -77,6 +77,12 @@ the gateway returns a Gemini-shaped unsupported-model error.
   sees a Messages request and Messages result/events whether Messages is the
   source the client sent or the target the upstream serves; Responses, Chat
   Completions, and Gemini follow the same rule.
+- Role compatibility is target-only within those lists, so translator bullets
+  describe the intermediate target shape rather than an unconditional final
+  wire role. Chat Completions and Responses apply enabled role rewrites in the
+  fixed order system-to-developer, developer-to-system, then interleaved
+  system-to-user. Messages can demote every inline system message to user
+  because its only first-position system slot is the top-level `system` field.
 - Each provider runs its own boundary interceptor chain inside its `call*`
   method, after the gateway-side chain and immediately before the wire. The
   boundary chain owns provider-specific quirks: image compression, header
@@ -255,14 +261,16 @@ runs for streaming `/v1/responses` and non-streaming `/v1/responses/compact`.
 The compact action is narrowed to the compact request shape and dispatched
 directly to the subscription backend's `/codex/responses/compact` endpoint.
 
-Before the provider boundary, the target Responses interceptor rewrites
-`role: "system"` input messages to `role: "developer"`. It changes only the
-role; item order, content-part boundaries, ids, and status remain intact. This
-also covers a multi-block Messages `system` field after generic translation has
-preserved it as one multi-part input message. Native Responses instructions,
-Gemini `systemInstruction`, and a string or single-block Messages `system`
-already occupy the top-level `instructions` field and remain unchanged. The
-developer representation matches the official Codex Responses Lite wire:
+Codex enables `promote-system-to-developer` by default. While that effective
+flag remains enabled, the target Responses interceptor rewrites `role:
+"system"` input messages to `role: "developer"`. It changes only the role; item
+order, content-part boundaries, ids, and status remain intact. This also covers
+a multi-block Messages `system` field after generic translation has preserved
+it as one multi-part input message. Native Responses instructions, Gemini
+`systemInstruction`, and a string or single-block Messages `system` stay in the
+top-level `instructions` field; input messages are never folded into it. The
+provider's default-instructions step below remains independent. The developer
+representation matches the official Codex Responses Lite wire:
 https://github.com/openai/codex/blob/1f17e7512f0e47625f2cad416f14870688a99814/codex-rs/core/src/client.rs#L829-L849
 
 The Codex boundary then runs these steps:
