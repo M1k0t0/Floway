@@ -5,7 +5,7 @@ import type { ChatCompletionsInvocation } from './types.ts';
 import { mockChatGatewayCtx } from '../../../../test-helpers/gateway-ctx.ts';
 import type { ChatCompletionsMessage, ChatCompletionsPayload } from '@floway-dev/protocols/chat-completions';
 import { eventResult, type FlagId } from '@floway-dev/provider';
-import { assertEquals, stubModelCandidate, testTelemetryModelIdentity } from '@floway-dev/test-utils';
+import { assert, assertEquals, stubModelCandidate, testTelemetryModelIdentity } from '@floway-dev/test-utils';
 
 const gatewayCtx = mockChatGatewayCtx();
 const okEvents = () => Promise.resolve(eventResult((async function* () {})(), testTelemetryModelIdentity));
@@ -74,6 +74,28 @@ test('preserves the leading system run and demotes later system messages', async
       { role: 'user', content: 'inline rules' },
     ],
   );
+});
+
+test('keeps a leading-only system run and an empty input unchanged', async () => {
+  const leading: ChatCompletionsMessage[] = [
+    { role: 'system', content: 'base A' },
+    { role: 'system', content: 'base B' },
+  ];
+  assertEquals(await applyRoles(leading, new Set(['demote-interleaved-system-to-user'])), leading);
+  assertEquals(await applyRoles([], new Set(['demote-interleaved-system-to-user'])), []);
+});
+
+test('preserves multipart content identity when demoting an interleaved system message', async () => {
+  const content = [
+    { type: 'text' as const, text: 'one' },
+    { type: 'text' as const, text: 'two' },
+  ];
+  const result = await applyRoles(
+    [{ role: 'user', content: 'hello' }, { role: 'system', content }],
+    new Set(['demote-interleaved-system-to-user']),
+  );
+  assertEquals(result, [{ role: 'user', content: 'hello' }, { role: 'user', content }]);
+  assert(result[1]?.content === content);
 });
 
 test('applies overlapping flags in promotion then demotion order', async () => {

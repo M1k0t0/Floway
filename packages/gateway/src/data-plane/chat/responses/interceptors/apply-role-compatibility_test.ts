@@ -6,7 +6,7 @@ import { mockChatGatewayCtx } from '../../../../test-helpers/gateway-ctx.ts';
 import { doneFrame } from '@floway-dev/protocols/common';
 import type { ResponsesInputItem } from '@floway-dev/protocols/responses';
 import { eventResult, type FlagId } from '@floway-dev/provider';
-import { assertEquals, stubModelCandidate, testTelemetryModelIdentity } from '@floway-dev/test-utils';
+import { assert, assertEquals, stubModelCandidate, testTelemetryModelIdentity } from '@floway-dev/test-utils';
 
 const gatewayCtx = mockChatGatewayCtx();
 const okEvents = () => Promise.resolve(eventResult((async function* () { yield doneFrame(); })(), testTelemetryModelIdentity));
@@ -70,6 +70,35 @@ test('uses non-message items as the boundary before demoting later system', asyn
       { type: 'message', role: 'user', content: 'inline rules' },
     ],
   );
+});
+
+test('keeps a leading-only system run and an empty input unchanged', async () => {
+  const leading: ResponsesInputItem[] = [
+    { type: 'message', role: 'system', content: 'base A' },
+    { type: 'message', role: 'system', content: 'base B' },
+  ];
+  assertEquals(await applyRoles(leading, new Set(['demote-interleaved-system-to-user'])), leading);
+  assertEquals(await applyRoles([], new Set(['demote-interleaved-system-to-user'])), []);
+});
+
+test('preserves multipart content identity when demoting an interleaved system message', async () => {
+  const content = [
+    { type: 'input_text' as const, text: 'one' },
+    { type: 'input_text' as const, text: 'two' },
+  ];
+  const result = await applyRoles(
+    [
+      { type: 'message', role: 'user', content: 'hello' },
+      { type: 'message', role: 'system', content },
+    ],
+    new Set(['demote-interleaved-system-to-user']),
+  );
+  assertEquals(result, [
+    { type: 'message', role: 'user', content: 'hello' },
+    { type: 'message', role: 'user', content },
+  ]);
+  const demoted = result[1];
+  assert(demoted?.type === 'message' && demoted.content === content);
 });
 
 test('applies overlapping flags in promotion then demotion order', async () => {

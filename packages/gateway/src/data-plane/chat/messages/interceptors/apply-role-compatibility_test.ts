@@ -6,7 +6,7 @@ import { mockChatGatewayCtx } from '../../../../test-helpers/gateway-ctx.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { MessagesMessage, MessagesPayload, MessagesStreamEvent } from '@floway-dev/protocols/messages';
 import { type ExecuteResult, eventResult, type FlagId } from '@floway-dev/provider';
-import { assertEquals, stubModelCandidate, testTelemetryModelIdentity } from '@floway-dev/test-utils';
+import { assert, assertEquals, stubModelCandidate, testTelemetryModelIdentity } from '@floway-dev/test-utils';
 
 const gatewayCtx = mockChatGatewayCtx();
 const okEvents = (): Promise<ExecuteResult<ProtocolFrame<MessagesStreamEvent>>> =>
@@ -54,4 +54,18 @@ test('demotes every inline system message and preserves content', async () => {
       { role: 'user', content },
     ],
   );
+  const result = await applyRoles(
+    [{ role: 'system', content }],
+    new Set(['demote-interleaved-system-to-user']),
+  );
+  assert(result[0]?.content === content);
+});
+
+test('handles empty input and leaves non-system messages unchanged', async () => {
+  assertEquals(await applyRoles([], new Set(['demote-interleaved-system-to-user'])), []);
+  const messages: MessagesMessage[] = [
+    { role: 'user', content: 'hello' },
+    { role: 'assistant', content: 'hi' },
+  ];
+  assertEquals(await applyRoles(messages, new Set(['demote-interleaved-system-to-user'])), messages);
 });
