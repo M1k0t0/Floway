@@ -262,8 +262,8 @@ The compact action is narrowed to the compact request shape and dispatched
 directly to the subscription backend's `/codex/responses/compact` endpoint.
 
 Codex enables `promote-system-to-developer` by default. While that effective
-flag remains enabled, the target Responses interceptor rewrites `role:
-"system"` input messages to `role: "developer"`. It changes only the role; item
+flag remains enabled, the target Responses interceptor rewrites input messages
+from `role: "system"` to `role: "developer"`. It changes only the role; item
 order, content-part boundaries, ids, and status remain intact. This also covers
 a multi-block Messages `system` field after generic translation has preserved
 it as one multi-part input message. Native Responses instructions, Gemini
