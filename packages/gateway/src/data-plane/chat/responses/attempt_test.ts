@@ -9,13 +9,13 @@ import { InMemoryRepo } from '../../../repo/memory.ts';
 import type { StoredResponsesItem } from '../../../repo/types.ts';
 import { mockChatGatewayCtx } from '../../../test-helpers/gateway-ctx.ts';
 import type { ChatGatewayCtx } from '../shared/gateway-ctx.ts';
+import { initExternalResourceFetcher } from '@floway-dev/platform';
 import type { ChatCompletionsPayload, ChatCompletionsStreamEvent } from '@floway-dev/protocols/chat-completions';
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
-import type { MessagesStreamEvent } from '@floway-dev/protocols/messages';
-import type { ResponsesPayload, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
+import type { MessagesPayload, MessagesStreamEvent } from '@floway-dev/protocols/messages';
+import type { CanonicalResponsesPayload, ResponsesPayload, ResponsesResult, ResponsesStreamEvent } from '@floway-dev/protocols/responses';
 import { type ModelCandidate, directFetcher, type ProviderModel, type ProviderResponsesResult, type ProviderStreamResult, type ResponsesAction, type UpstreamCallOptions, type FlagId } from '@floway-dev/provider';
 import { assert, assertEquals, stubProvider, stubInternalModel, stubProviderModel } from '@floway-dev/test-utils';
-import type { CanonicalResponsesPayload } from '@floway-dev/translate/via-responses/responses-items';
 
 const API_KEY_ID = 'key_attempt_test';
 
@@ -51,7 +51,7 @@ const makeProviderEvents = async function* (events: readonly ResponsesStreamEven
 };
 
 const makeCandidate = (
-  callResponses: (model: ProviderModel, body: Omit<ResponsesPayload, 'model'>, action: ResponsesAction, signal: AbortSignal | undefined, opts: UpstreamCallOptions) => Promise<ProviderResponsesResult>,
+  callResponses: (model: ProviderModel, body: Omit<CanonicalResponsesPayload, 'model'>, action: ResponsesAction, signal: AbortSignal | undefined, opts: UpstreamCallOptions) => Promise<ProviderResponsesResult>,
   enabledFlags: ReadonlySet<FlagId> = new Set<FlagId>(),
 ): ModelCandidate => {
   const provider = stubProvider({ callResponses });
@@ -431,7 +431,7 @@ test('compact reshapes the trigger turn into a result and derives snapshotMode=r
     output: [compactionItem] as unknown as ResponsesResult['output'],
   };
 
-  const callResponses = vi.fn(async (_model: ProviderModel, _body: Omit<ResponsesPayload, 'model'>, action: ResponsesAction): Promise<ProviderResponsesResult> => {
+  const callResponses = vi.fn(async (_model: ProviderModel, _body: Omit<CanonicalResponsesPayload, 'model'>, action: ResponsesAction): Promise<ProviderResponsesResult> => {
     if (action !== 'compact') throw new Error(`compact candidate received action='${action}'`);
     return { action: 'compact', ok: true, result: compactionResult, modelKey: 'test-model-key' };
   });
@@ -473,13 +473,19 @@ test('compact reshapes the trigger turn into a result and derives snapshotMode=r
 // In-attempt test asserting the narrow header-inheritance contract: when an
 // outer protocol passes invocation headers, the translated Messages call sees
 // them on the wire.
-test('generate inherits invocation headers across translation to Messages', async () => {
+test('generate inherits headers and injects external image loading across translation to Messages', async () => {
   installRepo();
+  initExternalResourceFetcher(url => {
+    assertEquals(url.href, 'https://example.com/image.png');
+    return Promise.resolve(new Response(Uint8Array.of(1, 2, 3), { headers: { 'content-type': 'image/png' } }));
+  });
   let observedHeaders: Headers | undefined;
+  let observedBody: Omit<MessagesPayload, 'model'> | undefined;
   const upstreamModel = stubInternalModel({ endpoints: { messages: {} } }, 'up_test');
   const messagesProvider = stubProvider({
-    callMessages: async (_model, _body, _signal, opts): Promise<ProviderStreamResult<MessagesStreamEvent>> => {
+    callMessages: async (_model, body, _signal, opts): Promise<ProviderStreamResult<MessagesStreamEvent>> => {
       observedHeaders = opts.headers;
+      observedBody = body as Omit<MessagesPayload, 'model'>;
       return {
         ok: true,
         events: (async function* () {
@@ -509,7 +515,13 @@ test('generate inherits invocation headers across translation to Messages', asyn
   };
 
   const result = await responsesAttempt.generate({
-    payload: makePayload(),
+    payload: makePayload({
+      input: [{
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_image', image_url: 'https://example.com/image.png', detail: 'auto' }],
+      }],
+    }),
     ctx: makeGatewayCtx(createResponsesHttpStore(API_KEY_ID, true)),
     candidate,
     headers: new Headers({ 'x-test': 'abc' }),
@@ -518,6 +530,11 @@ test('generate inherits invocation headers across translation to Messages', asyn
   if (result.type !== 'events') throw new Error('unreachable');
   await collectEvents(result.events);
   assertEquals(observedHeaders?.get('x-test'), 'abc');
+  const message = observedBody?.messages[0];
+  assert(message?.role === 'user' && Array.isArray(message.content));
+  const image = message.content.find(block => block.type === 'image');
+  assert(image?.type === 'image');
+  assertEquals(image.source, { type: 'base64', media_type: 'image/png', data: 'AQID' });
 });
 
 test('generate seeds privatePayload before interceptors so the web-search shim replays the prior wsc results on echo', async () => {

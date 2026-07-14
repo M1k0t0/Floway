@@ -61,6 +61,12 @@ the gateway returns a Gemini-shaped unsupported-model error.
   boundaries normalize it to an explicit `type: "message"` before storage,
   interception, or translation. Malformed untyped items are rejected as caller
   input errors at the same boundary.
+- Responses create and compact request shapes model open-string
+  `prompt_cache_options` and `prompt_cache_retention`. Native compact projection
+  forwards both controls verbatim; provider-specific rejection remains a
+  boundary workaround (Codex strips `prompt_cache_retention`).
+- Explicit `prompt_cache_breakpoint` metadata on text, image, and file content
+  survives canonicalization and retained-message compaction.
 - Translators do not synthesize defaults merely to satisfy a target shape.
   Examples: no translated-only `temperature: 1`, `store: false`,
   `parallel_tool_calls: true`, or `reasoning.summary: "detailed"`.
@@ -74,7 +80,7 @@ the gateway returns a Gemini-shaped unsupported-model error.
 - Each provider runs its own boundary interceptor chain inside its `call*`
   method, after the gateway-side chain and immediately before the wire. The
   boundary chain owns provider-specific quirks: image compression, header
-  shaping (`x-vision-request`, `x-initiator`, anthropic-beta filtering),
+  shaping (`copilot-vision-request`, `x-initiator`, anthropic-beta filtering),
   field stripping (Copilot Responses `service_tier`, `image_generation`,
   `store: false` forcing), Copilot Messages `cache_control.scope` scrubbing,
   and similar.
@@ -122,12 +128,20 @@ are billed as reasoning/output exactly once.
   it, decodes shim-owned replay history back into upstream `search_result`
   blocks, and rewrites shim-owned search results/citations back to native
   Messages shape. The shim is enabled by default for Copilot Messages targets
-  too, because Copilot search is executed by the gateway.
+  too, because Copilot search is executed by the gateway. `count_tokens`
+  performs the same request preparation without the generation-only response
+  stream rewrite.
 - strips reserved `x-anthropic-billing-header` prompt-attribution lines and
   `cch=<hash>` cache markers that some clients inline into the `system`
   prompt; these are opaque to every upstream and poison prompt-cache prefix
   hashes
 - strips stray `[DONE]` sentinels from Anthropic-shaped streams
+
+Messages generation and `count_tokens` apply billing-attribution stripping,
+forced-tool reasoning compatibility, inline-system role compatibility, and
+web-search request preparation in the same order. Token counts therefore see
+the same gateway-level compatibility shape as generation; each provider still
+owns any operation-specific wire-boundary transforms.
 
 ### Messages — Copilot provider boundary chain
 
@@ -176,8 +190,31 @@ Header shaping (UA, `X-Stainless-*`, `anthropic-beta`) and the dated
 upstream model id are set in the provider's fetch path, not as interceptor
 steps.
 
-### Responses — gateway interceptors
+### Responses — gateway flow and interceptors
 
+- resolves `previous_response_id` and every `item_reference` through the
+  gateway's Responses store before candidate dispatch. Affinity is classified
+  from each referenced item's stored type, then the candidate rewrite replaces
+  every reference with its durable payload. Same-upstream items recover their
+  upstream wire id; portable items receive a temporary id when needed. A
+  missing durable payload returns `item_not_found`, and no provider receives an
+  `item_reference` carrier.
+
+- executes hosted `image_generation` through the gateway server-tool shim for
+  translated targets and native Responses providers that opt into the shim.
+  Edit sources are flattened in declaration order from message content,
+  function/custom tool output, and replayed image-generation results. Remote
+  HTTP(S) sources are downloaded once during request preparation through the
+  gateway's shared external-image loader, with manual redirect handling,
+  bounded streaming, public-address-only Node egress, and Azure-compatible
+  errors for download and image-format failures. The original URL remains
+  visible to the orchestrator while the cached bytes are reused by the edit
+  backend. Inline and remote masks are materialized by the same path.
+  Any mask `file_id`, including one supplied beside `image_url`, remains an
+  explicit `unsupported_image_source` because it requires the owning
+  upstream's authenticated Files namespace; the shim validates `image_url`
+  before applying that Floway guard. GIF sources are transcoded to WebP for
+  `/images/edits`, and a mask alone is sufficient edit context for `auto`/`edit`.
 - removes unsupported `image_generation` Responses tool entries and forced
   tool choices that targeted them before target request construction. Other
   hosted/deferred Responses tools, including `web_search`, `tool_search`, and
@@ -201,11 +238,14 @@ The same boundary runs for both `/v1/responses` (streaming) and
 - forces `store: false` on the wire — the gateway always owns Responses
   persistence; the original `store` is captured by the entry adapter before
   the chain runs, so durable storage is unaffected
-- compresses inline base64 image data URLs to WebP
-- injects `x-vision-request` and `x-initiator` headers
-- on `/v1/responses` only: retries expired connection-bound input IDs once
-  with deterministic rewrites, and synchronizes mismatched stream output
-  item IDs
+- compresses inline base64 image data URLs to WebP across canonical message,
+  function-output, and custom-output content; remote URLs and file IDs remain
+  unchanged
+- injects `copilot-vision-request` when any of those canonical content arrays
+  carries an image, and derives `x-initiator` from the final canonical item
+  (missing/falsy roles and `assistant` are agent turns; other role-bearing
+  items are user turns)
+- on `/v1/responses` only: synchronizes mismatched stream output item IDs
 
 ### Responses — Codex provider boundary chain
 
@@ -227,9 +267,10 @@ https://github.com/openai/codex/blob/1f17e7512f0e47625f2cad416f14870688a99814/co
 
 The Codex boundary then runs these steps:
 
-- injects a default `instructions` string when none is supplied; current
-  ChatGPT-subscription catalog models reject an empty or missing field (third-
-  party implementation record:
+- injects a neutral default only when `instructions` is absent, `null`, or an
+  empty string. Other malformed external values pass through so the upstream
+  owns validation. Current ChatGPT-subscription catalog models reject empty or
+  missing instructions (implementation record:
   https://github.com/im4codes/imcodes/blob/5f769d933dfd679e3a4d670183b0384a1baf62cd/src/agent/providers/codex-sdk.ts#L560-L579)
 - strips fields the upstream rejects with `Unsupported parameter`:
   `max_output_tokens`, `temperature`, `top_p`, `frequency_penalty`,
@@ -290,7 +331,11 @@ Request mapping shared by the Gemini source translation pairs:
   thinking controls. Budget `0` disables thinking via Messages
   `thinking.disabled`, Responses `reasoning.effort: "none"`, or Chat
   `reasoning_effort: "none"`; positive budgets choose low/medium/high effort
-  where the target only supports effort levels.
+  where the target only supports effort levels. When both controls are present,
+  the numeric budget takes precedence on Chat and Responses; Messages preserves
+  its native budget and the level in separate fields. Without a budget,
+  explicit `thinkingLevel` strings, including empty and future values, pass
+  verbatim to the target's open-string effort slot for upstream validation.
 - `maxOutputTokens`, `temperature`, `topP`, `topK`, `stopSequences`,
   `presencePenalty`, `frequencyPenalty`, `seed`, `responseMimeType`, and
   `responseSchema` are passed through when the selected target has a natural
@@ -403,8 +448,8 @@ Request mapping:
   preserve chronology.
 - string input becomes one user message.
 - user `input_text` becomes Messages text; `input_image` URLs are resolved via
-  the shared remote-image loader and converted to base64 image blocks when
-  supported.
+  the gateway-injected platform external-resource loader and converted to
+  base64 image blocks when supported.
 - assistant `output_text` becomes assistant text blocks.
 - `function_call` becomes assistant `tool_use`.
 - `function_call_output` becomes user `tool_result`; incomplete status marks the
@@ -516,7 +561,7 @@ Request mapping:
   Messages `system`, preserving each source content part as a separate text
   block. Later instruction messages remain inline in chronological order.
 - Chat user text and supported images become Messages user blocks. Remote images
-  are resolved through the shared loader.
+  are resolved through the same gateway-injected external-resource loader.
 - Chat assistant `content` becomes assistant text.
 - Chat assistant scalar `reasoning_text` / `reasoning_opaque` becomes one
   `thinking` block or one `redacted_thinking` block.
@@ -597,7 +642,14 @@ Request mapping:
   assistant message as `reasoning_items[]`; the first scalar-eligible group also
   projects to `reasoning_text`.
 - `function_call` items become assistant `tool_calls`.
-- `function_call_output` items become Chat `tool` messages.
+- `function_call_output` items become text-only Chat `tool` messages. Because
+  Chat tool messages do not admit image parts, tool-output images are grouped
+  after the contiguous tool-result run in one synthesized user image message;
+  each tool call's image group is preceded by its source `call_id` label.
+  The synthesized message's legal Chat `user` role is authoritative at provider
+  boundaries, so a final lifted-image turn is reported as user-initiated even
+  though its image originated in tool output; no out-of-band provenance
+  contradicts the wire role.
 - `max_output_tokens`, `stream`, `temperature`, `top_p`, `metadata`, `store`,
   `parallel_tool_calls`, `prompt_cache_key`, `safety_identifier`,
   `service_tier`, and explicit `reasoning.effort` pass through when present.
@@ -638,6 +690,8 @@ Known losses:
 - Freeform `custom` tool `format.definition` is preserved as a
   `Lark grammar: ${definition}` description on the wrapped `input` parameter;
   other `format` fields are not preserved.
+- Lifting tool-output images into a user message changes their speaker role but
+  keeps the visual bytes usable on Chat targets.
 - `input_file` message/tool-output content and assistant-side files or images
   have no Chat counterpart and are rejected.
 - File-id-only images cannot be materialized by the pure translator and are

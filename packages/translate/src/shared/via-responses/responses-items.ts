@@ -4,26 +4,25 @@ import { responsesReasoningToMessagesBlock, unpackReasoningSignature } from '../
 import type { ChatCompletionsReasoningItem, ChatCompletionsMessage } from '@floway-dev/protocols/chat-completions';
 import type { GeminiContent } from '@floway-dev/protocols/gemini';
 import type { MessagesAssistantContentBlock, MessagesMessage } from '@floway-dev/protocols/messages';
-import type { ResponsesEasyInputMessage, ResponsesInputItem, ResponsesRequestPayload } from '@floway-dev/protocols/responses';
+import type { CanonicalResponsesPayload, ResponsesEasyInputMessage, ResponsesInputItem, ResponsesRequestPayload } from '@floway-dev/protocols/responses';
 
 // Wire `ResponsesRequestPayload.input` accepts a bare string and EasyInputMessage
 // objects whose `type: "message"` discriminator is omitted. The gateway's
 // canonical internal shape is an explicitly discriminated item array: every
 // consumer past HTTP / WS entry normalization or cross-protocol translation
 // sees `type: "message"` on every message.
-// The name is owned here because `*-via-responses` translators produce this
-// shape directly — their `buildTargetRequest` always constructs an array —
-// so the boundary between "wire" and "canonical" naturally sits at the
-// translator's return type.
-export type CanonicalResponsesPayload = Omit<ResponsesRequestPayload, 'input'> & {
-  input: ResponsesInputItem[];
-};
-
 // Lifts a wire `ResponsesRequestPayload` to canonical form. Called at every wire
 // boundary that produces a payload destined for internal use and by direct
 // Responses-source translators; cross-protocol translators already construct
 // `CanonicalResponsesPayload` with explicit message discriminators.
 export function canonicalizeResponsesPayload(value: unknown): CanonicalResponsesPayload {
+  const hasValidPromptCacheBreakpoint = (content: Record<string, unknown>): boolean => {
+    const breakpoint = content.prompt_cache_breakpoint;
+    if (breakpoint === undefined || breakpoint === null) return true;
+    return typeof breakpoint === 'object'
+      && typeof (breakpoint as Record<string, unknown>).mode === 'string';
+  };
+
   const isImplicitEasyInputMessage = (item: unknown): item is ResponsesEasyInputMessage & { type?: undefined } => {
     if (typeof item !== 'object' || item === null) return false;
     const message = item as Record<string, unknown>;
@@ -37,11 +36,13 @@ export function canonicalizeResponsesPayload(value: unknown): CanonicalResponses
         switch (content.type) {
         case 'input_text':
         case 'output_text':
-          return typeof content.text === 'string';
+          return typeof content.text === 'string' && hasValidPromptCacheBreakpoint(content);
         case 'input_image':
-          return (typeof content.image_url === 'string' || typeof content.file_id === 'string') && typeof content.detail === 'string';
+          return (typeof content.image_url === 'string' || typeof content.file_id === 'string')
+            && typeof content.detail === 'string'
+            && hasValidPromptCacheBreakpoint(content);
         case 'input_file':
-          return true;
+          return hasValidPromptCacheBreakpoint(content);
         default:
           return false;
         }

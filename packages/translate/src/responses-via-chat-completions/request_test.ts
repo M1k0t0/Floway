@@ -1408,6 +1408,7 @@ test.each([
   { name: 'multi_agent_call', input: [{ type: 'multi_agent_call', action: 'spawn_agent', arguments: '{}', call_id: 'call_1' }] },
   { name: 'multi_agent_call_output', input: [{ type: 'multi_agent_call_output', action: 'spawn_agent', call_id: 'call_1', output: [] as ResponsesInputMultiAgentCallOutputItem['output'] }] },
   { name: 'context_compaction', input: [{ type: 'context_compaction', encrypted_content: 'opaque' }] },
+  { name: 'item_reference', input: [{ type: 'item_reference', id: 'msg_1' }] },
 ] as const)('translateResponsesToChatCompletions rejects Responses-only $name input', ({ name, input }) => {
   assertThrows(
     () => translateResponsesToChatCompletions({ model: 'gpt-test', input: [...input] }),
@@ -1487,7 +1488,7 @@ test('translateResponsesToChatCompletions rejects file tool output', () => {
       input: [{ type: 'function_call_output', call_id: 'call_1', output: [{ type: 'input_file', file_id: 'file_1' }] }],
     }),
     Error,
-    'input_file content',
+    'input_file tool output',
   );
 });
 
@@ -1625,7 +1626,7 @@ test('translateResponsesToChatCompletions throws on a stray compaction input ite
   );
 });
 
-test('translateResponsesToChatCompletions maps multimodal function_call_output into a tool message with image content', () => {
+test('translateResponsesToChatCompletions lifts tool-output images into a following user message', () => {
   const result = translateResponsesToChatCompletions({
     model: 'gpt-test',
     input: [
@@ -1651,11 +1652,88 @@ test('translateResponsesToChatCompletions maps multimodal function_call_output i
     parallel_tool_calls: true,
   });
 
-  const toolMessage = result.target.messages.find(message => message.role === 'tool');
-  assertEquals(toolMessage?.content, [
-    { type: 'text', text: 'captured' },
-    { type: 'image_url', image_url: { url: 'data:image/png;base64,AQID', detail: 'high' } },
+  assertEquals(result.target.messages, [
+    {
+      role: 'assistant',
+      content: null,
+      tool_calls: [{
+        id: 'call_1',
+        type: 'function',
+        function: { name: 'screenshot', arguments: '{}' },
+      }],
+    },
+    { role: 'tool', tool_call_id: 'call_1', content: 'captured' },
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Image output from tool call call_1:' },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,AQID', detail: 'high' } },
+      ],
+    },
   ]);
+});
+
+test('translateResponsesToChatCompletions keeps grouped tool results contiguous before lifted images', () => {
+  const result = translateResponsesToChatCompletions({
+    model: 'gpt-test',
+    input: [
+      { type: 'function_call', call_id: 'call_a', name: 'capture_a', arguments: '{}', status: 'completed' },
+      { type: 'function_call', call_id: 'call_b', name: 'capture_b', arguments: '{}', status: 'completed' },
+      { type: 'custom_tool_call', call_id: 'call_c', name: 'inspect', input: 'raw output' },
+      {
+        type: 'function_call_output',
+        call_id: 'call_a',
+        output: [
+          { type: 'input_image', image_url: 'data:image/png;base64,AAAA', detail: 'low' },
+          { type: 'input_image', image_url: 'data:image/png;base64,AAAB', detail: 'high' },
+        ],
+      },
+      {
+        type: 'function_call_output',
+        call_id: 'call_b',
+        output: [
+          { type: 'input_text', text: 'second capture' },
+          { type: 'input_image', image_url: 'data:image/png;base64,BBBB', detail: 'auto' },
+        ],
+      },
+      { type: 'custom_tool_call_output', call_id: 'call_c', output: 'inspection complete' },
+    ],
+  });
+
+  assertEquals(result.target.messages.map(message => message.role), ['assistant', 'tool', 'tool', 'tool', 'user']);
+  assertEquals(result.target.messages[1].content, 'Image output is attached in the following user message.');
+  assertEquals(result.target.messages[2].content, 'second capture');
+  assertEquals(result.target.messages[3].content, 'inspection complete');
+  assertEquals(result.target.messages[4].content, [
+    { type: 'text', text: 'Image output from tool call call_a:' },
+    { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA', detail: 'low' } },
+    { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAB', detail: 'high' } },
+    { type: 'text', text: 'Image output from tool call call_b:' },
+    { type: 'image_url', image_url: { url: 'data:image/png;base64,BBBB', detail: 'auto' } },
+  ]);
+});
+
+test('translateResponsesToChatCompletions places lifted images before a later source message', () => {
+  for (const trailing of [
+    { type: 'message' as const, role: 'user' as const, content: 'new user turn' },
+    { type: 'message' as const, role: 'system' as const, content: 'new system turn' },
+  ]) {
+    const result = translateResponsesToChatCompletions({
+      model: 'gpt-test',
+      input: [
+        { type: 'function_call', call_id: 'call_1', name: 'capture', arguments: '{}', status: 'completed' },
+        {
+          type: 'function_call_output',
+          call_id: 'call_1',
+          output: [{ type: 'input_image', image_url: 'data:image/png;base64,AAAA', detail: 'auto' }],
+        },
+        trailing,
+      ],
+    });
+
+    assertEquals(result.target.messages.map(message => message.role), ['assistant', 'tool', 'user', trailing.role]);
+    assertEquals(result.target.messages.at(-1)?.content, trailing.content);
+  }
 });
 
 // ── Native field forwarding ──
