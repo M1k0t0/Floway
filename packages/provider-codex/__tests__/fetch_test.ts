@@ -200,6 +200,43 @@ describe('callCodexResponses — upstream classification', () => {
     expect(body.stream).toBe(true);
   });
 
+  test('requests inline encrypted reasoning for stateless replay', async () => {
+    seedFreshAccessToken();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
+    await callCodexResponses({
+      upstreamId, account: activeAccount,
+      model, body: { input: [], stream: true },
+      headers: new Headers(), effects: makeEffects(), call: noopUpstreamCallOptions(),
+    });
+    const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.include).toEqual(['reasoning.encrypted_content']);
+  });
+
+  test('uses the official Codex include shape and replays inline reasoning state unchanged', async () => {
+    seedFreshAccessToken();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
+    const reasoning = {
+      type: 'reasoning' as const,
+      id: 'rs_replayed',
+      summary: [],
+      encrypted_content: 'opaque-reasoning',
+    };
+    await callCodexResponses({
+      upstreamId, account: activeAccount,
+      model,
+      body: {
+        input: [reasoning],
+        include: ['web_search_call.action.sources'],
+        stream: true,
+      },
+      headers: new Headers(), effects: makeEffects(), call: noopUpstreamCallOptions(),
+    });
+
+    const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.include).toEqual(['reasoning.encrypted_content']);
+    expect(body.input).toEqual([reasoning]);
+  });
+
   test('builds Codex responses headers and metadata from a clean set', async () => {
     seedFreshAccessToken();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());

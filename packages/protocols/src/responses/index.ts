@@ -177,11 +177,9 @@ export interface ResponsesInputReasoning {
   type: 'reasoning';
   id: string;
   summary: { type: 'summary_text'; text: string }[];
-  // Opaque reasoning blob the upstream signs against `(account, id)`. Never
-  // auto-requested via `include: ['reasoning.encrypted_content']` (forcing it
-  // breaks non-OpenAI reasoning models); present only when the upstream
-  // volunteers it, and round-tripped verbatim so the next-turn signature
-  // check passes.
+  // Opaque reasoning blob the upstream signs against `(account, id)`. Floway
+  // round-trips a supplied `encrypted_content` value verbatim so the upstream
+  // can validate the next turn's signature.
   encrypted_content?: string;
 }
 

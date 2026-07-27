@@ -282,6 +282,13 @@ const buildCodexClientMetadata = (identity: CodexRequestIdentity, turnMetadataJs
   'x-codex-turn-metadata': turnMetadataJson,
 });
 
+// Codex runs stateless (`store: false`), so each reasoning item must return its
+// opaque payload for the next request to replay inline. The ChatGPT subscription
+// backend receives the official Codex CLI's exact include shape; other Responses
+// include values are not established as valid on this vendor-locked endpoint.
+// https://github.com/openai/codex/blob/c21c8a5e215bc7b9215fc727cfe17f60ab170333/codex-rs/core/src/client.rs#L888-L918
+const CODEX_RESPONSES_INCLUDE = ['reasoning.encrypted_content'] as const;
+
 const buildCodexResponsesBody = (
   opts: CallCodexResponsesOptions,
   identity: CodexRequestIdentity,
@@ -296,6 +303,7 @@ const buildCodexResponsesBody = (
     model: opts.model.id,
     store: false,
     stream: true,
+    include: CODEX_RESPONSES_INCLUDE,
     client_metadata: {
       ...buildCodexClientMetadata(identity, turnMetadataJson),
       ...callerExtras,
