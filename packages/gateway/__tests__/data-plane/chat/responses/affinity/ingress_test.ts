@@ -104,7 +104,7 @@ test('removes an empty originless reasoning prefix but preserves a reasoning ite
   const prepared = await prepareResponsesAffinity({
     model: 'model',
     input: [
-      { type: 'reasoning', id: 'rs_prefix', summary: [], encrypted_content: carrier },
+      { type: 'reasoning', id: 'rs_prefix', summary: [], content: null, encrypted_content: carrier } as unknown as CanonicalResponsesPayload['input'][number],
       {
         type: 'reasoning',
         id: 'rs_visible',

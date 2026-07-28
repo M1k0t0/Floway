@@ -102,8 +102,8 @@ const isEmptyOriginlessReasoningCarrier = (
     && location.decoded.kind === 'owned'
     && location.decoded.value === undefined
     && !selected.present);
-  if (!originlessTopLevel) return false;
-  return Object.keys(item).every(key => ['type', 'id', 'summary', 'encrypted_content'].includes(key));
+  if (!originlessTopLevel || (item.content !== undefined && item.content !== null)) return false;
+  return Object.keys(item).every(key => ['type', 'id', 'summary', 'content', 'encrypted_content'].includes(key));
 };
 
 export const prepareResponsesAffinity = async (
