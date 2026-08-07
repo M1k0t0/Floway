@@ -237,7 +237,7 @@ describe('userspaceTls — prefix coalescing', () => {
 
   it.each(['192.0.2.10', '2001:db8::1'])(
     'omits SNI for the IP literal %s',
-    async (host) => {
+    async host => {
       const fake = makeFakeDuplex();
       const ac = new AbortController();
       const handshake = userspaceTls(

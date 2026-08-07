@@ -1,7 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { userspaceTls } from '@floway-dev/http';
-
 import { dial, runDirectConnectRequest, runProxiedRequest } from '../src/dialer.ts';
 import { dialHttpConnect } from '../src/protocols/http-connect.ts';
 import { dialReality } from '../src/protocols/reality.ts';
@@ -12,6 +10,7 @@ import { dialTrojan } from '../src/protocols/trojan.ts';
 import { dialVlessTcpTls, dialVlessWsTls } from '../src/protocols/vless.ts';
 import type { ProxyConfig } from '../src/proxy-config.ts';
 import type { DialOptions, DialResult, ProxyRequestTarget, SocketDial } from '../src/types.ts';
+import { userspaceTls } from '@floway-dev/http';
 
 const noopStream = (): DialResult => {
   const readable = new ReadableStream<Uint8Array>({ start(c) { c.close(); } });
@@ -19,7 +18,7 @@ const noopStream = (): DialResult => {
   return { readable, writable };
 };
 
-vi.mock('@floway-dev/http', async (importOriginal) => {
+vi.mock('@floway-dev/http', async importOriginal => {
   const actual = await importOriginal<typeof import('@floway-dev/http')>();
   return {
     ...actual,
