@@ -283,27 +283,27 @@ const verifyFixtureIdentity = async (fixture: string, host: string): Promise<voi
 
 describe('userspaceTls — certificate reference identity', () => {
   it('accepts an exact IPv4 iPAddress SAN', async () => {
-    await expect(verifyFixtureIdentity('ip-san.pem', '192.0.2.10')).resolves.toBeUndefined();
+    await expect(verifyFixtureIdentity('ip-san.generated.pem', '192.0.2.10')).resolves.toBeUndefined();
   });
 
   it('rejects a mismatched IPv4 iPAddress SAN', async () => {
-    await expect(verifyFixtureIdentity('ip-san.pem', '192.0.2.11'))
+    await expect(verifyFixtureIdentity('ip-san.generated.pem', '192.0.2.11'))
       .rejects.toThrow('Certificate is not for host 192.0.2.11');
   });
 
   it('matches equivalent IPv6 text forms by address bytes', async () => {
     await expect(
-      verifyFixtureIdentity('ip-san.pem', '2001:0db8:0:0:0:0:0:1'),
+      verifyFixtureIdentity('ip-san.generated.pem', '2001:0db8:0:0:0:0:0:1'),
     ).resolves.toBeUndefined();
   });
 
   it('does not treat an IP-valued CN or DNS SAN as an IP identity', async () => {
-    await expect(verifyFixtureIdentity('ip-cn-dns-san.pem', '192.0.2.10'))
+    await expect(verifyFixtureIdentity('ip-cn-dns-san.generated.pem', '192.0.2.10'))
       .rejects.toThrow('Certificate is not for host 192.0.2.10');
   });
 
   it('preserves DNS SAN wildcard matching for DNS hosts', async () => {
-    await expect(verifyFixtureIdentity('ip-san.pem', 'api.example.test')).resolves.toBeUndefined();
+    await expect(verifyFixtureIdentity('ip-san.generated.pem', 'api.example.test')).resolves.toBeUndefined();
   });
 });
 
