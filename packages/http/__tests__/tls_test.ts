@@ -1,7 +1,60 @@
+import { readFile } from 'node:fs/promises';
+
+import { loadX509FromPem, setCryptoImplementation, verifyCertificateChain } from '@reclaimprotocol/tls';
+import { webcryptoCrypto } from '@reclaimprotocol/tls/webcrypto';
 import { describe, expect, it } from 'vitest';
 
 import { makeFakeDuplex } from './test-utils.ts';
 import { addTrustedRootCAs, userspaceTls } from '../src/tls.ts';
+
+const waitForClientHello = async (
+  fake: ReturnType<typeof makeFakeDuplex>,
+): Promise<Uint8Array> => {
+  const deadline = Date.now() + 1000;
+  while (fake.written().byteLength < 200 && Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 5));
+  }
+  return fake.written();
+};
+
+const clientHelloServerName = (record: Uint8Array): string | undefined => {
+  let offset = 5;
+  if (record[offset++] !== 0x01) throw new Error('expected ClientHello');
+  offset += 3; // handshake length
+  offset += 2 + 32; // legacy version + random
+  const sessionIdLength = record[offset++]!;
+  offset += sessionIdLength;
+  const cipherSuitesLength = (record[offset]! << 8) | record[offset + 1]!;
+  offset += 2 + cipherSuitesLength;
+  const compressionMethodsLength = record[offset++]!;
+  offset += compressionMethodsLength;
+  const extensionsLength = (record[offset]! << 8) | record[offset + 1]!;
+  offset += 2;
+  const extensionsEnd = offset + extensionsLength;
+
+  while (offset < extensionsEnd) {
+    const type = (record[offset]! << 8) | record[offset + 1]!;
+    const length = (record[offset + 2]! << 8) | record[offset + 3]!;
+    offset += 4;
+    if (type === 0) {
+      const nameListLength = (record[offset]! << 8) | record[offset + 1]!;
+      let nameOffset = offset + 2;
+      const nameListEnd = nameOffset + nameListLength;
+      while (nameOffset < nameListEnd) {
+        const nameType = record[nameOffset++]!;
+        const nameLength = (record[nameOffset]! << 8) | record[nameOffset + 1]!;
+        nameOffset += 2;
+        if (nameType === 0) {
+          return new TextDecoder().decode(record.slice(nameOffset, nameOffset + nameLength));
+        }
+        nameOffset += nameLength;
+      }
+      return undefined;
+    }
+    offset += length;
+  }
+  return undefined;
+};
 
 describe('userspaceTls — input validation', () => {
   it('rejects synchronously when the supplied AbortSignal is already aborted', async () => {
@@ -44,11 +97,7 @@ describe('userspaceTls — ClientHello on the wire', () => {
     // first byte is enough to discriminate a TLS handshake record from
     // anything else; we read more once it's there. Polling avoids a hard-
     // coded sleep that races reclaim's synchronous startup path under load.
-    const deadline = Date.now() + 1000;
-    while (fake.written().byteLength < 5 && Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 5));
-    }
-    const written = fake.written();
+    const written = await waitForClientHello(fake);
     expect(written.byteLength).toBeGreaterThanOrEqual(5);
     // TLS record header: type=Handshake(0x16), legacy_record_version=TLS1.2(0x0303)
     // for TLS 1.3 ClientHellos (RFC 8446 §5.1).
@@ -140,11 +189,7 @@ describe('userspaceTls — prefix coalescing', () => {
     );
     handshake.catch(() => { /* expected — we abort below */ });
 
-    const deadline = Date.now() + 1000;
-    while (fake.written().byteLength < 9 && Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 5));
-    }
-    const written = fake.written();
+    const written = await waitForClientHello(fake);
     expect(written[0]).toBe(0xde);
     expect(written[1]).toBe(0xad);
     expect(written[2]).toBe(0xbe);
@@ -165,20 +210,16 @@ describe('userspaceTls — prefix coalescing', () => {
     );
     handshake.catch(() => { /* expected */ });
 
-    const deadline = Date.now() + 1000;
-    while (fake.written().byteLength < 5 && Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 5));
-    }
+    await waitForClientHello(fake);
     expect(fake.written()[0]).toBe(0x16);
 
     ac.abort(new DOMException('done', 'AbortError'));
     await handshake.catch(() => { /* expected */ });
   });
 
-  it('places the SNI hostname inside the ClientHello extension block', async () => {
-    // RFC 6066 §3: server_name extension carries the host as a length-
-    // prefixed name list. We grep for the host bytes in the emitted record;
-    // they must appear because reclaim copies the SNI from opts.host.
+  it('includes SNI for a DNS hostname', async () => {
+    // RFC 6066 §3: server_name carries a HostName, never a literal address.
+    // https://www.rfc-editor.org/rfc/rfc6066#section-3
     const fake = makeFakeDuplex();
     const ac = new AbortController();
     const host = 'sni-test.example';
@@ -188,20 +229,83 @@ describe('userspaceTls — prefix coalescing', () => {
     );
     handshake.catch(() => { /* expected */ });
 
-    const deadline = Date.now() + 1000;
-    while (fake.written().byteLength < 200 && Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 5));
-    }
-    const written = fake.written();
-    const text = new TextDecoder('latin1').decode(written);
-    expect(text).toContain(host);
+    expect(clientHelloServerName(await waitForClientHello(fake))).toBe(host);
 
     ac.abort(new DOMException('done', 'AbortError'));
     await handshake.catch(() => { /* expected */ });
   });
+
+  it.each(['192.0.2.10', '2001:db8::1'])(
+    'omits SNI for the IP literal %s',
+    async (host) => {
+      const fake = makeFakeDuplex();
+      const ac = new AbortController();
+      const handshake = userspaceTls(
+        { readable: fake.readable, writable: fake.writable },
+        { host, signal: ac.signal },
+      );
+      handshake.catch(() => { /* expected */ });
+
+      expect(clientHelloServerName(await waitForClientHello(fake))).toBeUndefined();
+
+      ac.abort(new DOMException('done', 'AbortError'));
+      await handshake.catch(() => { /* expected */ });
+    },
+  );
 });
 
 interface TrustGlobals { TLS_ADDITIONAL_ROOT_CA_LIST?: string[] }
+
+const quietLogger = {
+  trace() {},
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+  fatal() {},
+  child() { return quietLogger; },
+};
+
+const loadFixtureCertificate = async (name: string) =>
+  loadX509FromPem(await readFile(new URL(`./fixtures/${name}`, import.meta.url), 'utf8'));
+
+const verifyFixtureIdentity = async (fixture: string, host: string): Promise<void> => {
+  setCryptoImplementation(webcryptoCrypto);
+  const certificate = await loadFixtureCertificate(fixture);
+  await verifyCertificateChain(
+    [certificate],
+    host,
+    quietLogger,
+    undefined,
+    [certificate],
+  );
+};
+
+describe('userspaceTls — certificate reference identity', () => {
+  it('accepts an exact IPv4 iPAddress SAN', async () => {
+    await expect(verifyFixtureIdentity('ip-san.pem', '192.0.2.10')).resolves.toBeUndefined();
+  });
+
+  it('rejects a mismatched IPv4 iPAddress SAN', async () => {
+    await expect(verifyFixtureIdentity('ip-san.pem', '192.0.2.11'))
+      .rejects.toThrow('Certificate is not for host 192.0.2.11');
+  });
+
+  it('matches equivalent IPv6 text forms by address bytes', async () => {
+    await expect(
+      verifyFixtureIdentity('ip-san.pem', '2001:0db8:0:0:0:0:0:1'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('does not treat an IP-valued CN or DNS SAN as an IP identity', async () => {
+    await expect(verifyFixtureIdentity('ip-cn-dns-san.pem', '192.0.2.10'))
+      .rejects.toThrow('Certificate is not for host 192.0.2.10');
+  });
+
+  it('preserves DNS SAN wildcard matching for DNS hosts', async () => {
+    await expect(verifyFixtureIdentity('ip-san.pem', 'api.example.test')).resolves.toBeUndefined();
+  });
+});
 
 describe('addTrustedRootCAs', () => {
   it('deduplicates additions against the existing global list', () => {
