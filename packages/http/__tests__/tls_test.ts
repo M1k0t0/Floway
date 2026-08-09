@@ -1,11 +1,30 @@
 import { readFile } from 'node:fs/promises';
 
-import { loadX509FromPem, setCryptoImplementation, verifyCertificateChain } from '@reclaimprotocol/tls';
+import * as reclaimTls from '@reclaimprotocol/tls';
 import { webcryptoCrypto } from '@reclaimprotocol/tls/webcrypto';
 import { describe, expect, it } from 'vitest';
 
 import { makeFakeDuplex } from './test-utils.ts';
 import { addTrustedRootCAs, userspaceTls } from '../src/tls.ts';
+
+const { loadX509FromPem, setCryptoImplementation, verifyCertificateChain } = reclaimTls;
+
+const startObservedHandshake = (
+  host: string,
+): {
+  fake: ReturnType<typeof makeFakeDuplex>;
+  abort: AbortController;
+  handshake: ReturnType<typeof userspaceTls>;
+} => {
+  const fake = makeFakeDuplex();
+  const abort = new AbortController();
+  const handshake = userspaceTls(
+    { readable: fake.readable, writable: fake.writable },
+    { host, signal: abort.signal },
+  );
+  handshake.catch(() => { /* expected when the observation aborts */ });
+  return { fake, abort, handshake };
+};
 
 const waitForClientHello = async (
   fake: ReturnType<typeof makeFakeDuplex>,
@@ -217,41 +236,67 @@ describe('userspaceTls — prefix coalescing', () => {
     await handshake.catch(() => { /* expected */ });
   });
 
+  it('keeps host identity classification internal to the TLS package', () => {
+    expect('classifyHostIdentity' in reclaimTls).toBe(false);
+    expect('parseIpLiteral' in reclaimTls).toBe(false);
+  });
+
   it('includes SNI for a DNS hostname', async () => {
-    // RFC 6066 §3: server_name carries a HostName, never a literal address.
-    // https://www.rfc-editor.org/rfc/rfc6066#section-3
-    const fake = makeFakeDuplex();
-    const ac = new AbortController();
     const host = 'sni-test.example';
-    const handshake = userspaceTls(
-      { readable: fake.readable, writable: fake.writable },
-      { host, signal: ac.signal },
-    );
-    handshake.catch(() => { /* expected */ });
+    const { fake, abort, handshake } = startObservedHandshake(host);
 
     expect(clientHelloServerName(await waitForClientHello(fake))).toBe(host);
 
-    ac.abort(new DOMException('done', 'AbortError'));
+    abort.abort(new DOMException('done', 'AbortError'));
     await handshake.catch(() => { /* expected */ });
   });
 
   it.each(['192.0.2.10', '2001:db8::1'])(
     'omits SNI for the IP literal %s',
     async host => {
-      const fake = makeFakeDuplex();
-      const ac = new AbortController();
-      const handshake = userspaceTls(
-        { readable: fake.readable, writable: fake.writable },
-        { host, signal: ac.signal },
-      );
-      handshake.catch(() => { /* expected */ });
+      const { fake, abort, handshake } = startObservedHandshake(host);
 
       expect(clientHelloServerName(await waitForClientHello(fake))).toBeUndefined();
 
-      ac.abort(new DOMException('done', 'AbortError'));
+      abort.abort(new DOMException('done', 'AbortError'));
       await handshake.catch(() => { /* expected */ });
     },
   );
+
+  it.each([
+    '',
+    '192.0.2',
+    '192.0.2.10.1',
+    '192..2.10',
+    '192.0.2.256',
+    '192.0.-1.10',
+    '192.0.+2.10',
+    '192.00.2.10',
+    '0xC0.0.2.10',
+    '0300.0.2.10',
+    ' 192.0.2.10',
+    '192.0.2.10 ',
+    '192.0.2.10.',
+    '192.0.2.10:443',
+    '2001:db8::1::1',
+    '1:2:3:4:5:6:7:8:9',
+    '1:2:3:4:5:6:7',
+    '12345::1',
+    '2001:db8::g',
+    '::ffff:192.0.2.10:1',
+    '::192.0.2.10:1',
+    '2001:db8:192.0.2.10::',
+    '2001:db8::1%eth0',
+    '[2001:db8::1]',
+  ])('rejects invalid identity %j before writing a ClientHello', async host => {
+    const fake = makeFakeDuplex();
+
+    await expect(userspaceTls(
+      { readable: fake.readable, writable: fake.writable },
+      { host },
+    )).rejects.toThrow(`Invalid TLS host identity ${host}`);
+    expect(fake.written()).toHaveLength(0);
+  });
 });
 
 interface TrustGlobals { TLS_ADDITIONAL_ROOT_CA_LIST?: string[] }
@@ -269,9 +314,11 @@ const quietLogger = {
 const loadFixtureCertificate = async (name: string) =>
   loadX509FromPem(await readFile(new URL(`./fixtures/${name}`, import.meta.url), 'utf8'));
 
-const verifyFixtureIdentity = async (fixture: string, host: string): Promise<void> => {
+const verifyFixtureCertificate = async (
+  certificate: Parameters<typeof verifyCertificateChain>[0][number],
+  host: string,
+): Promise<void> => {
   setCryptoImplementation(webcryptoCrypto);
-  const certificate = await loadFixtureCertificate(fixture);
   await verifyCertificateChain(
     [certificate],
     host,
@@ -281,7 +328,16 @@ const verifyFixtureIdentity = async (fixture: string, host: string): Promise<voi
   );
 };
 
+const verifyFixtureIdentity = async (fixture: string, host: string): Promise<void> => {
+  await verifyFixtureCertificate(await loadFixtureCertificate(fixture), host);
+};
+
 describe('userspaceTls — certificate reference identity', () => {
+  it('extracts the IPv4 and IPv6 address SANs', async () => {
+    const certificate = await loadFixtureCertificate('ip-san.generated.pem');
+    expect(certificate.getAlternativeIPAddresses()).toEqual(['192.0.2.10', '2001:db8::1']);
+  });
+
   it('accepts an exact IPv4 iPAddress SAN', async () => {
     await expect(verifyFixtureIdentity('ip-san.generated.pem', '192.0.2.10')).resolves.toBeUndefined();
   });
@@ -297,10 +353,41 @@ describe('userspaceTls — certificate reference identity', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('rejects a different IPv6 identity', async () => {
+    await expect(verifyFixtureIdentity('ip-san.generated.pem', '2001:db8::2'))
+      .rejects.toThrow('Certificate is not for host 2001:db8::2');
+  });
+
   it('does not treat an IP-valued CN or DNS SAN as an IP identity', async () => {
     await expect(verifyFixtureIdentity('ip-cn-dns-san.generated.pem', '192.0.2.10'))
       .rejects.toThrow('Certificate is not for host 192.0.2.10');
   });
+
+  it('does not apply DNS wildcard matching to an IP identity', async () => {
+    await expect(verifyFixtureIdentity('ip-san.generated.pem', '203.0.113.7'))
+      .rejects.toThrow('Certificate is not for host 203.0.113.7');
+  });
+
+  it('keeps IPv4 and IPv4-mapped IPv6 identities distinct', async () => {
+    await expect(verifyFixtureIdentity('ip-san.generated.pem', '::ffff:192.0.2.10'))
+      .rejects.toThrow('Certificate is not for host ::ffff:192.0.2.10');
+  });
+
+  it('fails closed when a custom certificate adapter cannot expose IP SANs', async () => {
+    const certificate = await loadFixtureCertificate('ip-san.generated.pem');
+    const { getAlternativeIPAddresses: _, ...adapterWithoutIpSans } = certificate;
+
+    await expect(verifyFixtureCertificate(adapterWithoutIpSans, '192.0.2.10'))
+      .rejects.toThrow('Certificate is not for host 192.0.2.10');
+  });
+
+  it.each(['[2001:db8::1]', '2001:db8::1%eth0', '192.00.2.10'])(
+    'rejects invalid certificate reference identity %s',
+    async host => {
+      await expect(verifyFixtureIdentity('ip-san.generated.pem', host))
+        .rejects.toThrow(`Invalid TLS host identity ${host}`);
+    },
+  );
 
   it('preserves DNS SAN wildcard matching for DNS hosts', async () => {
     await expect(verifyFixtureIdentity('ip-san.generated.pem', 'api.example.test')).resolves.toBeUndefined();
