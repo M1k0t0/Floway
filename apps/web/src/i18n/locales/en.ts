@@ -648,6 +648,11 @@ const en = {
               description:
                   "The OpenAI Responses API includes context compaction capabilities, but this upstream may not provide native context compaction.\nWhen this option is enabled, Floway rewrites a compaction request as a normal generation request and injects Codex's context-handoff summarization prompt to “simulate” native context compaction, allowing subsequent requests to continue the task context from before compaction.\nThis option is treated as enabled when the upstream does not provide the OpenAI Responses API.",
             },
+            'codex-installation-id-passthrough': {
+              label: 'Prefer Caller Codex Installation ID',
+              description:
+                  "Codex Responses callers can provide an installation ID in `client_metadata['x-codex-installation-id']` or `x-codex-turn-metadata`.\nWhen enabled, Floway prefers that caller value and falls back to the account's fixed installation ID. When disabled, Floway ignores caller values and always sends the account's fixed installation ID.",
+            },
             'disable-reasoning-on-forced-tool-choice': {
               label: 'Disable Reasoning for Forced Tool Calls',
               description:

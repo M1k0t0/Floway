@@ -241,12 +241,14 @@ const buildCodexRequestIdentity = (
   clientMetadata: Record<string, unknown>,
   clientTurnMetadata: Record<string, unknown> | null,
 ): CodexRequestIdentity => {
-  // Identity priority for every mirrored id follows the same per-turn rule as
+  // Caller-provided identity follows the same per-turn rule as
   // `callerTurnMetadata`: caller body `client_metadata` key → parsed
   // `x-codex-turn-metadata` key → caller-supplied header → gateway default. So
   // a caller can split its identity across surfaces and we still emit
   // consistent values everywhere, and a long-lived socket's frozen handshake
-  // headers never outrank the current turn's body.
+  // headers never outrank the current turn's body. Installation id has no
+  // standalone header projection; its two body projections are considered only
+  // when the operator enables passthrough below.
   const sessionId = stringField(clientMetadata, 'session_id')
     ?? stringField(clientTurnMetadata, 'session_id')
     ?? trimHeader(opts.headers, 'session-id')
@@ -263,9 +265,11 @@ const buildCodexRequestIdentity = (
   // https://github.com/openai/codex/blob/a16863f8704831d13e041ed7dba2c4a57a2a940b/codex-rs/codex-api/src/endpoint/responses.rs#L87-L91
   // https://github.com/openai/codex/blob/a16863f8704831d13e041ed7dba2c4a57a2a940b/codex-rs/core/src/client.rs#L1134-L1136
   const clientRequestId = trimHeader(opts.headers, 'x-client-request-id') ?? threadId;
-  const installationId = stringField(clientMetadata, 'x-codex-installation-id')
-    ?? stringField(clientTurnMetadata, 'installation_id')
-    ?? opts.account.openaiDeviceId;
+  const installationId = opts.model.enabledFlags.has('codex-installation-id-passthrough')
+    ? stringField(clientMetadata, 'x-codex-installation-id')
+      ?? stringField(clientTurnMetadata, 'installation_id')
+      ?? opts.account.openaiDeviceId
+    : opts.account.openaiDeviceId;
   // Codex advances the window on every auto-compaction — the id is
   // `{thread_id}:{auto_compact_window_number}` — and a reused socket carries
   // the advanced value in the frame body alone:

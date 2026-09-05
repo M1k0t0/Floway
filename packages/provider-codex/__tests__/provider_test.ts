@@ -116,6 +116,7 @@ describe('createCodexProvider', () => {
     expect(models.map(m => m.id)).toEqual(['gpt-5.4', 'codex-auto-review', 'gpt-image-2']);
     expect(models[0].endpoints).toEqual({ openaiResponses: {} });
     expect(models[2]).toMatchObject({ kind: 'image', endpoints: { openaiImagesGenerations: {}, openaiImagesEdits: {} } });
+    expect(models.every(model => model.enabledFlags.has('codex-installation-id-passthrough'))).toBe(true);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(fetchSpy.mock.calls[0][0]).toMatch(/\/codex\/models/);
   });
@@ -204,13 +205,17 @@ describe('createCodexProvider', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(modelsResponse());
     const recordWithOverride: UpstreamRecord = {
       ...baseRecord,
-      flagOverrides: { 'openai-responses-web-search-shim': true },
+      flagOverrides: {
+        'openai-responses-web-search-shim': true,
+        'codex-installation-id-passthrough': false,
+      },
     };
     const instance = createCodexProvider(recordWithOverride);
     const models = await instance.instance.getProvidedModels(directFetcher);
     for (const m of models) {
       expect(m.enabledFlags.has('rewrite-system-to-developer')).toBe(true);
       expect(m.enabledFlags.has('openai-responses-web-search-shim')).toBe(true);
+      expect(m.enabledFlags.has('codex-installation-id-passthrough')).toBe(false);
     }
   });
 

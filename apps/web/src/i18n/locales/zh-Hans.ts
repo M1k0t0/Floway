@@ -618,6 +618,11 @@ const zhHansCN = {
               description:
                   'OpenAI Responses API 包含上下文压缩能力，但本上游可能不提供原生上下文压缩。\n开启此开关后，Floway 会将压缩请求改写为普通生成请求，注入 Codex 的上下文交接摘要提示词，来“模拟”原生上下文压缩，并在后续请求中延续压缩前的任务上下文。\n当上游不提供 OpenAI Responses API 时，此开关被视为开启。',
             },
+            'codex-installation-id-passthrough': {
+              label: '优先透传 Codex Installation ID',
+              description:
+                  "Codex Responses 调用方可通过 `client_metadata['x-codex-installation-id']` 或 `x-codex-turn-metadata` 提供 Installation ID。\n开启后，Floway 优先使用调用方提供的值，未提供时回退到账号的固定 Installation ID；关闭后，Floway 忽略调用方提供的值，始终发送账号的固定 Installation ID。",
+            },
             'disable-reasoning-on-forced-tool-choice': {
               label: '强制工具调用时禁用思考',
               description:

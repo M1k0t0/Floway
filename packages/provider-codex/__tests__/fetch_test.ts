@@ -15,6 +15,12 @@ const makeEffects = (): CodexCallEffects => ({
 
 const activeAccount: CodexAccountCredential = { chatgptAccountId: 'acc', refresh_token: 'rt_v1', state: 'active', state_updated_at: '2026-01-01T00:00:00Z', openaiDeviceId: '11111111-2222-4333-8444-555555555555', accessToken: null, quotaSnapshot: null };
 const model = stubProviderModel({ id: 'gpt-5.4', display_name: 'gpt-5.4', endpoints: { openaiResponses: {} } });
+const installationIdPassthroughModel = stubProviderModel({
+  id: 'gpt-5.4',
+  display_name: 'gpt-5.4',
+  endpoints: { openaiResponses: {} },
+  enabledFlags: new Set(['codex-installation-id-passthrough'] as const),
+});
 const imageModel = stubProviderModel({ id: 'gpt-image-2', display_name: 'GPT-Image-2', kind: 'image', endpoints: { openaiImagesGenerations: {}, openaiImagesEdits: {} } });
 
 const upstreamId = 'up_a';
@@ -96,6 +102,19 @@ const sseResponse = (status = 200): Response => new Response(
 
 const errorJson = (status: number, body: unknown, extraHeaders: Record<string, string> = {}): Response =>
   new Response(JSON.stringify(body), { status, headers: new Headers({ 'content-type': 'application/json', ...extraHeaders }) });
+
+const readInstallationIdProjections = async (init: RequestInit): Promise<[unknown, unknown, unknown]> => {
+  const headers = new Headers(init.headers);
+  const headerTurnMetadata = JSON.parse(headers.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
+  const body = await readJsonRequest(init) as Record<string, unknown>;
+  const clientMetadata = body.client_metadata as Record<string, unknown>;
+  const bodyTurnMetadata = JSON.parse(String(clientMetadata['x-codex-turn-metadata'])) as Record<string, unknown>;
+  return [
+    headerTurnMetadata.installation_id,
+    clientMetadata['x-codex-installation-id'],
+    bodyTurnMetadata.installation_id,
+  ];
+};
 
 const idToken = (planType = 'plus'): string => [
   Buffer.from('{}').toString('base64url'),
@@ -223,7 +242,7 @@ describe('callCodexOpenAIResponses — upstream classification', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
     await callCodexOpenAIResponses({
       upstreamId, account: activeAccount,
-      model,
+      model: installationIdPassthroughModel,
       body: {
         input: [],
         stream: true,
@@ -531,28 +550,32 @@ describe('callCodexOpenAIResponses — upstream classification', () => {
     expect(first).not.toBe(second);
   });
 
-  test('uses account.openaiDeviceId as the installation id', async () => {
+  test('falls back to account.openaiDeviceId when installation id passthrough is enabled but the caller omits it', async () => {
     seedFreshAccessToken();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
     const deviceId = '22222222-3333-4444-9555-666666666666';
     await callCodexOpenAIResponses({
       upstreamId, account: { ...activeAccount, openaiDeviceId: deviceId },
-      model, body: { input: [], stream: true }, headers: new Headers(), effects: makeEffects(), call: noopUpstreamCallOptions(),
+      model: installationIdPassthroughModel,
+      body: { input: [], stream: true },
+      headers: new Headers(),
+      effects: makeEffects(),
+      call: noopUpstreamCallOptions(),
     });
 
-    const headers = new Headers((fetchSpy.mock.calls[0][1] as RequestInit).headers);
-    const turnMetadata = JSON.parse(headers.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
-    expect(turnMetadata.installation_id).toBe(deviceId);
-    const body = await readJsonRequest(fetchSpy.mock.calls[0][1] as RequestInit) as Record<string, unknown>;
-    expect((body.client_metadata as Record<string, unknown>)['x-codex-installation-id']).toBe(deviceId);
+    expect(await readInstallationIdProjections(fetchSpy.mock.calls[0][1] as RequestInit)).toEqual([
+      deviceId,
+      deviceId,
+      deviceId,
+    ]);
   });
 
-  test('prefers a caller-supplied installation id from client_metadata over the account device id', async () => {
+  test('passes through a caller-supplied installation id from client_metadata when enabled', async () => {
     seedFreshAccessToken();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
     await callCodexOpenAIResponses({
       upstreamId, account: { ...activeAccount, openaiDeviceId: 'account-device-id' },
-      model,
+      model: installationIdPassthroughModel,
       body: {
         input: [], stream: true,
         client_metadata: { 'x-codex-installation-id': 'caller-installation-id' },
@@ -562,11 +585,66 @@ describe('callCodexOpenAIResponses — upstream classification', () => {
       call: noopUpstreamCallOptions(),
     });
 
-    const headers = new Headers((fetchSpy.mock.calls[0][1] as RequestInit).headers);
-    const turnMetadata = JSON.parse(headers.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
-    expect(turnMetadata.installation_id).toBe('caller-installation-id');
-    const body = await readJsonRequest(fetchSpy.mock.calls[0][1] as RequestInit) as Record<string, unknown>;
-    expect((body.client_metadata as Record<string, unknown>)['x-codex-installation-id']).toBe('caller-installation-id');
+    expect(await readInstallationIdProjections(fetchSpy.mock.calls[0][1] as RequestInit)).toEqual([
+      'caller-installation-id',
+      'caller-installation-id',
+      'caller-installation-id',
+    ]);
+  });
+
+  test('passes through a caller-supplied installation id from turn metadata when enabled', async () => {
+    seedFreshAccessToken();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
+    await callCodexOpenAIResponses({
+      upstreamId, account: { ...activeAccount, openaiDeviceId: 'account-device-id' },
+      model: installationIdPassthroughModel,
+      body: {
+        input: [], stream: true,
+        client_metadata: {
+          'x-codex-turn-metadata': JSON.stringify({ installation_id: 'turn-installation-id' }),
+        },
+      } as unknown as Parameters<typeof callCodexOpenAIResponses>[0]['body'],
+      headers: new Headers(),
+      effects: makeEffects(),
+      call: noopUpstreamCallOptions(),
+    });
+
+    expect(await readInstallationIdProjections(fetchSpy.mock.calls[0][1] as RequestInit)).toEqual([
+      'turn-installation-id',
+      'turn-installation-id',
+      'turn-installation-id',
+    ]);
+  });
+
+  test('uses the fixed account installation id when passthrough is disabled', async () => {
+    seedFreshAccessToken();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
+    const call = (clientMetadata: Record<string, string>) => callCodexOpenAIResponses({
+      upstreamId, account: { ...activeAccount, openaiDeviceId: 'account-device-id' },
+      model,
+      body: {
+        input: [], stream: true, client_metadata: clientMetadata,
+      } as unknown as Parameters<typeof callCodexOpenAIResponses>[0]['body'],
+      headers: new Headers(),
+      effects: makeEffects(),
+      call: noopUpstreamCallOptions(),
+    });
+
+    await call({ 'x-codex-installation-id': 'flat-caller-installation-id' });
+    await call({
+      'x-codex-turn-metadata': JSON.stringify({ installation_id: 'turn-caller-installation-id' }),
+    });
+
+    expect(await readInstallationIdProjections(fetchSpy.mock.calls[0][1] as RequestInit)).toEqual([
+      'account-device-id',
+      'account-device-id',
+      'account-device-id',
+    ]);
+    expect(await readInstallationIdProjections(fetchSpy.mock.calls[1][1] as RequestInit)).toEqual([
+      'account-device-id',
+      'account-device-id',
+      'account-device-id',
+    ]);
   });
 
   test('passes through caller thread-id and x-client-request-id when distinct from session-id', async () => {

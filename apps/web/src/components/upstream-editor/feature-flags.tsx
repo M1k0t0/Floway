@@ -19,6 +19,7 @@ const flagGroupById = {
   'openai-responses-web-search-shim': 'shims',
   'openai-responses-image-generation-shim': 'shims',
   'openai-responses-compact-shim': 'shims',
+  'codex-installation-id-passthrough': 'apiCompatibility',
   'disable-reasoning-on-forced-tool-choice': 'apiCompatibility',
   'rewrite-mid-conv-system-to-user': 'apiCompatibility',
   'rewrite-developer-to-system': 'apiCompatibility',

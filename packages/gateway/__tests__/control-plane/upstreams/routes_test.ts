@@ -2232,16 +2232,19 @@ test('GET /api/upstreams/blueprint serves the record a new upstream starts as wi
     assertEquals(typeof preview.flag_defaults['strip-billing-attribution'], 'boolean');
   }
 
-  // Spot-check the two provider-computed decisions we care about at the
-  // wire boundary. copilot keeps `strip-billing-attribution` on so the
-  // Claude Code billing block never reaches its OpenAI-compatible upstream
-  // prompt cache; claude-code keeps it off so plan-tier attribution reaches
-  // Anthropic verbatim.
+  // Spot-check the provider-computed decisions we care about at the wire
+  // boundary. copilot keeps `strip-billing-attribution` on so the Claude Code
+  // billing block never reaches its OpenAI-compatible upstream prompt cache;
+  // claude-code keeps it off so plan-tier attribution reaches Anthropic
+  // verbatim; Codex prefers caller installation ids unless the operator opts
+  // into the fixed account id.
   const copilotPreview = (await (await requestApp('/api/upstreams/blueprint?kind=copilot', { headers: { 'x-floway-session': adminSession } })).json()) as JsonObject;
   assertEquals(copilotPreview.flag_defaults['strip-billing-attribution'], true);
   assertEquals(copilotPreview.flag_defaults['rewrite-mid-conv-system-to-user'], false);
   const ccPreview = (await (await requestApp('/api/upstreams/blueprint?kind=claude-code', { headers: { 'x-floway-session': adminSession } })).json()) as JsonObject;
   assertEquals(ccPreview.flag_defaults['strip-billing-attribution'], false);
+  const codexPreview = (await (await requestApp('/api/upstreams/blueprint?kind=codex', { headers: { 'x-floway-session': adminSession } })).json()) as JsonObject;
+  assertEquals(codexPreview.flag_defaults['codex-installation-id-passthrough'], true);
 });
 
 test('GET /api/upstreams/:id returns the full record with fresh Codex quota for the edit page', async () => {
