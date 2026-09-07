@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createUpstreamStateRepoStub } from './upstream-state-repo.ts';
 import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from '../src/constants.ts';
 import { callCodexAlphaSearch, callCodexOpenAIImagesGenerations, callCodexOpenAIResponses, callCodexOpenAIResponsesCompact, type CodexCallEffects } from '../src/fetch.ts';
+import { nickCodexIdentityUuid } from '../src/ids.ts';
 import type { CodexAccessTokenEntry, CodexAccountCredential, CodexQuotaSnapshotEntryMap, CodexUpstreamState } from '../src/state.ts';
 import type { OpenAIResponsesResult } from '@floway-dev/protocols/openai-responses';
 import { initProviderRepo, type UpstreamRecord } from '@floway-dev/provider';
@@ -20,6 +21,21 @@ const installationIdPassthroughModel = stubProviderModel({
   display_name: 'gpt-5.4',
   endpoints: { openaiResponses: {} },
   enabledFlags: new Set(['codex-installation-id-passthrough'] as const),
+});
+const installationIdNicknameModel = stubProviderModel({
+  id: 'gpt-5.4',
+  display_name: 'gpt-5.4',
+  endpoints: { openaiResponses: {} },
+  enabledFlags: new Set([
+    'codex-installation-id-passthrough',
+    'nick-installation-id',
+  ] as const),
+});
+const installationIdNicknameOnlyModel = stubProviderModel({
+  id: 'gpt-5.4',
+  display_name: 'gpt-5.4',
+  endpoints: { openaiResponses: {} },
+  enabledFlags: new Set(['nick-installation-id'] as const),
 });
 const imageModel = stubProviderModel({ id: 'gpt-image-2', display_name: 'GPT-Image-2', kind: 'image', endpoints: { openaiImagesGenerations: {}, openaiImagesEdits: {} } });
 
@@ -616,12 +632,147 @@ describe('callCodexOpenAIResponses — upstream classification', () => {
     ]);
   });
 
+  test('nicknames caller installation ids deterministically without collapsing distinct callers', async () => {
+    seedFreshAccessToken();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
+    const call = (callerInstallationId: string) => callCodexOpenAIResponses({
+      upstreamId,
+      account: activeAccount,
+      model: installationIdNicknameModel,
+      body: {
+        input: [],
+        stream: true,
+        client_metadata: { 'x-codex-installation-id': callerInstallationId },
+      } as unknown as Parameters<typeof callCodexOpenAIResponses>[0]['body'],
+      headers: new Headers(),
+      effects: makeEffects(),
+      call: noopUpstreamCallOptions(),
+    });
+
+    await call('  caller-installation-id  ');
+    await call('caller-installation-id');
+    await call('other-caller-installation-id');
+
+    const expected = nickCodexIdentityUuid(
+      activeAccount.chatgptAccountId,
+      'installation',
+      'caller-installation-id',
+    );
+    const first = await readInstallationIdProjections(fetchSpy.mock.calls[0][1] as RequestInit);
+    const second = await readInstallationIdProjections(fetchSpy.mock.calls[1][1] as RequestInit);
+    const other = await readInstallationIdProjections(fetchSpy.mock.calls[2][1] as RequestInit);
+    expect(first).toEqual([expected, expected, expected]);
+    expect(second).toEqual(first);
+    expect(new Set(other).size).toBe(1);
+    expect(other[0]).not.toBe(expected);
+  });
+
+  test('scopes an installation id nickname to the selected Codex account', async () => {
+    const selectedAccount: CodexAccountCredential = {
+      ...activeAccount,
+      chatgptAccountId: 'acc_other',
+      accessToken: farFutureAccessToken,
+    };
+    currentRecord = makeRecord({ accounts: [selectedAccount] });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
+    await callCodexOpenAIResponses({
+      upstreamId,
+      account: selectedAccount,
+      model: installationIdNicknameModel,
+      body: {
+        input: [],
+        stream: true,
+        client_metadata: { 'x-codex-installation-id': 'caller-installation-id' },
+      } as unknown as Parameters<typeof callCodexOpenAIResponses>[0]['body'],
+      headers: new Headers(),
+      effects: makeEffects(),
+      call: noopUpstreamCallOptions(),
+    });
+
+    const expected = nickCodexIdentityUuid(
+      selectedAccount.chatgptAccountId,
+      'installation',
+      'caller-installation-id',
+    );
+    expect(await readInstallationIdProjections(fetchSpy.mock.calls[0][1] as RequestInit)).toEqual([
+      expected,
+      expected,
+      expected,
+    ]);
+    expect(expected).not.toBe(nickCodexIdentityUuid(
+      activeAccount.chatgptAccountId,
+      'installation',
+      'caller-installation-id',
+    ));
+  });
+
+  test('nicknames the turn-metadata installation id when the flat projection is blank', async () => {
+    seedFreshAccessToken();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
+    await callCodexOpenAIResponses({
+      upstreamId,
+      account: activeAccount,
+      model: installationIdNicknameModel,
+      body: {
+        input: [],
+        stream: true,
+        client_metadata: {
+          'x-codex-installation-id': '  ',
+          'x-codex-turn-metadata': JSON.stringify({ installation_id: '  turn-installation-id  ' }),
+        },
+      } as unknown as Parameters<typeof callCodexOpenAIResponses>[0]['body'],
+      headers: new Headers(),
+      effects: makeEffects(),
+      call: noopUpstreamCallOptions(),
+    });
+
+    const expected = nickCodexIdentityUuid(
+      activeAccount.chatgptAccountId,
+      'installation',
+      'turn-installation-id',
+    );
+    expect(await readInstallationIdProjections(fetchSpy.mock.calls[0][1] as RequestInit)).toEqual([
+      expected,
+      expected,
+      expected,
+    ]);
+  });
+
+  test('does not nickname a missing or blank caller installation id', async () => {
+    seedFreshAccessToken();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
+    const deviceId = 'account-device-id';
+    const call = (clientMetadata?: Record<string, string>) => callCodexOpenAIResponses({
+      upstreamId,
+      account: { ...activeAccount, openaiDeviceId: deviceId },
+      model: installationIdNicknameModel,
+      body: {
+        input: [],
+        stream: true,
+        ...(clientMetadata === undefined ? {} : { client_metadata: clientMetadata }),
+      } as unknown as Parameters<typeof callCodexOpenAIResponses>[0]['body'],
+      headers: new Headers(),
+      effects: makeEffects(),
+      call: noopUpstreamCallOptions(),
+    });
+
+    await call();
+    await call({
+      'x-codex-installation-id': '  ',
+      'x-codex-turn-metadata': JSON.stringify({ installation_id: '\t' }),
+    });
+
+    const fixed = [deviceId, deviceId, deviceId];
+    expect(await readInstallationIdProjections(fetchSpy.mock.calls[0][1] as RequestInit)).toEqual(fixed);
+    expect(await readInstallationIdProjections(fetchSpy.mock.calls[1][1] as RequestInit)).toEqual(fixed);
+  });
+
   test('uses the fixed account installation id when passthrough is disabled', async () => {
     seedFreshAccessToken();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse());
-    const call = (clientMetadata: Record<string, string>) => callCodexOpenAIResponses({
+    const call = (selectedModel: typeof model, clientMetadata: Record<string, string>) => callCodexOpenAIResponses({
       upstreamId, account: { ...activeAccount, openaiDeviceId: 'account-device-id' },
-      model,
+      model: selectedModel,
       body: {
         input: [], stream: true, client_metadata: clientMetadata,
       } as unknown as Parameters<typeof callCodexOpenAIResponses>[0]['body'],
@@ -630,8 +781,8 @@ describe('callCodexOpenAIResponses — upstream classification', () => {
       call: noopUpstreamCallOptions(),
     });
 
-    await call({ 'x-codex-installation-id': 'flat-caller-installation-id' });
-    await call({
+    await call(model, { 'x-codex-installation-id': 'flat-caller-installation-id' });
+    await call(installationIdNicknameOnlyModel, {
       'x-codex-turn-metadata': JSON.stringify({ installation_id: 'turn-caller-installation-id' }),
     });
 
@@ -1119,6 +1270,31 @@ describe('callCodexOpenAIResponsesCompact', () => {
 
     expect(result.result.object).toBe('response.compaction');
     expect(result.result.output[0]).toMatchObject({ id: 'cmp_x', type: 'compaction', encrypted_content: 'FULL_BLOB' });
+  });
+
+  test('nicknames a caller installation id in compact turn metadata', async () => {
+    seedFreshAccessToken();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(compactJsonResponse());
+    const result = await callCodexOpenAIResponsesCompact({
+      upstreamId,
+      account: activeAccount,
+      model: installationIdNicknameModel,
+      body: { input: [] },
+      headers: new Headers({
+        'x-codex-turn-metadata': JSON.stringify({ installation_id: 'compact-caller-installation-id' }),
+      }),
+      effects: makeEffects(),
+      call: noopUpstreamCallOptions(),
+    });
+    expect(result.ok).toBe(true);
+
+    const headers = new Headers((fetchSpy.mock.calls[0][1] as RequestInit).headers);
+    const turnMetadata = JSON.parse(headers.get('x-codex-turn-metadata') ?? 'null') as Record<string, unknown>;
+    expect(turnMetadata.installation_id).toBe(nickCodexIdentityUuid(
+      activeAccount.chatgptAccountId,
+      'installation',
+      'compact-caller-installation-id',
+    ));
   });
 
   test('2xx persists quota snapshot via opts.call.waitUntil', async () => {

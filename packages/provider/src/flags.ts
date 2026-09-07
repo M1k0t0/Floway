@@ -28,6 +28,7 @@ export const OPTIONAL_FLAG_IDS = [
   'openai-responses-image-generation-shim',
   'openai-responses-compact-shim',
   'codex-installation-id-passthrough',
+  'nick-installation-id',
   'disable-reasoning-on-forced-tool-choice',
   'rewrite-mid-conv-system-to-user',
   'rewrite-developer-to-system',

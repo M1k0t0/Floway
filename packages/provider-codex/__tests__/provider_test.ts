@@ -117,6 +117,7 @@ describe('createCodexProvider', () => {
     expect(models[0].endpoints).toEqual({ openaiResponses: {} });
     expect(models[2]).toMatchObject({ kind: 'image', endpoints: { openaiImagesGenerations: {}, openaiImagesEdits: {} } });
     expect(models.every(model => model.enabledFlags.has('codex-installation-id-passthrough'))).toBe(true);
+    expect(models.every(model => !model.enabledFlags.has('nick-installation-id'))).toBe(true);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(fetchSpy.mock.calls[0][0]).toMatch(/\/codex\/models/);
   });
@@ -208,6 +209,7 @@ describe('createCodexProvider', () => {
       flagOverrides: {
         'openai-responses-web-search-shim': true,
         'codex-installation-id-passthrough': false,
+        'nick-installation-id': true,
       },
     };
     const instance = createCodexProvider(recordWithOverride);
@@ -216,6 +218,7 @@ describe('createCodexProvider', () => {
       expect(m.enabledFlags.has('rewrite-system-to-developer')).toBe(true);
       expect(m.enabledFlags.has('openai-responses-web-search-shim')).toBe(true);
       expect(m.enabledFlags.has('codex-installation-id-passthrough')).toBe(false);
+      expect(m.enabledFlags.has('nick-installation-id')).toBe(true);
     }
   });
 

@@ -623,6 +623,11 @@ const zhHansCN = {
               description:
                   "Codex Responses 调用方可通过 `client_metadata['x-codex-installation-id']` 或 `x-codex-turn-metadata` 提供 Installation ID。\n开启后，Floway 优先使用调用方提供的值，未提供时回退到账号的固定 Installation ID；关闭后，Floway 忽略调用方提供的值，始终发送账号的固定 Installation ID。",
             },
+            'nick-installation-id': {
+              label: '匿名化调用方 Codex Installation ID',
+              description:
+                  '此选项默认关闭，且仅在“优先透传 Codex Installation ID”接收到非空调用方值时生效。\n开启后，Floway 会根据所选 Codex 账号、`installation` 身份类型和原值派生稳定的 UUID。账号或原值不同，UUID 也不同；固定模式或未提供调用方值时仍使用账号的固定 Installation ID。',
+            },
             'disable-reasoning-on-forced-tool-choice': {
               label: '强制工具调用时禁用思考',
               description:

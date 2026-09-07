@@ -653,6 +653,11 @@ const en = {
               description:
                   "Codex Responses callers can provide an installation ID in `client_metadata['x-codex-installation-id']` or `x-codex-turn-metadata`.\nWhen enabled, Floway prefers that caller value and falls back to the account's fixed installation ID. When disabled, Floway ignores caller values and always sends the account's fixed installation ID.",
             },
+            'nick-installation-id': {
+              label: 'Pseudonymize Caller Codex Installation ID',
+              description:
+                  "This option is off by default and applies only when Prefer Caller Codex Installation ID admits a non-empty caller value.\nWhen enabled, Floway replaces that value with a stable UUID derived from the selected Codex account, the `installation` identity kind, and the original value. Different accounts or original values produce different UUIDs; fixed mode and missing caller values still use the account's fixed installation ID.",
+            },
             'disable-reasoning-on-forced-tool-choice': {
               label: 'Disable Reasoning for Forced Tool Calls',
               description:

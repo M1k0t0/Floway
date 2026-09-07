@@ -1,7 +1,7 @@
 import { parse, validate, version } from 'uuid';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
-import { sha256JsonUuid, uuidV7 } from '../src/ids.ts';
+import { nickCodexIdentityUuid, sha256JsonUuid, uuidV7 } from '../src/ids.ts';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -23,6 +23,30 @@ test('sha256JsonUuid preserves the legacy concatenated JSON digest', async () =>
   expect(validate(id)).toBe(true);
   expect(version(id)).toBe(4);
   expect(parse(id)[8] & 0xc0).toBe(0x80);
+});
+
+describe('nickCodexIdentityUuid', () => {
+  const selectedAuthId = 'acct_selected';
+  const identityKind = 'installation';
+  const originalValue = 'downstream-installation';
+
+  test('keeps an identical tuple stable at a frozen UUID mapping', () => {
+    const id = nickCodexIdentityUuid(selectedAuthId, identityKind, originalValue);
+
+    expect(id).toBe('74812dab-f608-41ed-abdf-ac1a602d46fb');
+    expect(nickCodexIdentityUuid(selectedAuthId, identityKind, originalValue)).toBe(id);
+    expect(validate(id)).toBe(true);
+    expect(version(id)).toBe(4);
+    expect(parse(id)[8] & 0xc0).toBe(0x80);
+  });
+
+  test('separates every component of the identity tuple', () => {
+    const id = nickCodexIdentityUuid(selectedAuthId, identityKind, originalValue);
+
+    expect(nickCodexIdentityUuid('acct_other', identityKind, originalValue)).not.toBe(id);
+    expect(nickCodexIdentityUuid(selectedAuthId, 'prompt-cache', originalValue)).not.toBe(id);
+    expect(nickCodexIdentityUuid(selectedAuthId, identityKind, 'other-installation')).not.toBe(id);
+  });
 });
 
 describe('uuidV7', () => {

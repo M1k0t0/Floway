@@ -9,6 +9,7 @@ export const OLLAMA_DEFAULT_FLAGS: FlagDefaults = {
   'openai-responses-image-generation-shim': true,
   'openai-responses-compact-shim': true,
   'codex-installation-id-passthrough': false,
+  'nick-installation-id': false,
   'disable-reasoning-on-forced-tool-choice': false,
   'rewrite-mid-conv-system-to-user': false,
   'rewrite-developer-to-system': false,

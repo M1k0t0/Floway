@@ -14,6 +14,7 @@ export const CUSTOM_DEFAULT_FLAGS: FlagDefaults = {
   // upstream that lacks native compact.
   'openai-responses-compact-shim': false,
   'codex-installation-id-passthrough': false,
+  'nick-installation-id': false,
   'disable-reasoning-on-forced-tool-choice': false,
   'rewrite-mid-conv-system-to-user': false,
   'rewrite-developer-to-system': false,

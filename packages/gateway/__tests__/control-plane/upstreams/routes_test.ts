@@ -2237,7 +2237,7 @@ test('GET /api/upstreams/blueprint serves the record a new upstream starts as wi
   // billing block never reaches its OpenAI-compatible upstream prompt cache;
   // claude-code keeps it off so plan-tier attribution reaches Anthropic
   // verbatim; Codex prefers caller installation ids unless the operator opts
-  // into the fixed account id.
+  // into the fixed account id, while scoped pseudonymization stays opt-in.
   const copilotPreview = (await (await requestApp('/api/upstreams/blueprint?kind=copilot', { headers: { 'x-floway-session': adminSession } })).json()) as JsonObject;
   assertEquals(copilotPreview.flag_defaults['strip-billing-attribution'], true);
   assertEquals(copilotPreview.flag_defaults['rewrite-mid-conv-system-to-user'], false);
@@ -2245,6 +2245,7 @@ test('GET /api/upstreams/blueprint serves the record a new upstream starts as wi
   assertEquals(ccPreview.flag_defaults['strip-billing-attribution'], false);
   const codexPreview = (await (await requestApp('/api/upstreams/blueprint?kind=codex', { headers: { 'x-floway-session': adminSession } })).json()) as JsonObject;
   assertEquals(codexPreview.flag_defaults['codex-installation-id-passthrough'], true);
+  assertEquals(codexPreview.flag_defaults['nick-installation-id'], false);
 });
 
 test('GET /api/upstreams/:id returns the full record with fresh Codex quota for the edit page', async () => {

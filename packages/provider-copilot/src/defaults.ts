@@ -18,6 +18,7 @@ export const COPILOT_DEFAULT_FLAGS: FlagDefaults = {
   // has a compaction wire.
   'openai-responses-compact-shim': false,
   'codex-installation-id-passthrough': false,
+  'nick-installation-id': false,
   'disable-reasoning-on-forced-tool-choice': false,
   // Upstream default is off; Claude models below 4.8 flip it on via the
   // per-model default. See `defaultFlagsForCopilotModel` for the empirical

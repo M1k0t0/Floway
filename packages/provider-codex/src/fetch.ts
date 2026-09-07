@@ -10,7 +10,7 @@ import {
   CODEX_OPENAI_RESPONSES_PATH,
   CODEX_USER_AGENT,
 } from './constants.ts';
-import { sha256JsonUuid, uuidV7 } from './ids.ts';
+import { nickCodexIdentityUuid, sha256JsonUuid, uuidV7 } from './ids.ts';
 import { codexPlanSupportsImages } from './models.ts';
 import {
   hasCodexQuotaReading,
@@ -265,10 +265,13 @@ const buildCodexRequestIdentity = (
   // https://github.com/openai/codex/blob/a16863f8704831d13e041ed7dba2c4a57a2a940b/codex-rs/codex-api/src/endpoint/responses.rs#L87-L91
   // https://github.com/openai/codex/blob/a16863f8704831d13e041ed7dba2c4a57a2a940b/codex-rs/core/src/client.rs#L1134-L1136
   const clientRequestId = trimHeader(opts.headers, 'x-client-request-id') ?? threadId;
+  const callerInstallationId = stringField(clientMetadata, 'x-codex-installation-id')
+    ?? stringField(clientTurnMetadata, 'installation_id');
   const installationId = opts.model.enabledFlags.has('codex-installation-id-passthrough')
-    ? stringField(clientMetadata, 'x-codex-installation-id')
-      ?? stringField(clientTurnMetadata, 'installation_id')
-      ?? opts.account.openaiDeviceId
+    && callerInstallationId !== null
+    ? opts.model.enabledFlags.has('nick-installation-id')
+      ? nickCodexIdentityUuid(opts.account.chatgptAccountId, 'installation', callerInstallationId)
+      : callerInstallationId
     : opts.account.openaiDeviceId;
   // Codex advances the window on every auto-compaction — the id is
   // `{thread_id}:{auto_compact_window_number}` — and a reused socket carries
