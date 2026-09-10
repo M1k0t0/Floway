@@ -412,7 +412,16 @@ test('compact returns the clean upstream result for source-edge affinity and sto
 
   const callOpenAIResponses = vi.fn(async (_model: ProviderModel, _body: Omit<CanonicalOpenAIResponsesPayload, 'model'>, action: OpenAIResponsesAction): Promise<ProviderOpenAIResponsesResult> => {
     if (action !== 'compact') throw new Error(`compact candidate received action='${action}'`);
-    return { action: 'compact', ok: true, result: compactionResult, modelKey: 'test-model-key' };
+    return {
+      action: 'compact',
+      ok: true,
+      result: compactionResult,
+      modelKey: 'test-model-key',
+      headers: new Headers({
+        'x-openai-internal-codex-responses-lite': 'true',
+        'x-request-id': 'req_compact',
+      }),
+    };
   });
 
   const candidate = makeCandidate(callOpenAIResponses);
@@ -435,6 +444,8 @@ test('compact returns the clean upstream result for source-edge affinity and sto
   assertEquals(result.result.output.length, 1);
   assertEquals((result.result.output[0] as { id: string }).id, 'cmp_1');
   assertEquals(result.result.id, compactionResult.id);
+  assertEquals(result.headers?.get('x-openai-internal-codex-responses-lite'), 'true');
+  assertEquals(result.headers?.get('x-request-id'), 'req_compact');
 });
 
 test('generate strips disallowed headers and injects external image loading across translation to Anthropic Messages', async () => {

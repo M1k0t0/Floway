@@ -114,6 +114,7 @@ export const openaiResponsesAttempt = {
         modelIdentity: chainResult.modelIdentity,
         usage: tokenUsageFromBillableUsage((await chainResult.finalMetadata)?.billableUsage),
         performance: chainResult.performance,
+        ...(chainResult.headers === undefined ? {} : { headers: chainResult.headers }),
       };
     }
     return chainResult;
@@ -238,6 +239,7 @@ const providerOpenAIResponsesResultToExecuteResult = async (
     modelIdentity,
     {
       performance: context,
+      ...(providerResult.headers === undefined ? {} : { headers: providerResult.headers }),
       ...(billableUsage === null ? {} : { finalMetadata: Promise.resolve({ modelIdentity, billableUsage }) }),
     },
   );

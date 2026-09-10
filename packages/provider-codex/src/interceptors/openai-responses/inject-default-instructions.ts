@@ -1,3 +1,4 @@
+import { hasLeadingCodexResponsesLiteTools } from '../../responses-lite.ts';
 import type { OpenAIResponsesBoundaryCtx } from './types.ts';
 
 // ChatGPT-subscription catalog models reject missing or empty `instructions`.
@@ -10,7 +11,10 @@ export const injectDefaultInstructions = async <TResult>(
   run: () => Promise<TResult>,
 ): Promise<TResult> => {
   const instructions = ctx.payload.instructions;
-  if (instructions === undefined || instructions === null || instructions === '') {
+  if (
+    !hasLeadingCodexResponsesLiteTools(ctx.payload.input)
+    && (instructions === undefined || instructions === null || instructions === '')
+  ) {
     ctx.payload = { ...ctx.payload, instructions: "You're a helpful assistant." };
   }
   return await run();

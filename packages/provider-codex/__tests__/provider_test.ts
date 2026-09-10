@@ -59,8 +59,8 @@ const sseResponse = (): Response => new Response(
 
 const modelsResponse = (): Response => new Response(JSON.stringify({
   models: [
-    { slug: 'gpt-5.4', display_name: 'GPT-5.4', visibility: 'list', context_window: 272000, max_context_window: 1000000 },
-    { slug: 'codex-auto-review', display_name: 'Codex Auto Review', visibility: 'hide', context_window: 272000, max_context_window: 1000000 },
+    { slug: 'gpt-5.4', display_name: 'GPT-5.4', visibility: 'list', context_window: 272000, max_context_window: 1000000, use_responses_lite: false },
+    { slug: 'codex-auto-review', display_name: 'Codex Auto Review', visibility: 'hide', context_window: 272000, max_context_window: 1000000, use_responses_lite: true },
   ],
 }), { status: 200, headers: new Headers({ 'content-type': 'application/json' }) });
 
@@ -97,6 +97,7 @@ describe('createCodexProvider', () => {
       'x-codex-image-turn-id',
       'x-codex-turn-metadata',
       'x-codex-window-id',
+      'x-openai-internal-codex-responses-lite',
     ]);
   });
 
@@ -115,6 +116,8 @@ describe('createCodexProvider', () => {
     // can dispatch to `codex-auto-review` even though ChatGPT's UI hides it.
     expect(models.map(m => m.id)).toEqual(['gpt-5.4', 'codex-auto-review', 'gpt-image-2']);
     expect(models[0].endpoints).toEqual({ openaiResponses: {} });
+    expect(models[0].providerData).toEqual({ useResponsesLite: false });
+    expect(models[1].providerData).toEqual({ useResponsesLite: true });
     expect(models[2]).toMatchObject({ kind: 'image', endpoints: { openaiImagesGenerations: {}, openaiImagesEdits: {} } });
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(fetchSpy.mock.calls[0][0]).toMatch(/\/codex\/models/);

@@ -42,6 +42,24 @@ test('injects the default when instructions is null', async () => {
   assertEquals(ctx.payload.instructions, "You're a helpful assistant.");
 });
 
+test('does not add a top-level fallback to an already-Lite request', async () => {
+  const input: CanonicalOpenAIResponsesPayload['input'] = [
+    {
+      type: 'additional_tools',
+      role: 'developer',
+      id: 'at_existing',
+      tools: [],
+    },
+    { type: 'message', role: 'user', content: 'hello' },
+  ];
+  const ctx = invocation({ model: 'gpt-test', input });
+
+  await injectDefaultInstructions(ctx, stubRequest, okEvents);
+
+  assertEquals(ctx.payload.instructions, undefined);
+  assertEquals(ctx.payload.input, input);
+});
+
 test('preserves a caller-supplied instructions string', async () => {
   const ctx = invocation({ model: 'gpt-test', input: [{ type: 'message', role: 'user', content: 'hello' }], instructions: 'You are a pirate.' });
 

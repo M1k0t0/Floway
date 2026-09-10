@@ -1,0 +1,564 @@
+import { v5 as uuidV5 } from 'uuid';
+
+import {
+  CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY,
+  CODEX_RESPONSES_LITE_HEADER,
+} from './constants.ts';
+import type { ProtocolFrame } from '@floway-dev/protocols/common';
+import type {
+  CanonicalOpenAIResponsesPayload,
+  OpenAIResponsesCompactionResult,
+  OpenAIResponsesInputAdditionalToolsItem,
+  OpenAIResponsesInputItem,
+  OpenAIResponsesInputMessage,
+  OpenAIResponsesOutputItem,
+  OpenAIResponsesResult,
+  OpenAIResponsesStreamEvent,
+  OpenAIResponsesTool,
+} from '@floway-dev/protocols/openai-responses';
+
+export type CodexResponsesBody = Omit<CanonicalOpenAIResponsesPayload, 'model'>;
+
+interface CallableIdentity {
+  name: string;
+  namespace?: string;
+  type: 'function_call' | 'custom_tool_call';
+}
+
+export interface CodexResponsesCallableIdentityMap {
+  readonly byWireName: ReadonlyMap<string, CallableIdentity | null>;
+}
+
+export interface CodexResponsesRequestEchoes {
+  readonly tools: CodexResponsesBody['tools'];
+  readonly instructions: CodexResponsesBody['instructions'];
+  readonly parallel_tool_calls: CodexResponsesBody['parallel_tool_calls'];
+  readonly reasoning: CodexResponsesBody['reasoning'];
+}
+
+export interface CodexResponsesBridgeResult {
+  body: CodexResponsesBody;
+  callableIdentities: CodexResponsesCallableIdentityMap;
+  requestEchoes?: CodexResponsesRequestEchoes;
+}
+
+interface ToolOrigin {
+  tool: OpenAIResponsesTool;
+}
+
+// Official Codex folds flat function/custom tools into this namespace and tags
+// the following developer message with this content kind.
+// https://github.com/openai/codex/blob/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/tools/src/tool_spec.rs#L95-L141
+// https://github.com/openai/codex/blob/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/core/src/context/base_instructions.rs#L5-L12
+const DEFAULT_FUNCTION_NAMESPACE = 'functions';
+const BASE_INSTRUCTIONS_CONTENT_KIND = 'model.base_instructions';
+// RFC 9562's namespace UUID for ISO object identifiers, matching
+// `Uuid::NAMESPACE_OID` in official Codex's Responses Lite ID derivation.
+// https://github.com/openai/codex/blob/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/core/src/client.rs#L938-L965
+// https://www.rfc-editor.org/rfc/rfc9562.html#name-namespace-id-usage-and-allo
+const UUID_NAMESPACE_OID = '6ba7b812-9dad-11d1-80b4-00c04fd430c8';
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isCallableTool = (
+  value: unknown,
+): value is Extract<OpenAIResponsesTool, { type: 'function' | 'custom' }> =>
+  isRecord(value)
+  && (value.type === 'function' || value.type === 'custom')
+  && typeof value.name === 'string';
+
+const isNamespaceTool = (
+  value: unknown,
+): value is Extract<OpenAIResponsesTool, { type: 'namespace' }> =>
+  isRecord(value)
+  && value.type === 'namespace'
+  && typeof value.name === 'string'
+  && typeof value.description === 'string'
+  && Array.isArray(value.tools);
+
+const isAdditionalToolsItem = (
+  value: unknown,
+): value is OpenAIResponsesInputAdditionalToolsItem =>
+  isRecord(value)
+  && value.type === 'additional_tools'
+  && value.role === 'developer'
+  && Array.isArray(value.tools)
+  && (value.id === undefined || value.id === null || typeof value.id === 'string');
+
+export const hasLeadingCodexResponsesLiteTools = (
+  input: readonly OpenAIResponsesInputItem[],
+): boolean => isAdditionalToolsItem(input[0]);
+
+const clientMetadataFrom = (body: CodexResponsesBody): Record<string, unknown> | undefined => {
+  const metadata = (body as unknown as Record<string, unknown>).client_metadata;
+  return isRecord(metadata) ? metadata : undefined;
+};
+
+export const downstreamRequestsCodexResponsesLite = (
+  headers: Headers,
+  body: CodexResponsesBody,
+): boolean =>
+  headers.get(CODEX_RESPONSES_LITE_HEADER)?.trim().toLowerCase() === 'true'
+  || clientMetadataFrom(body)?.[CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY] === 'true'
+  || hasLeadingCodexResponsesLiteTools(body.input);
+
+const callableKey = (namespace: string | undefined, name: string): string =>
+  JSON.stringify([namespace ?? null, name]);
+
+const sameIdentity = (left: CallableIdentity, right: CallableIdentity): boolean =>
+  left.name === right.name
+  && left.namespace === right.namespace
+  && left.type === right.type;
+
+const registerCallable = (
+  entries: Map<string, CallableIdentity | null>,
+  wire: CallableIdentity,
+  downstream: CallableIdentity,
+): void => {
+  const key = callableKey(wire.namespace, wire.name);
+  if (!entries.has(key)) {
+    entries.set(key, downstream);
+    return;
+  }
+  const current = entries.get(key);
+  if (current !== null && current !== undefined && !sameIdentity(current, downstream)) {
+    entries.set(key, null);
+  }
+};
+
+const identityForTool = (
+  tool: Extract<OpenAIResponsesTool, { type: 'function' | 'custom' }>,
+  namespace?: string,
+): CallableIdentity => ({
+  name: tool.name,
+  ...(namespace === undefined ? {} : { namespace }),
+  type: tool.type === 'function' ? 'function_call' : 'custom_tool_call',
+});
+
+const registerUnchangedTool = (
+  entries: Map<string, CallableIdentity | null>,
+  tool: OpenAIResponsesTool,
+): void => {
+  if (isCallableTool(tool)) {
+    const identity = identityForTool(tool);
+    registerCallable(entries, identity, identity);
+    return;
+  }
+  if (!isNamespaceTool(tool)) return;
+  for (const child of tool.tools) {
+    if (!isCallableTool(child)) continue;
+    const identity = identityForTool(child, tool.name);
+    registerCallable(entries, identity, identity);
+  }
+};
+
+// Collect the same two Responses declaration surfaces, in wire order, that
+// CLIProxyAPI inventories before translating tools.
+// https://github.com/router-for-me/CLIProxyAPI/blob/7fac6b15bcfe5ea55c18c9eaec8e5b7e6457d974/internal/util/responses_tools.go#L65-L73
+const collectToolOrigins = (body: CodexResponsesBody): ToolOrigin[] => {
+  const origins: ToolOrigin[] = [];
+  if (Array.isArray(body.tools)) {
+    origins.push(...body.tools.map(tool => ({ tool })));
+  }
+  for (const item of body.input) {
+    if (!isAdditionalToolsItem(item)) continue;
+    origins.push(...item.tools.map(tool => ({ tool })));
+  }
+  return origins;
+};
+
+const toolsForLite = (
+  origins: readonly ToolOrigin[],
+  entries: Map<string, CallableIdentity | null>,
+): OpenAIResponsesTool[] => {
+  const output: OpenAIResponsesTool[] = [];
+  const functionChildren: Array<Extract<OpenAIResponsesTool, { type: 'function' | 'custom' }>> = [];
+  let functionDescription = '';
+  let functionIndex: number | undefined;
+
+  for (const { tool } of origins) {
+    if (isCallableTool(tool)) {
+      functionIndex ??= output.length;
+      functionChildren.push(tool);
+      registerCallable(
+        entries,
+        identityForTool(tool, DEFAULT_FUNCTION_NAMESPACE),
+        identityForTool(tool),
+      );
+      continue;
+    }
+    if (isNamespaceTool(tool) && tool.name === DEFAULT_FUNCTION_NAMESPACE) {
+      functionIndex ??= output.length;
+      if (tool.description.trim() !== '') functionDescription = tool.description;
+      for (const child of tool.tools) {
+        functionChildren.push(child);
+        if (!isCallableTool(child)) continue;
+        const identity = identityForTool(child, DEFAULT_FUNCTION_NAMESPACE);
+        registerCallable(entries, identity, identity);
+      }
+      continue;
+    }
+
+    output.push(tool);
+    registerUnchangedTool(entries, tool);
+  }
+
+  if (functionIndex !== undefined && functionChildren.length > 0) {
+    output.splice(functionIndex, 0, {
+      type: 'namespace',
+      name: DEFAULT_FUNCTION_NAMESPACE,
+      description: functionDescription,
+      tools: functionChildren,
+    });
+  }
+
+  return output;
+};
+
+const registerUnchangedOrigins = (
+  origins: readonly ToolOrigin[],
+  entries: Map<string, CallableIdentity | null>,
+): void => {
+  for (const { tool } of origins) registerUnchangedTool(entries, tool);
+};
+
+// Only consume Codex's exact one-fragment carrier. A mixed developer message
+// may contain other classified context and must remain in the input intact.
+// https://github.com/openai/codex/blob/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/context-fragments/src/fragment.rs#L35-L51
+const isBaseInstructionsMessage = (
+  value: unknown,
+): value is OpenAIResponsesInputMessage => {
+  if (!isRecord(value) || value.type !== 'message' || value.role !== 'developer') return false;
+  const metadata = value.internal_chat_message_metadata_passthrough;
+  if (!isRecord(metadata) || !Array.isArray(metadata.content_item_kinds)) return false;
+  if (
+    metadata.content_item_kinds.length !== 1
+    || metadata.content_item_kinds[0] !== BASE_INSTRUCTIONS_CONTENT_KIND
+  ) return false;
+  return Array.isArray(value.content)
+    && value.content.length === 1
+    && isRecord(value.content[0])
+    && value.content[0].type === 'input_text'
+    && typeof value.content[0].text === 'string';
+};
+
+const baseInstructionsText = (message: OpenAIResponsesInputMessage): string => {
+  if (!Array.isArray(message.content)) return '';
+  const part = message.content[0];
+  return part !== undefined && 'text' in part && typeof part.text === 'string'
+    ? part.text
+    : '';
+};
+
+const makeThreadNamespace = (threadId: string): string =>
+  uuidV5(threadId, UUID_NAMESPACE_OID);
+
+const makeAdditionalToolsItem = (
+  tools: OpenAIResponsesTool[],
+  threadNamespace: string,
+): OpenAIResponsesInputAdditionalToolsItem => ({
+  type: 'additional_tools',
+  role: 'developer',
+  tools,
+  id: `at_${uuidV5(JSON.stringify(tools), threadNamespace)}`,
+});
+
+const makeBaseInstructionsMessage = (
+  instructions: string,
+  threadNamespace: string,
+): OpenAIResponsesInputMessage => ({
+  type: 'message',
+  role: 'developer',
+  content: [{ type: 'input_text', text: instructions }],
+  id: `msg_${uuidV5(instructions, threadNamespace)}`,
+  internal_chat_message_metadata_passthrough: {
+    content_item_kinds: [BASE_INSTRUCTIONS_CONTENT_KIND],
+  },
+});
+
+// Codex strips this field only from message and callable-output image content;
+// do not recurse into tool schemas, metadata, or unrelated extension objects.
+// https://github.com/openai/codex/blob/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/core/src/client_common.rs#L56-L105
+const removeInputImageDetail = <T extends { type: string }>(part: T): T => {
+  if (part.type !== 'input_image') return part;
+  const next = { ...part };
+  delete (next as { detail?: unknown }).detail;
+  return next;
+};
+
+const removeLiteImageDetail = (
+  item: OpenAIResponsesInputItem,
+): OpenAIResponsesInputItem => {
+  if (item.type === 'message' && Array.isArray(item.content)) {
+    return {
+      ...item,
+      content: item.content.map(removeInputImageDetail),
+    };
+  }
+  if (
+    (item.type === 'function_call_output' || item.type === 'custom_tool_call_output')
+    && Array.isArray(item.output)
+  ) {
+    return {
+      ...item,
+      output: item.output.map(removeInputImageDetail),
+    };
+  }
+  return item;
+};
+
+const lowerToLite = (
+  body: CodexResponsesBody,
+  threadId: string,
+): CodexResponsesBridgeResult => {
+  const next: CodexResponsesBody = { ...body };
+  const origins = collectToolOrigins(body);
+  const entries = new Map<string, CallableIdentity | null>();
+  const leadingTools = isAdditionalToolsItem(body.input[0]) ? body.input[0] : undefined;
+  const additionalToolsCount = body.input.filter(isAdditionalToolsItem).length;
+  const hasTopLevelTools = Array.isArray(body.tools) && body.tools.length > 0;
+  const rebuildTools = leadingTools === undefined
+    || hasTopLevelTools
+    || additionalToolsCount > 1;
+  const threadNamespace = makeThreadNamespace(threadId);
+  let input = [...body.input];
+
+  if (rebuildTools) {
+    const tools = toolsForLite(origins, entries);
+    input = input.filter(item => !isAdditionalToolsItem(item));
+    input.unshift(makeAdditionalToolsItem(tools, threadNamespace));
+  } else {
+    registerUnchangedOrigins(origins, entries);
+  }
+
+  if (Array.isArray(body.tools) || body.tools === null) delete next.tools;
+
+  if (typeof body.instructions === 'string' && body.instructions.length > 0) {
+    input.splice(1, 0, makeBaseInstructionsMessage(body.instructions, threadNamespace));
+    delete next.instructions;
+  } else if (body.instructions === undefined || body.instructions === null || body.instructions === '') {
+    delete next.instructions;
+  }
+
+  next.input = input.map(removeLiteImageDetail);
+  // These are model-side Lite wire controls, not downstream preferences.
+  // https://github.com/openai/codex/blob/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/core/src/client.rs#L920-L924
+  // https://github.com/openai/codex/blob/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/core/src/client.rs#L1014-L1021
+  next.parallel_tool_calls = false;
+  next.reasoning = {
+    ...(isRecord(body.reasoning) ? body.reasoning : {}),
+    context: 'all_turns',
+  };
+
+  return {
+    body: next,
+    callableIdentities: { byWireName: entries },
+  };
+};
+
+const withoutLiteClientMetadata = (body: CodexResponsesBody): CodexResponsesBody => {
+  const metadata = clientMetadataFrom(body);
+  if (!metadata || !(CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY in metadata)) return body;
+
+  const nextMetadata = { ...metadata };
+  delete nextMetadata[CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY];
+  return {
+    ...body,
+    client_metadata: nextMetadata,
+  } as CodexResponsesBody;
+};
+
+const liftToStandard = (body: CodexResponsesBody): CodexResponsesBridgeResult => {
+  const next = withoutLiteClientMetadata({ ...body });
+  const origins = collectToolOrigins(body);
+  const entries = new Map<string, CallableIdentity | null>();
+  registerUnchangedOrigins(origins, entries);
+
+  const additionalIndexes = new Set<number>();
+  body.input.forEach((item, index) => {
+    if (isAdditionalToolsItem(item)) additionalIndexes.add(index);
+  });
+
+  const leadingTools = isAdditionalToolsItem(body.input[0]);
+  const baseMessageIndex = leadingTools && isBaseInstructionsMessage(body.input[1]) ? 1 : undefined;
+  const topLevelInstructionsEmpty = body.instructions === undefined
+    || body.instructions === null
+    || body.instructions === '';
+  const promotedInstructions = baseMessageIndex === undefined
+    ? undefined
+    : baseInstructionsText(body.input[baseMessageIndex] as OpenAIResponsesInputMessage);
+  const promoteInstructions = topLevelInstructionsEmpty
+    && promotedInstructions !== undefined
+    && promotedInstructions.length > 0;
+
+  next.input = body.input.filter((_item, index) =>
+    !additionalIndexes.has(index) && (!promoteInstructions || index !== baseMessageIndex));
+
+  if (additionalIndexes.size > 0 || Array.isArray(body.tools)) {
+    next.tools = origins.map(({ tool }) => tool);
+  }
+  if (promoteInstructions) next.instructions = promotedInstructions;
+
+  return {
+    body: next,
+    callableIdentities: { byWireName: entries },
+  };
+};
+
+const passStandard = (body: CodexResponsesBody): CodexResponsesBridgeResult => ({
+  body: {
+    ...body,
+    input: [...body.input],
+  },
+  callableIdentities: { byWireName: new Map() },
+});
+
+export const bridgeCodexResponsesRequest = (
+  body: CodexResponsesBody,
+  opts: {
+    threadId: string;
+    downstreamUsesLite: boolean;
+    upstreamUsesLite: boolean;
+  },
+): CodexResponsesBridgeResult => {
+  const bridge = opts.upstreamUsesLite
+    ? lowerToLite(body, opts.threadId)
+    : opts.downstreamUsesLite
+      ? liftToStandard(body)
+      : passStandard(body);
+  if (opts.downstreamUsesLite === opts.upstreamUsesLite) return bridge;
+  // The upstream can echo the bridged request fields on every resource-bearing
+  // event. Preserve the caller's representation for those echoes while the
+  // callable map below reverses namespace/type changes on output items. This is
+  // the same request-map/response-restore split used by CLIProxyAPI.
+  // https://github.com/router-for-me/CLIProxyAPI/blob/7fac6b15bcfe5ea55c18c9eaec8e5b7e6457d974/internal/translator/openai/openai/responses/openai_openai-responses_response.go
+  return {
+    ...bridge,
+    requestEchoes: {
+      tools: body.tools,
+      instructions: body.instructions,
+      parallel_tool_calls: body.parallel_tool_calls,
+      reasoning: body.reasoning,
+    },
+  };
+};
+
+// Restore the caller-visible namespace and function/custom identity from the
+// request map, mirroring CLIProxyAPI's streaming and unary response repair.
+// https://github.com/router-for-me/CLIProxyAPI/blob/7fac6b15bcfe5ea55c18c9eaec8e5b7e6457d974/internal/translator/openai/openai/responses/openai_openai-responses_response.go#L288-L445
+// https://github.com/router-for-me/CLIProxyAPI/blob/7fac6b15bcfe5ea55c18c9eaec8e5b7e6457d974/internal/translator/openai/openai/responses/openai_openai-responses_response.go#L779-L963
+const restoreCallableItem = (
+  item: OpenAIResponsesOutputItem,
+  identities: CodexResponsesCallableIdentityMap,
+): OpenAIResponsesOutputItem => {
+  if (item.type !== 'function_call' && item.type !== 'custom_tool_call') return item;
+  const downstream = identities.byWireName.get(callableKey(item.namespace, item.name));
+  if (downstream === undefined || downstream === null) return item;
+
+  const restored = { ...item } as Record<string, unknown>;
+  restored.name = downstream.name;
+  if (downstream.namespace === undefined) delete restored.namespace;
+  else restored.namespace = downstream.namespace;
+
+  if (downstream.type === 'function_call') {
+    restored.type = 'function_call';
+    if (item.type === 'custom_tool_call') {
+      restored.arguments = item.input;
+      delete restored.input;
+      restored.status ??= 'completed';
+    }
+  } else {
+    restored.type = 'custom_tool_call';
+    if (item.type === 'function_call') {
+      restored.input = item.arguments;
+      delete restored.arguments;
+    }
+  }
+
+  return restored as unknown as OpenAIResponsesOutputItem;
+};
+
+const REQUEST_ECHO_FIELDS = [
+  'tools',
+  'instructions',
+  'parallel_tool_calls',
+  'reasoning',
+] as const;
+
+const restoreCodexRequestEchoes = (
+  result: OpenAIResponsesResult,
+  requestEchoes: CodexResponsesRequestEchoes | undefined,
+): OpenAIResponsesResult => {
+  if (requestEchoes === undefined) return result;
+  const restored = { ...result };
+  const record = restored as unknown as Record<string, unknown>;
+  for (const field of REQUEST_ECHO_FIELDS) {
+    const value = requestEchoes[field];
+    if (value === undefined) delete record[field];
+    else record[field] = value;
+  }
+  return restored;
+};
+
+export const restoreCodexResponsesResult = (
+  result: OpenAIResponsesResult,
+  identities: CodexResponsesCallableIdentityMap,
+  requestEchoes?: CodexResponsesRequestEchoes,
+): OpenAIResponsesResult => restoreCodexRequestEchoes({
+  ...result,
+  output: result.output.map(item => restoreCallableItem(item, identities)),
+}, requestEchoes);
+
+export const restoreCodexResponsesCompactionResult = (
+  result: OpenAIResponsesCompactionResult,
+  identities: CodexResponsesCallableIdentityMap,
+): OpenAIResponsesCompactionResult => ({
+  ...result,
+  output: result.output.map(item => restoreCallableItem(item, identities)),
+});
+
+export const restoreCodexResponsesEvent = (
+  event: OpenAIResponsesStreamEvent,
+  identities: CodexResponsesCallableIdentityMap,
+  requestEchoes?: CodexResponsesRequestEchoes,
+): OpenAIResponsesStreamEvent => {
+  if (event.type === 'response.output_item.added' || event.type === 'response.output_item.done') {
+    return {
+      ...event,
+      item: restoreCallableItem(event.item, identities),
+    };
+  }
+  if ('response' in event && isRecord(event.response) && Array.isArray(event.response.output)) {
+    return {
+      ...event,
+      response: restoreCodexResponsesResult(
+        event.response as unknown as OpenAIResponsesResult,
+        identities,
+        requestEchoes,
+      ),
+    } as OpenAIResponsesStreamEvent;
+  }
+  return event;
+};
+
+export const restoreCodexResponsesFrames = async function* (
+  frames: AsyncIterable<ProtocolFrame<OpenAIResponsesStreamEvent>>,
+  identities: CodexResponsesCallableIdentityMap,
+  requestEchoes?: CodexResponsesRequestEchoes,
+): AsyncGenerator<ProtocolFrame<OpenAIResponsesStreamEvent>> {
+  for await (const frame of frames) {
+    if (frame.type === 'done') {
+      yield frame;
+      continue;
+    }
+    yield {
+      ...frame,
+      event: restoreCodexResponsesEvent(
+        frame.event,
+        identities,
+        requestEchoes,
+      ),
+    };
+  }
+};

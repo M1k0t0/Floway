@@ -445,6 +445,7 @@ test('POST /v1/responses returns 502 when the response snapshot cannot be persis
 const compactTurn = async (
   upstream: Partial<OpenAIResponsesResult> = {},
   requestFields: Record<string, unknown> = {},
+  upstreamHeaders?: Headers,
 ): Promise<{ upstream: OpenAIResponsesResult; response: Response }> => {
   const compactionItem = { type: 'compaction' as const, id: 'cmp_1', encrypted_content: 'ENC' };
   const compactionResult: OpenAIResponsesResult = {
@@ -456,7 +457,13 @@ const compactTurn = async (
   };
   const callOpenAIResponses = vi.fn(async (_model: unknown, _body: unknown, action: OpenAIResponsesAction): Promise<ProviderOpenAIResponsesResult> => {
     if (action !== 'compact') throw new Error(`expected compact, got ${action}`);
-    return { action: 'compact', ok: true, result: compactionResult, modelKey: 'test-model-key' };
+    return {
+      action: 'compact',
+      ok: true,
+      result: compactionResult,
+      modelKey: 'test-model-key',
+      ...(upstreamHeaders === undefined ? {} : { headers: upstreamHeaders }),
+    };
   });
   queueResolution([makeCandidate({ callOpenAIResponses })]);
 
@@ -484,6 +491,20 @@ test('POST /v1/responses/compact returns a non-streaming compaction body', async
   assert(body.id.length > 0 && body.id !== 'resp_test', 'expected the source boundary to replace the upstream response id');
   assertEquals(await repo.openaiResponsesSnapshots.lookup(API_KEY_ID, body.id, 0), null);
   assertEquals(await repo.openaiResponsesItems.lookupMany(API_KEY_ID, body.output.map(item => item.id), 0), []);
+});
+
+test('POST /v1/responses/compact forwards safe provider response headers', async () => {
+  installRepo();
+  const { response } = await compactTurn({}, {}, new Headers({
+    'x-openai-internal-codex-responses-lite': 'true',
+    'x-request-id': 'req_compact',
+    connection: 'close',
+  }));
+
+  assertEquals(response.status, 200);
+  assertEquals(response.headers.get('x-openai-internal-codex-responses-lite'), 'true');
+  assertEquals(response.headers.get('x-request-id'), 'req_compact');
+  assertEquals(response.headers.get('connection'), null);
 });
 
 test('POST /v1/responses/compact answers the compaction resource, not the response resource', async () => {

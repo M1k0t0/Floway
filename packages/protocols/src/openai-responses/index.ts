@@ -125,6 +125,10 @@ export interface OpenAIResponsesInputMessage {
   role: 'user' | 'assistant' | 'system' | 'developer';
   content: string | OpenAIResponsesInputContent[];
   phase?: OpenAIResponsesMessagePhase;
+  // Codex tags its Responses Lite base-instructions message through this
+  // provider extension.
+  // https://github.com/openai/codex/blob/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/protocol/src/models.rs#L935-L944
+  internal_chat_message_metadata_passthrough?: Record<string, unknown>;
 }
 
 // The OpenAI Responses request schema's EasyInputMessage makes the constant

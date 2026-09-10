@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { CODEX_CLI_VERSION, CODEX_ORIGINATOR, CODEX_USER_AGENT } from '../src/constants.ts';
-import { codexImageProviderModel, codexPlanSupportsImages, codexRawToProviderModel, fetchCodexCatalog } from '../src/models.ts';
+import { codexImageProviderModel, codexModelUsesResponsesLite, codexPlanSupportsImages, codexRawToProviderModel, fetchCodexCatalog } from '../src/models.ts';
 import { priceRequest } from '@floway-dev/protocols/common';
 import { directFetcher, type FlagId } from '@floway-dev/provider';
 
@@ -97,6 +97,27 @@ describe('fetchCodexCatalog', () => {
     expect(catalog[0].default_reasoning_effort).toBeUndefined();
   });
 
+  test('parses the Responses Lite catalog flag and preserves false versus absence', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(okJson({
+      models: [
+        { slug: 'future-lite-model', display_name: 'Future Lite', context_window: 1, use_responses_lite: true },
+        { slug: 'gpt-6-astra', display_name: 'GPT-6 Astra', context_window: 2, use_responses_lite: false },
+        { slug: 'legacy-model', display_name: 'Legacy', context_window: 3 },
+      ],
+    }));
+
+    const catalog = await fetchCodexCatalog({ accessToken: 'at', accountId: 'acc', fetcher: directFetcher });
+    expect(catalog.map(model => model.use_responses_lite)).toEqual([true, false, undefined]);
+  });
+
+  test('rejects a present non-boolean Responses Lite catalog flag', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(okJson({
+      models: [{ slug: 'gpt-x', display_name: 'GPT-X', context_window: 1, use_responses_lite: 'true' }],
+    }));
+
+    await expect(fetchCodexCatalog({ accessToken: 'at', accountId: 'acc', fetcher: directFetcher })).rejects.toThrow(/use_responses_lite not a boolean/);
+  });
+
   test('throws on malformed input_modalities entry (unknown modality)', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(okJson({
       models: [{ slug: 'gpt-x', display_name: 'GPT-X', context_window: 1, input_modalities: ['video'] }],
@@ -126,6 +147,40 @@ describe('codexRawToProviderModel', () => {
     expect(m.kind).toBe('chat');
     expect(m.limits.max_context_window_tokens).toBe(272000);
     expect(m.owned_by).toBe('openai');
+  });
+
+  test('projects Responses Lite as private metadata and defaults absence to standard', () => {
+    const lite = codexRawToProviderModel({
+      id: 'future-lite-model',
+      display_name: 'Future Lite',
+      context_window: 1,
+      use_responses_lite: true,
+    }, noFlags);
+    const explicitlyStandardAstra = codexRawToProviderModel({
+      id: 'gpt-6-astra',
+      display_name: 'GPT-6 Astra',
+      context_window: 1,
+      use_responses_lite: false,
+    }, noFlags);
+    const absent = codexRawToProviderModel({
+      id: 'legacy-model',
+      display_name: 'Legacy',
+      context_window: 1,
+    }, noFlags);
+
+    expect(lite.providerData).toEqual({ useResponsesLite: true });
+    expect(codexModelUsesResponsesLite(lite)).toBe(true);
+    expect(codexModelUsesResponsesLite(explicitlyStandardAstra)).toBe(false);
+    expect(absent.providerData).toEqual({ useResponsesLite: false });
+    expect(codexModelUsesResponsesLite(absent)).toBe(false);
+  });
+
+  test('exposes malformed persisted Responses Lite metadata', () => {
+    const model = codexRawToProviderModel({ id: 'gpt-x', display_name: 'GPT-X', context_window: 1 }, noFlags);
+    const malformedValue = { ...model, providerData: { useResponsesLite: 'true' } };
+    const malformedContainer = { ...model, providerData: [] };
+    expect(() => codexModelUsesResponsesLite(malformedValue)).toThrow(/useResponsesLite is not a boolean/);
+    expect(() => codexModelUsesResponsesLite(malformedContainer)).toThrow(/providerData is not an object/);
   });
 
   test('attaches OpenAI-API-rate pricing for known slugs and treats codex-auto-review as gpt-5.4', () => {

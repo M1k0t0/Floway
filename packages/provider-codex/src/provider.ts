@@ -1,6 +1,7 @@
 import { ensureCodexAccessToken, mintCodexAccessToken } from './access-token.ts';
 import { CodexOAuthSessionTerminatedError } from './auth/oauth.ts';
 import { assertCodexUpstreamRecord, type CodexUpstreamConfig } from './config.ts';
+import { CODEX_RESPONSES_LITE_HEADER } from './constants.ts';
 import { CODEX_DEFAULT_FLAGS } from './defaults.ts';
 import { callCodexAlphaSearch, callCodexOpenAIImagesEdits, callCodexOpenAIImagesGenerations, callCodexOpenAIResponses, callCodexOpenAIResponsesCompact, type CodexCallEffects } from './fetch.ts';
 import { CODEX_OPENAI_RESPONSES_BOUNDARY } from './interceptors/openai-responses/index.ts';
@@ -8,7 +9,6 @@ import type { OpenAIResponsesBoundaryCtx } from './interceptors/openai-responses
 import { codexImageProviderModel, codexPlanSupportsImages, codexRawToProviderModel, fetchCodexCatalog } from './models.ts';
 import { assertCodexUpstreamState, findCodexAccountIndex, replaceCodexAccount } from './state.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
-import { toCompactPayloadShape } from '@floway-dev/protocols/openai-responses';
 import { getProviderRepo, resolveEffectiveFlags, type ProviderInstance, type Provider, type ProviderCallResult, type ProviderOpenAIResponsesResult, type ProviderStreamResult, type UpstreamRecord } from '@floway-dev/provider';
 
 // https://github.com/openai/codex/blob/c607da9f371bb66a41cc772c6ddf1989d28137d3/codex-rs/codex-api/src/requests/headers.rs#L5-L12
@@ -25,6 +25,7 @@ const INBOUND_HEADER_ALLOWLIST = [
   'x-codex-image-turn-id',
   'x-codex-turn-metadata',
   'x-codex-window-id',
+  CODEX_RESPONSES_LITE_HEADER,
 ] as const;
 
 export const createCodexProvider = (record: UpstreamRecord): Provider => {
@@ -143,11 +144,10 @@ export const createCodexProvider = (record: UpstreamRecord): Provider => {
           const backendCallBase = { upstreamId: record.id, account, model, headers: ctx.headers, signal, effects, call: opts };
           switch (ctx.action) {
           case 'compact':
-            // Narrow to the compact wire shape — defends against a future
-            // interceptor that flips `ctx.action` from 'generate' to 'compact'
-            // mid-chain and leaves the generate-shaped body (tools, reasoning,
-            // etc.) in place.
-            return { action: 'compact', ...(await callCodexOpenAIResponsesCompact({ ...backendCallBase, body: toCompactPayloadShape(wireBody) })) };
+            // Keep the complete canonical body until the selected model's
+            // standard/Lite bridge has relocated every tool and instruction
+            // carrier. fetch.ts performs the final Codex compact projection.
+            return { action: 'compact', ...(await callCodexOpenAIResponsesCompact({ ...backendCallBase, body: wireBody })) };
           case 'generate':
             return { action: 'generate', ...(await callCodexOpenAIResponses({ ...backendCallBase, body: wireBody })) };
           default:
