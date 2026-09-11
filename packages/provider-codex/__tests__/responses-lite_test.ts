@@ -209,6 +209,81 @@ describe('Responses Lite inverse repair', () => {
     expect(restored.tool_choice).toBe('auto');
   });
 
+  test('repairs both callable event families through interleaved item lifecycles', async () => {
+    const encoded = encodeCodexResponsesLiteRequest(requestBody({ tools: [functionTool('lookup'), customTool('shell')] }), 'thread');
+    const vendor = { encrypted_content: 'opaque+encrypted==', input: 'opaque input', arguments: 'opaque arguments' };
+    const lookup = { type: 'custom_tool_call' as const, id: 'item_lookup', call_id: 'call_lookup', namespace: 'functions', name: 'lookup', input: '', vendor };
+    const shell = { type: 'function_call' as const, id: 'item_shell', call_id: 'call_shell', namespace: 'functions', name: 'shell', arguments: '', status: 'in_progress' as const, vendor };
+    const standardLookup = { type: 'function_call' as const, id: lookup.id, call_id: lookup.call_id, name: lookup.name, arguments: '', status: 'in_progress' as const, vendor };
+    const standardShell = { type: 'custom_tool_call' as const, id: shell.id, call_id: shell.call_id, name: shell.name, input: '', status: 'in_progress' as const, vendor };
+    const opaque = { type: 'reasoning' as const, id: 'rs_opaque', summary: [], encrypted_content: 'reasoning+opaque==' };
+    const unknown = { type: 'response.future', item_id: lookup.id, output_index: 0, input: 'future input', vendor };
+    const unknownItemDelta = { type: 'response.function_call_arguments.delta', item_id: 'item_unknown', output_index: 2, delta: 'opaque delta', vendor };
+    const output = [{ ...lookup, input: '{}' }, { ...shell, arguments: 'ls', status: 'completed' as const }, opaque];
+    const standardOutput = [{ ...standardLookup, arguments: '{}', status: 'completed' as const }, { ...standardShell, input: 'ls', status: 'completed' as const }, opaque];
+    const events = [
+      { type: 'response.output_item.added', output_index: 0, item: lookup, vendor },
+      { type: 'response.output_item.added', output_index: 1, item: shell, vendor },
+      { type: 'response.custom_tool_call_input.delta', item_id: lookup.id, output_index: 0, delta: '{}', vendor },
+      unknown,
+      { type: 'response.function_call_arguments.delta', item_id: shell.id, output_index: 1, delta: 'ls', vendor },
+      unknownItemDelta,
+      { type: 'response.custom_tool_call_input.done', item_id: lookup.id, output_index: 0, input: '{}', vendor },
+      { type: 'response.function_call_arguments.done', item_id: shell.id, output_index: 1, name: 'shell', arguments: 'ls', vendor },
+      { type: 'response.output_item.done', output_index: 1, item: output[1], vendor },
+      { type: 'response.output_item.done', output_index: 0, item: output[0], vendor },
+      { type: 'response.completed', response: response({ output }), vendor },
+    ].map((event, sequence_number) => ({ ...event, sequence_number }));
+    const expected = [
+      { ...events[0], item: standardLookup },
+      { ...events[1], item: standardShell },
+      { ...events[2], type: 'response.function_call_arguments.delta' },
+      events[3],
+      { ...events[4], type: 'response.custom_tool_call_input.delta' },
+      events[5],
+      { type: 'response.function_call_arguments.done', item_id: lookup.id, output_index: 0, name: 'lookup', arguments: '{}', vendor, sequence_number: 6 },
+      { type: 'response.custom_tool_call_input.done', item_id: shell.id, output_index: 1, name: 'shell', input: 'ls', vendor, sequence_number: 7 },
+      { ...events[8], item: standardOutput[1] },
+      { ...events[9], item: standardOutput[0] },
+      { ...events[10], response: response({ output: standardOutput }) },
+    ];
+    const original = structuredClone(events);
+    const done = { type: 'done' } as const;
+    const frames = (async function* (): AsyncGenerator<ProtocolFrame<OpenAIResponsesStreamEvent>> {
+      for (const event of events) yield { type: 'event', event: event as OpenAIResponsesStreamEvent };
+      yield done;
+    })();
+    const restored: ProtocolFrame<OpenAIResponsesStreamEvent>[] = [];
+    for await (const frame of restoreCodexResponsesFrames(frames, encoded.callableIdentities)) restored.push(frame);
+    expect(restored).toEqual([...expected.map(event => ({ type: 'event', event })), done]);
+    expect(restored.at(-1)).toBe(done);
+    expect(events).toEqual(original);
+  });
+
+  test.each([undefined, 'incomplete', 'future_status', null])('uses lifecycle defaults only when converted function status is missing: %s', status => {
+    const encoded = encodeCodexResponsesLiteRequest(requestBody({ tools: [functionTool('lookup')] }), 'thread');
+    const item = {
+      type: 'custom_tool_call', id: 'item_lookup', call_id: 'call_lookup', namespace: 'functions', name: 'lookup', input: '{}',
+      ...(status === undefined ? {} : { status }),
+    } as OpenAIResponsesOutputItem;
+    for (const type of ['response.output_item.added', 'response.output_item.done'] as const) {
+      expect(restoreCodexResponsesEvent({ type, output_index: 0, item }, encoded.callableIdentities)).toMatchObject({
+        item: { type: 'function_call', status: status === undefined ? type === 'response.output_item.added' ? 'in_progress' : 'completed' : status },
+      });
+    }
+    for (const responseStatus of ['queued', 'in_progress', 'completed', 'incomplete', 'failed'] as const) {
+      const resource = response({ status: responseStatus, output: [item] });
+      const expectedStatus = status === undefined ? responseStatus === 'queued' || responseStatus === 'in_progress' ? 'in_progress' : 'completed' : status;
+      expect(restoreCodexResponsesResult(resource, encoded.callableIdentities).output[0]).toMatchObject({ type: 'function_call', status: expectedStatus });
+      expect(restoreCodexResponsesEvent({ type: `response.${responseStatus}`, response: resource } as OpenAIResponsesStreamEvent, encoded.callableIdentities)).toMatchObject({
+        response: { output: [{ type: 'function_call', status: expectedStatus }] },
+      });
+    }
+    expect(restoreCodexResponsesCompactionResult({ id: 'cmp_1', object: 'response.compaction', output: [item] }, encoded.callableIdentities).output[0]).toMatchObject({
+      type: 'function_call', status: status === undefined ? 'completed' : status,
+    });
+  });
+
   test('repairs namespace and function/custom identity on items, results, compact and frames', async () => {
     const encoded = encodeCodexResponsesLiteRequest(requestBody({
       tools: [
@@ -232,7 +307,7 @@ describe('Responses Lite inverse repair', () => {
     ];
     for (const type of ['response.output_item.added', 'response.output_item.done'] as const) {
       wire.forEach((item, output_index) => expect(restoreCodexResponsesEvent({ type, output_index, item }, encoded.callableIdentities)).toEqual({
-        type, output_index, item: expected[output_index],
+        type, output_index, item: type === 'response.output_item.added' && output_index === 0 ? { ...expected[0], status: 'in_progress' } : expected[output_index],
       }));
     }
     expect(restoreCodexResponsesResult(response({ output: wire }), encoded.callableIdentities).output).toEqual(expected);

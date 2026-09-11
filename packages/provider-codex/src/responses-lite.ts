@@ -287,6 +287,7 @@ export const encodeCodexResponsesLiteRequest = (
 const restoreCallableItem = (
   item: OpenAIResponsesOutputItem,
   identities: CodexResponsesCallableIdentityMap,
+  missingStatus: 'in_progress' | 'completed' = 'completed',
 ): OpenAIResponsesOutputItem => {
   if (item.type !== 'function_call' && item.type !== 'custom_tool_call') return item;
   const standard = identities.byWireName.get(callableKey(item.namespace, item.name));
@@ -302,7 +303,7 @@ const restoreCallableItem = (
     if (item.type === 'custom_tool_call') {
       restored.arguments = item.input;
       delete restored.input;
-      restored.status ??= 'completed';
+      if (restored.status === undefined) restored.status = missingStatus;
     }
   } else {
     restored.type = 'custom_tool_call';
@@ -321,10 +322,11 @@ export const restoreCodexResponsesResult = (
   result: OpenAIResponsesResult,
   identities: CodexResponsesCallableIdentityMap,
   requestEchoes?: CodexResponsesRequestEchoes,
+  missingStatus: 'in_progress' | 'completed' = result.status === 'queued' || result.status === 'in_progress' ? 'in_progress' : 'completed',
 ): OpenAIResponsesResult => {
   const restored = {
     ...result,
-    output: result.output.map(item => restoreCallableItem(item, identities)),
+    output: result.output.map(item => restoreCallableItem(item, identities, missingStatus)),
   };
   if (requestEchoes !== undefined) {
     const record = restored as unknown as Record<string, unknown>;
@@ -351,7 +353,7 @@ export const restoreCodexResponsesEvent = (
   requestEchoes?: CodexResponsesRequestEchoes,
 ): OpenAIResponsesStreamEvent => {
   if (event.type === 'response.output_item.added' || event.type === 'response.output_item.done') {
-    return { ...event, item: restoreCallableItem(event.item, identities) };
+    return { ...event, item: restoreCallableItem(event.item, identities, event.type === 'response.output_item.added' ? 'in_progress' : 'completed') };
   }
   if (
     (event.type === 'response.queued' || event.type === 'response.created' || event.type === 'response.in_progress'
@@ -364,10 +366,45 @@ export const restoreCodexResponsesEvent = (
         event.response as unknown as OpenAIResponsesResult,
         identities,
         requestEchoes,
+        event.type === 'response.queued' || event.type === 'response.created' || event.type === 'response.in_progress' ? 'in_progress' : 'completed',
       ),
     } as OpenAIResponsesStreamEvent;
   }
   return event;
+};
+
+// Callable input events carry item_id, not the tool identity. A converted item
+// must keep the same family through its delta/done events; done uses arguments
+// for functions (with a name) and input for custom tools.
+// https://github.com/openai/openai-node/blob/61539248cbe04665de68a71e6fd878127ae4db87/src/resources/responses/responses.ts
+const restoreCallableInputEvent = (
+  event: OpenAIResponsesStreamEvent,
+  identitiesByItemId: ReadonlyMap<string, CallableIdentity>,
+): OpenAIResponsesStreamEvent => {
+  if (!('item_id' in event)) return event;
+  const identity = identitiesByItemId.get(event.item_id);
+  if (identity === undefined) return event;
+  switch (event.type) {
+  case 'response.function_call_arguments.delta':
+    return identity.type === 'custom_tool_call' ? { ...event, type: 'response.custom_tool_call_input.delta' } : event;
+  case 'response.custom_tool_call_input.delta':
+    return identity.type === 'function_call' ? { ...event, type: 'response.function_call_arguments.delta' } : event;
+  case 'response.function_call_arguments.done': {
+    if (identity.type !== 'custom_tool_call') return event;
+    const { arguments: input, ...restored } = event;
+    return { ...restored, type: 'response.custom_tool_call_input.done', input };
+  }
+  case 'response.custom_tool_call_input.done': {
+    if (identity.type !== 'function_call') return event;
+    const { input: args, ...restored } = event;
+    return {
+      ...restored, type: 'response.function_call_arguments.done', arguments: args,
+      ...(!('name' in restored) || restored.name === undefined ? { name: identity.name } : {}),
+    };
+  }
+  default:
+    return event;
+  }
 };
 
 export const restoreCodexResponsesFrames = async function* (
@@ -375,11 +412,23 @@ export const restoreCodexResponsesFrames = async function* (
   identities: CodexResponsesCallableIdentityMap,
   requestEchoes?: CodexResponsesRequestEchoes,
 ): AsyncGenerator<ProtocolFrame<OpenAIResponsesStreamEvent>> {
+  const identitiesByItemId = new Map<string, CallableIdentity>();
   for await (const frame of frames) {
     if (frame.type === 'done') {
       yield frame;
       continue;
     }
-    yield { ...frame, event: restoreCodexResponsesEvent(frame.event, identities, requestEchoes) };
+    const event = frame.event;
+    if (event.type === 'response.output_item.added' || event.type === 'response.output_item.done') {
+      const item = event.item;
+      if ((item.type === 'function_call' || item.type === 'custom_tool_call') && typeof item.id === 'string') {
+        const standard = identities.byWireName.get(callableKey(item.namespace, item.name));
+        if (standard !== undefined && standard.type !== item.type) identitiesByItemId.set(item.id, standard);
+      }
+    }
+    yield {
+      ...frame,
+      event: restoreCallableInputEvent(restoreCodexResponsesEvent(event, identities, requestEchoes), identitiesByItemId),
+    };
   }
 };
