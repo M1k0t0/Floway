@@ -1,10 +1,13 @@
 import type { ExecutionContext } from 'hono';
 import { onTestFinished, test, vi } from 'vitest';
 
+import { missingRequiredResourceKeys } from './test-required-resource-keys.ts';
 import { app } from '../../../../src/app.ts';
 import { hashOpenAIResponsesItem } from '../../../../src/data-plane/chat/openai-responses/items/identity.ts';
 import { openaiResponsesServe } from '../../../../src/data-plane/chat/openai-responses/serve.ts';
 import { KEEP_ALIVE_EVENT_TYPE } from '../../../../src/data-plane/chat/openai-responses/websocket.ts';
+import * as chatContext from '../../../../src/data-plane/chat/shared/gateway-ctx.ts';
+import * as liteCodec from '../../../../src/data-plane/codex/responses-lite.ts';
 import { DOWNSTREAM_KEEP_ALIVE_INTERVAL_MS } from '../../../../src/data-plane/shared/sse.ts';
 import { initDumpBroker, initDumpStore } from '../../../../src/dump/registry.ts';
 import { initBackgroundSchedulerResolver } from '../../../../src/runtime/background.ts';
@@ -98,6 +101,7 @@ const connectOpenAIResponsesWebSocket = async (apiKey: string, upgradeHeaders: R
 // that is the deadline every session-scoped write has to beat.
 const connectOpenAIResponsesWebSocketCapturingSessionLifetime = async (
   apiKey: string,
+  upgradeHeaders: Record<string, string> = {},
 ): Promise<{ client: TestWorkerWebSocket; sessionLifetime: Promise<unknown> }> => {
   const registered: Promise<unknown>[] = [];
   initBackgroundSchedulerResolver(_c => promise => {
@@ -105,7 +109,7 @@ const connectOpenAIResponsesWebSocketCapturingSessionLifetime = async (
     trackBackground(promise);
   });
   try {
-    const client = await connectOpenAIResponsesWebSocket(apiKey);
+    const client = await connectOpenAIResponsesWebSocket(apiKey, upgradeHeaders);
     assertEquals(registered.length, 1, 'expected the upgrade to register exactly one background task');
     const sessionLifetime = registered[0];
     assertExists(sessionLifetime);
@@ -150,6 +154,8 @@ const withSuccessfulOpenAIResponsesUpstream = async <T>(run: () => Promise<T>): 
           object: 'response',
           model: 'gpt-direct-responses',
           status: 'completed',
+          error: null,
+          incomplete_details: null,
           output: [],
           output_text: 'done',
           usage: { input_tokens: 3, output_tokens: 5, total_tokens: 8 },
@@ -1547,6 +1553,80 @@ test('OpenAI Responses WebSocket outer catch records a failed perf sample attrib
     assertEquals(perfRows[0]?.requests, 1);
   } finally {
     generateSpy.mockRestore();
+  }
+});
+
+test('Responses Lite WebSocket normalizes each operation before ctx/store and serve without leaking caller state into the next turn', async () => {
+  const { apiKey, repo } = await setupAppTest();
+  await repo.apiKeys.save({ ...apiKey, dumpRetentionSeconds: 3600 });
+  const dumps = installDumpStubs(initDumpStore, initDumpBroker);
+  const tools = [{ type: 'namespace', name: 'files', description: '', tools: [{ type: 'function', name: 'read' }] }];
+  const frames = [JSON.stringify({
+    type: 'response.create', event_id: 'lite', model: 'gpt-direct-responses', stream: false,
+    client_metadata: { ws_request_header_x_openai_internal_codex_responses_lite: 'true', keep: 'first' },
+    input: [
+      { type: 'additional_tools', role: 'developer', tools },
+      { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'base rules' }], internal_chat_message_metadata_passthrough: { content_item_kinds: ['model.base_instructions'] } },
+      { role: 'user', content: 'hello' },
+    ],
+  }, null, 2), JSON.stringify({
+    type: 'response.create', event_id: 'standard', response: { model: 'gpt-direct-responses', input: 'second', instructions: 'standard rules', tools, client_metadata: { keep: 'second' } },
+  }, null, 2)];
+  let normalized: ReturnType<typeof liteCodec.normalizeResponsesIngress> | undefined;
+  let normalizations = 0;
+  let turns = 0;
+  const normalize = liteCodec.normalizeResponsesIngress;
+  const normalization = vi.spyOn(liteCodec, 'normalizeResponsesIngress').mockImplementation((...args) => {
+    normalizations++;
+    normalized = normalize(...args);
+    return normalized;
+  });
+  const createCtx = chatContext.createChatGatewayCtxFromHono;
+  const creation = vi.spyOn(chatContext, 'createChatGatewayCtxFromHono').mockImplementation((...args) => {
+    assertEquals(normalizations, turns + 1, 'each operation must normalize before creating its ctx/store');
+    assertEquals(normalized?.payload.input.some(item => item.type === 'additional_tools'), false);
+    assertEquals(new TextDecoder().decode(args[1].requestBody.bytes), frames[turns]);
+    return createCtx(...args);
+  });
+  const generate = openaiResponsesServe.generate;
+  const serving = vi.spyOn(openaiResponsesServe, 'generate').mockImplementation(async args => {
+    assert(args.payload === normalized?.payload);
+    assertEquals(args.payload.instructions, turns === 0 ? 'base rules' : 'standard rules');
+    assertEquals(args.payload.tools, tools);
+    assertEquals(args.payload.stream, true);
+    assertEquals(args.headers.get('x-openai-internal-codex-responses-lite'), null);
+    assertEquals((args.payload as unknown as Record<string, unknown>).client_metadata, { keep: turns === 0 ? 'first' : 'second' });
+    assertEquals(normalized?.clientView !== undefined, turns === 0);
+    turns++;
+    return await generate(args);
+  });
+  try {
+    await withSuccessfulOpenAIResponsesUpstream(async () => await withWorkerWebSocketRuntime(async () => {
+      const { client, sessionLifetime } = await connectOpenAIResponsesWebSocketCapturingSessionLifetime(apiKey.key, { 'x-openai-internal-codex-responses-lite': 'true' });
+      for (const [index, raw] of frames.entries()) {
+        const received = waitForMessages(client, messages => messages.some(isTerminalResponseEvent) || messages.some(message => message.type === 'error'));
+        client.send(raw);
+        const messages = await received;
+        assertEquals(messages.at(-1)?.type, 'response.completed');
+        const resources = messages.flatMap(message => message.response === undefined ? [] : [message.response as Record<string, unknown>]);
+        assert(resources.length > 0);
+        for (const resource of resources) {
+          assertEquals(missingRequiredResourceKeys(resource), []);
+          assertEquals(resource.tools, index === 0 ? [] : tools);
+          assertEquals(resource.instructions, index === 0 ? null : 'standard rules');
+        }
+      }
+      client.close();
+      await sessionLifetime;
+      assertEquals(turns, 2);
+      assertEquals(creation.mock.calls.length, 2);
+      assertEquals(dumps.stored.length, 2);
+      assertEquals(dumps.stored.map(dump => new TextDecoder().decode(dump.record.request.body)), frames);
+    }));
+  } finally {
+    serving.mockRestore();
+    creation.mockRestore();
+    normalization.mockRestore();
   }
 });
 
