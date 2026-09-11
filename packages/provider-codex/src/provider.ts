@@ -6,7 +6,7 @@ import { CODEX_DEFAULT_FLAGS } from './defaults.ts';
 import { callCodexAlphaSearch, callCodexOpenAIImagesEdits, callCodexOpenAIImagesGenerations, callCodexOpenAIResponses, callCodexOpenAIResponsesCompact, type CodexCallEffects } from './fetch.ts';
 import { CODEX_OPENAI_RESPONSES_BOUNDARY } from './interceptors/openai-responses/index.ts';
 import type { OpenAIResponsesBoundaryCtx } from './interceptors/openai-responses/types.ts';
-import { codexImageProviderModel, codexPlanSupportsImages, codexRawToProviderModel, fetchCodexCatalog } from './models.ts';
+import { codexImageProviderModel, codexModelUsesResponsesLite, codexPlanSupportsImages, codexRawToProviderModel, fetchCodexCatalog } from './models.ts';
 import { assertCodexUpstreamState, findCodexAccountIndex, replaceCodexAccount } from './state.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
 import { getProviderRepo, resolveEffectiveFlags, type ProviderInstance, type Provider, type ProviderCallResult, type ProviderOpenAIResponsesResult, type ProviderStreamResult, type UpstreamRecord } from '@floway-dev/provider';
@@ -129,6 +129,8 @@ export const createCodexProvider = (record: UpstreamRecord): Provider => {
         body,
       });
     },
+
+    supportsOpenAIResponsesLite: codexModelUsesResponsesLite,
 
     callOpenAIResponses: async (model, body, action, signal, opts) => {
       const ctx: OpenAIResponsesBoundaryCtx = {

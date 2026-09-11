@@ -237,6 +237,78 @@ test('OpenAI Responses WebSocket forwards stream events, echoes event_id, and en
   );
 });
 
+test('OpenAI Responses WebSocket lifts a body-marked Lite turn before a standard upstream', async () => {
+  const { apiKey } = await setupAppTest();
+  const upstreamBodies: Record<string, unknown>[] = [];
+
+  await withMockedFetch(
+    async request => {
+      const url = new URL(request.url);
+      if (url.hostname === 'update.code.visualstudio.com') return jsonResponse(['1.110.1']);
+      if (url.pathname === '/copilot_internal/v2/token') {
+        return jsonResponse({ token: 'copilot-access-token', expires_at: 4102444800, refresh_in: 3600, endpoints: { api: 'https://api.individual.githubcopilot.com' } });
+      }
+      if (url.pathname === '/models') {
+        return jsonResponse(copilotModels([{ id: 'gpt-direct-responses', supported_endpoints: ['/responses'] }]));
+      }
+      if (url.pathname === '/responses') {
+        upstreamBodies.push(JSON.parse(await request.text()) as Record<string, unknown>);
+        return sseOpenAIResponsesResponse({
+          id: 'resp_ws_lite', object: 'response', model: 'gpt-direct-responses', status: 'completed', output: [], output_text: 'done',
+          usage: { input_tokens: 3, output_tokens: 5, total_tokens: 8 },
+        });
+      }
+      throw new Error(`Unhandled fetch ${request.url}`);
+    },
+    async () => await withWorkerWebSocketRuntime(async () => {
+      const client = await connectOpenAIResponsesWebSocket(apiKey.key);
+      try {
+        const received = waitForMessages(client, messages => messages.some(isTerminalResponseEvent));
+        client.send(JSON.stringify({
+          type: 'response.create',
+          event_id: 'evt_lite',
+          model: 'gpt-direct-responses',
+          input: [
+            { type: 'additional_tools', id: 'at_client', role: 'developer', tools: [] },
+            { type: 'message', id: 'msg_developer', role: 'developer', content: [{ type: 'input_text', text: 'Keep answers brief.' }] },
+            { type: 'message', id: 'msg_user', role: 'user', content: [{ type: 'input_text', text: 'Say hello.' }] },
+          ],
+          client_metadata: {
+            ws_request_header_x_openai_internal_codex_responses_lite: 'true',
+            request_trace: 'ws-source',
+          },
+          tool_choice: 'auto',
+          reasoning: { effort: 'low', context: 'all_turns' },
+          parallel_tool_calls: false,
+          stream: true,
+          store: false,
+        }));
+
+        const messages = await received;
+        assert(messages.every(message => message.event_id === 'evt_lite'));
+        assertEquals(messages.at(-1)?.type, 'response.completed');
+        assertEquals(upstreamBodies.length, 1);
+        const body = upstreamBodies[0]!;
+        assertEquals(body.input, [
+          { type: 'message', id: 'msg_developer', role: 'developer', content: [{ type: 'input_text', text: 'Keep answers brief.' }] },
+          { type: 'message', id: 'msg_user', role: 'user', content: [{ type: 'input_text', text: 'Say hello.' }] },
+        ]);
+        // The bridge supplies `tools: []` to the standard request; Copilot's
+        // outbound adapter then omits its empty wire form. What matters at the
+        // transport boundary is that the Lite-only input carrier is gone.
+        assertEquals(body.tools, undefined);
+        assertEquals(body.client_metadata, { request_trace: 'ws-source' });
+        assertEquals(body.tool_choice, 'auto');
+        assertEquals(body.reasoning, { effort: 'low', context: 'all_turns' });
+        assertEquals(body.parallel_tool_calls, false);
+        assertEquals(body.store, false);
+      } finally {
+        client.close();
+      }
+    }),
+  );
+});
+
 test('OpenAI Responses WebSocket starts capturing on the next turn when dump retention is enabled after upgrade', async () => {
   const { apiKey, repo } = await setupAppTest();
   const dumps = installDumpStubs(initDumpStore, initDumpBroker);

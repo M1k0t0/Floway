@@ -123,6 +123,26 @@ describe('createCodexProvider', () => {
     expect(fetchSpy.mock.calls[0][0]).toMatch(/\/codex\/models/);
   });
 
+  test('declares native Responses Lite support only from strict catalog metadata', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(modelsResponse());
+    const instance = createCodexProvider(baseRecord).instance;
+    const supportsLite = instance.supportsOpenAIResponsesLite;
+    if (supportsLite === undefined) throw new Error('expected Codex to declare Responses Lite support');
+
+    const models = await instance.getProvidedModels(directFetcher);
+    expect(supportsLite(models.find(model => model.id === 'gpt-5.4')!)).toBe(false);
+    expect(supportsLite(models.find(model => model.id === 'codex-auto-review')!)).toBe(true);
+    expect(supportsLite(stubProviderModel({ id: 'missing-metadata' }))).toBe(false);
+    expect(() => supportsLite(stubProviderModel({
+      id: 'malformed-metadata',
+      providerData: { useResponsesLite: 'true' },
+    }))).toThrow('Codex model malformed-metadata providerData.useResponsesLite is not a boolean');
+    expect(() => supportsLite(stubProviderModel({
+      id: 'non-object-metadata',
+      providerData: ['useResponsesLite'],
+    }))).toThrow('Codex model non-object-metadata providerData is not an object');
+  });
+
   test('getProvidedModels mints an access token when none is cached, then fetches the catalog', async () => {
     current = baseRecord;
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async input => {

@@ -9,6 +9,7 @@ import { withPromptCacheKeyStripped } from './strip-prompt-cache-key.ts';
 import type { OpenAIResponsesInterceptor } from './types.ts';
 import { withVendorDeepSeekOpenAIResponsesNormalize } from './vendor-deepseek-normalize.ts';
 import { withVendorQwenOpenAIResponsesNormalize } from './vendor-qwen-normalize.ts';
+import { withCodexResponsesLite } from '../../../codex/responses-lite.ts';
 
 // Unified OpenAI Responses interceptor list. All entries are attached to every
 // candidate; each interceptor's body decides whether to act (flag-gated entries
@@ -19,7 +20,9 @@ import { withVendorQwenOpenAIResponsesNormalize } from './vendor-qwen-normalize.
 // after pairwise translation has finished.
 //
 // Order matters: earlier entries wrap later ones.
-//   - withOpenAIResponsesCompactShim: runs outermost so the action pivot
+//   - withCodexResponsesLite: adapts client Lite input only when the selected
+//     target cannot consume it, before shims or cross-protocol translation.
+//   - withOpenAIResponsesCompactShim: wraps the remaining chain so the action pivot
 //     ('compact' → 'generate' for the inner summarization turn) is visible
 //     to every downstream interceptor + the provider terminal. Also
 //     responsible for inbound expansion of prior shim-encoded compaction
@@ -46,6 +49,7 @@ import { withVendorQwenOpenAIResponsesNormalize } from './vendor-qwen-normalize.
 //     the role-compatibility entry so each gets the final say on the outbound wire
 //     body.
 export const openaiResponsesInterceptors: readonly OpenAIResponsesInterceptor[] = [
+  withCodexResponsesLite,
   withOpenAIResponsesCompactShim,
   withOpenAIResponsesServerToolShim([
     webSearchServerTool,

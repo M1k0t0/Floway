@@ -16,8 +16,9 @@ import { initExternalResourceFetcher } from '@floway-dev/platform';
 import type { AnthropicMessagesPayload, AnthropicMessagesStreamEvent } from '@floway-dev/protocols/anthropic-messages';
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsPayload, OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
-import type { CanonicalOpenAIResponsesPayload, OpenAIResponsesPayload, OpenAIResponsesResult, OpenAIResponsesStreamEvent } from '@floway-dev/protocols/openai-responses';
+import type { CanonicalOpenAIResponsesPayload, OpenAIResponsesPayload, OpenAIResponsesResult, OpenAIResponsesStreamEvent, OpenAIResponsesTool } from '@floway-dev/protocols/openai-responses';
 import { type AnthropicMessagesUpstreamCallOptions, type ModelCandidate, directFetcher, type ProviderModel, type ProviderOpenAIResponsesResult, type ProviderStreamResult, type OpenAIResponsesAction, type UpstreamCallOptions, type FlagId } from '@floway-dev/provider';
+import { CODEX_RESPONSES_LITE_HEADER, CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY as CODEX_RESPONSES_LITE_MARKER } from '@floway-dev/provider-codex';
 import { assert, assertEquals, stubProvider, stubInternalModel, stubProviderModel } from '@floway-dev/test-utils';
 
 const API_KEY_ID = 'key_attempt_test';
@@ -28,6 +29,72 @@ const makeGatewayCtx = (store?: ChatGatewayCtx['store']) =>
 const makePayload = (overrides: Partial<CanonicalOpenAIResponsesPayload> = {}): CanonicalOpenAIResponsesPayload => ({
   model: 'test-model',
   input: [{ type: 'message', role: 'user', content: 'hello' }],
+  ...overrides,
+});
+
+type CodexResponsesLitePayload = CanonicalOpenAIResponsesPayload & {
+  client_metadata: Record<string, unknown>;
+};
+
+const codexTools: OpenAIResponsesTool[] = [
+  {
+    type: 'namespace',
+    name: 'workspace',
+    description: 'Workspace tools.',
+    tools: [{
+      type: 'custom',
+      name: 'patch',
+      description: 'Apply a patch.',
+      format: { type: 'grammar', syntax: 'lark', definition: 'start: "patch"' },
+    }],
+  },
+  {
+    type: 'namespace',
+    name: 'functions',
+    description: '',
+    tools: [{
+      type: 'function',
+      name: 'lookup',
+      description: 'Look up a value.',
+      parameters: { type: 'object', properties: { key: { type: 'string' } } },
+      strict: false,
+    }],
+  },
+  {
+    type: 'function',
+    name: 'ping',
+    parameters: { type: 'object', properties: {} },
+    strict: false,
+  },
+];
+
+const makeCodexResponsesLitePayload = (
+  overrides: Partial<CodexResponsesLitePayload> = {},
+): CodexResponsesLitePayload => ({
+  model: 'public-codex-alias',
+  input: [
+    { type: 'additional_tools', id: 'at_client', role: 'developer', tools: [] },
+    // This is deliberately untagged. Only Codex's exact tagged carrier is
+    // promoted to `instructions`; ordinary developer context stays in input.
+    { type: 'message', id: 'msg_developer', role: 'developer', content: [{ type: 'input_text', text: 'Use concise answers.' }] },
+    { type: 'message', id: 'msg_user', role: 'user', content: [{ type: 'input_text', text: 'Say hello.' }] },
+  ],
+  client_metadata: {
+    [CODEX_RESPONSES_LITE_MARKER]: 'true',
+    request_trace: 'retain-me',
+  },
+  tool_choice: 'auto',
+  reasoning: { effort: 'low', context: 'all_turns' },
+  parallel_tool_calls: false,
+  stream: true,
+  store: false,
+  text: {
+    format: {
+      type: 'json_schema',
+      name: 'short_reply',
+      schema: { type: 'object', properties: { greeting: { type: 'string' } }, required: ['greeting'] },
+    },
+  },
   ...overrides,
 });
 
@@ -53,6 +120,11 @@ const makeProviderEvents = async function* (events: readonly OpenAIResponsesStre
   yield doneFrame();
 };
 
+const makeProtocolFrames = async function* <E>(events: readonly E[]): AsyncGenerator<ProtocolFrame<E>> {
+  for (const event of events) yield eventFrame(event);
+  yield doneFrame();
+};
+
 const makeCandidate = (
   callOpenAIResponses: (model: ProviderModel, body: Omit<CanonicalOpenAIResponsesPayload, 'model'>, action: OpenAIResponsesAction, signal: AbortSignal | undefined, opts: UpstreamCallOptions) => Promise<ProviderOpenAIResponsesResult>,
   enabledFlags: ReadonlySet<FlagId> = new Set<FlagId>(),
@@ -72,6 +144,34 @@ const makeCandidate = (
     },
     model: stubInternalModel({
       providerModels: { [upstream]: stubProviderModel({ enabledFlags }) },
+    }, upstream),
+    fetcher: directFetcher,
+  };
+};
+
+const makeNativeLiteCandidate = (
+  callOpenAIResponses: (model: ProviderModel, body: Omit<CanonicalOpenAIResponsesPayload, 'model'>, action: OpenAIResponsesAction, signal: AbortSignal | undefined, opts: UpstreamCallOptions) => Promise<ProviderOpenAIResponsesResult>,
+  supportsOpenAIResponsesLite: (model: ProviderModel) => boolean,
+): ModelCandidate => {
+  const upstream = 'up_native_lite';
+  const providerModel = stubProviderModel({ id: 'gpt-real-provider-model', endpoints: { openaiResponses: {} } });
+  const provider = stubProvider({ callOpenAIResponses });
+  provider.supportsOpenAIResponsesLite = supportsOpenAIResponsesLite;
+  return {
+    provider: {
+      upstreamId: upstream,
+      kind: 'custom',
+      name: upstream,
+      inboundHeaderAllowlist: [],
+      disabledPublicModelIds: [],
+      modelPrefix: null,
+      modelsCache: null,
+      instance: provider,
+    },
+    model: stubInternalModel({
+      id: 'gpt-resolved-target',
+      endpoints: { openaiResponses: {} },
+      providerModels: { [upstream]: providerModel },
     }, upstream),
     fetcher: directFetcher,
   };
@@ -672,4 +772,436 @@ test('generate propagates upstream response headers onto the EventResult so resp
   assertEquals(result.headers?.get('anthropic-ratelimit-unified-status'), 'allowed');
   assertEquals(result.headers?.get('request-id'), 'req_resp_xyz');
   await collectEvents(result.events);
+});
+
+test('generate bridges a marked Codex Responses Lite request to standard Responses and restores its client view', async () => {
+  installRepo();
+  const payload = makeCodexResponsesLitePayload({ tools: codexTools });
+  const sourcePayload = JSON.parse(JSON.stringify(payload));
+  const headers = new Headers({
+    [CODEX_RESPONSES_LITE_HEADER]: 'true',
+    'x-client-trace': 'source-header',
+  });
+  let observedBody: Omit<CanonicalOpenAIResponsesPayload, 'model'> | undefined;
+  let observedHeaders: Headers | undefined;
+  const callOpenAIResponses = vi.fn(async (
+    _model: ProviderModel,
+    body: Omit<CanonicalOpenAIResponsesPayload, 'model'>,
+    _action: OpenAIResponsesAction,
+    _signal: AbortSignal | undefined,
+    opts: UpstreamCallOptions,
+  ): Promise<ProviderOpenAIResponsesResult> => {
+    observedBody = body;
+    observedHeaders = opts.headers;
+    return {
+      action: 'generate',
+      ok: true,
+      events: makeProviderEvents([{
+        type: 'response.completed',
+        sequence_number: 0,
+        response: {
+          ...makeOpenAIResponsesResult('resp_bridged'),
+          // Model wire identities deliberately differ from the caller-visible
+          // custom/function types. The bridge must restore them on egress.
+          output: [
+            {
+              type: 'function_call',
+              call_id: 'call_patch',
+              namespace: 'workspace',
+              name: 'patch',
+              arguments: 'apply',
+              status: 'completed',
+            },
+            {
+              type: 'custom_tool_call',
+              call_id: 'call_lookup',
+              namespace: 'functions',
+              name: 'lookup',
+              input: '{"key":"value"}',
+              status: 'completed',
+            },
+          ],
+          // These intentionally reflect the lifted standard request. Restoration
+          // must put the original Lite controls back on the response resource.
+          tools: [],
+          instructions: 'lifted instructions must not leak',
+          parallel_tool_calls: true,
+          reasoning: { effort: 'high', context: 'current_turn' },
+        },
+      }]),
+      modelKey: 'standard-key',
+      headers: new Headers({ 'x-request-id': 'req_bridged' }),
+    };
+  });
+
+  const result = await openaiResponsesAttempt.generate({
+    payload,
+    ctx: makeGatewayCtx(createOpenAIResponsesHttpStore(testOpenAIResponsesStatePolicy(API_KEY_ID), Date.now(), false)),
+    candidate: makeCandidate(callOpenAIResponses),
+    headers,
+  });
+
+  assertEquals(result.type, 'events');
+  if (result.type !== 'events') throw new Error('unreachable');
+  assert(observedBody !== undefined, 'expected standard Responses provider call');
+  assertEquals(observedHeaders?.get(CODEX_RESPONSES_LITE_HEADER), null);
+  // The upstream allowlist intentionally filters arbitrary client headers;
+  // the source Headers instance is checked below for immutability instead.
+  assertEquals(headers.get('x-client-trace'), 'source-header');
+  assertEquals(observedBody.input, [
+    { type: 'message', id: 'msg_developer', role: 'developer', content: [{ type: 'input_text', text: 'Use concise answers.' }] },
+    { type: 'message', id: 'msg_user', role: 'user', content: [{ type: 'input_text', text: 'Say hello.' }] },
+  ]);
+  assertEquals(observedBody.tools, codexTools);
+  assertEquals(observedBody.tool_choice, 'auto');
+  assertEquals(observedBody.reasoning, { effort: 'low', context: 'all_turns' });
+  assertEquals(observedBody.parallel_tool_calls, false);
+  assertEquals(observedBody.stream, true);
+  assertEquals(observedBody.store, false);
+  assertEquals(observedBody.text, payload.text);
+  assertEquals((observedBody as unknown as { client_metadata?: unknown }).client_metadata, { request_trace: 'retain-me' });
+
+  const events = await collectEvents(result.events);
+  const completed = events.find((event): event is Extract<OpenAIResponsesStreamEvent, { type: 'response.completed' }> => event.type === 'response.completed');
+  assert(completed !== undefined, 'expected response.completed');
+  assertEquals(completed.response.output, [
+    {
+      type: 'custom_tool_call',
+      call_id: 'call_patch',
+      namespace: 'workspace',
+      name: 'patch',
+      input: 'apply',
+      status: 'completed',
+    },
+    {
+      type: 'function_call',
+      call_id: 'call_lookup',
+      namespace: 'functions',
+      name: 'lookup',
+      arguments: '{"key":"value"}',
+      status: 'completed',
+    },
+  ]);
+  assertEquals(completed.response.tools, codexTools);
+  assertEquals(completed.response.instructions, undefined);
+  assertEquals(completed.response.parallel_tool_calls, false);
+  assertEquals(completed.response.reasoning, { effort: 'low', context: 'all_turns' });
+  assertEquals(result.headers?.get(CODEX_RESPONSES_LITE_HEADER), 'true');
+  assertEquals(result.headers?.get('x-request-id'), 'req_bridged');
+  assertEquals(payload, sourcePayload);
+  assertEquals(headers.get(CODEX_RESPONSES_LITE_HEADER), 'true');
+  assertEquals(headers.get('x-client-trace'), 'source-header');
+});
+
+test('generate does not infer Codex Responses Lite from an additional_tools item alone', async () => {
+  installRepo();
+  const payload = makePayload({
+    input: [
+      { type: 'additional_tools', id: 'at_standard', role: 'developer', tools: [] },
+      { type: 'message', role: 'user', content: 'standard request' },
+    ],
+  });
+  let observedBody: Omit<CanonicalOpenAIResponsesPayload, 'model'> | undefined;
+  const callOpenAIResponses = vi.fn(async (_model, body): Promise<ProviderOpenAIResponsesResult> => {
+    observedBody = body;
+    return {
+      action: 'generate', ok: true,
+      events: makeProviderEvents([{ type: 'response.completed', sequence_number: 0, response: makeOpenAIResponsesResult() }]),
+      modelKey: 'standard-key', headers: new Headers(),
+    };
+  });
+
+  const result = await openaiResponsesAttempt.generate({
+    payload,
+    ctx: makeGatewayCtx(createOpenAIResponsesHttpStore(testOpenAIResponsesStatePolicy(API_KEY_ID), Date.now(), false)),
+    candidate: makeCandidate(callOpenAIResponses),
+    headers: new Headers(),
+  });
+
+  assertEquals(result.type, 'events');
+  if (result.type !== 'events') throw new Error('unreachable');
+  await collectEvents(result.events);
+  assertEquals(observedBody?.input, payload.input);
+  assertEquals(result.headers?.get(CODEX_RESPONSES_LITE_HEADER), null);
+});
+
+test('generate preserves native Lite payloads when the selected provider supports the actual provider model', async () => {
+  installRepo();
+  const payload = makeCodexResponsesLitePayload({ tools: codexTools });
+  payload.input[2] = {
+    type: 'message',
+    id: 'msg_user',
+    role: 'user',
+    content: [
+      { type: 'input_text', text: 'Say hello.' },
+      { type: 'input_image', image_url: 'data:image/png;base64,AQID', detail: 'high' },
+    ],
+  };
+  const sourcePayload = JSON.parse(JSON.stringify(payload));
+  const headers = new Headers({ [CODEX_RESPONSES_LITE_HEADER]: 'true' });
+  const supportsOpenAIResponsesLite = vi.fn((model: ProviderModel) => model.id === 'gpt-real-provider-model');
+  let observedModel: ProviderModel | undefined;
+  let observedBody: Omit<CanonicalOpenAIResponsesPayload, 'model'> | undefined;
+  const callOpenAIResponses = vi.fn(async (
+    model: ProviderModel,
+    body: Omit<CanonicalOpenAIResponsesPayload, 'model'>,
+  ): Promise<ProviderOpenAIResponsesResult> => {
+    observedModel = model;
+    observedBody = body;
+    return {
+      action: 'generate', ok: true,
+      events: makeProviderEvents([{ type: 'response.completed', sequence_number: 0, response: makeOpenAIResponsesResult('resp_native_lite') }]),
+      modelKey: 'native-lite-key', headers: new Headers(),
+    };
+  });
+
+  const result = await openaiResponsesAttempt.generate({
+    payload,
+    ctx: makeGatewayCtx(createOpenAIResponsesHttpStore(testOpenAIResponsesStatePolicy(API_KEY_ID), Date.now(), false)),
+    candidate: makeNativeLiteCandidate(callOpenAIResponses, supportsOpenAIResponsesLite),
+    headers,
+  });
+
+  assertEquals(result.type, 'events');
+  if (result.type !== 'events') throw new Error('unreachable');
+  await collectEvents(result.events);
+  assertEquals(supportsOpenAIResponsesLite.mock.calls.map(([model]) => model.id), ['gpt-real-provider-model']);
+  assertEquals(observedModel?.id, 'gpt-real-provider-model');
+  assertEquals(observedBody, {
+    ...sourcePayload,
+    model: undefined,
+  });
+  assertEquals('model' in (observedBody ?? {}), false);
+  // Upstream header filtering is independent from the interceptor; this body
+  // equality pins the Lite marker and all Lite-only request fields instead.
+  assertEquals((observedBody?.input[2] as { content?: unknown[] })?.content?.[1], {
+    type: 'input_image', image_url: 'data:image/png;base64,AQID', detail: 'high',
+  });
+  assertEquals(payload, sourcePayload);
+  assertEquals(headers.get(CODEX_RESPONSES_LITE_HEADER), 'true');
+});
+
+test('generate leaves a bridged upstream API error status, body, and headers unchanged', async () => {
+  installRepo();
+  const errorBody = Uint8Array.of(0, 255, 7, 99);
+  const upstreamResponse = new Response(errorBody, {
+    status: 429,
+    headers: { 'content-type': 'application/problem+json', 'retry-after': '11', 'x-upstream': 'untouched' },
+  });
+  const callOpenAIResponses = vi.fn(async (): Promise<ProviderOpenAIResponsesResult> => ({
+    action: 'generate', ok: false, response: upstreamResponse, modelKey: 'standard-key',
+  }));
+
+  const result = await openaiResponsesAttempt.generate({
+    payload: makeCodexResponsesLitePayload(),
+    ctx: makeGatewayCtx(createOpenAIResponsesHttpStore(testOpenAIResponsesStatePolicy(API_KEY_ID), Date.now(), false)),
+    candidate: makeCandidate(callOpenAIResponses),
+    headers: new Headers({ [CODEX_RESPONSES_LITE_HEADER]: 'true' }),
+  });
+
+  assertEquals(result.type, 'api-error');
+  if (result.type !== 'api-error') throw new Error('unreachable');
+  assertEquals(result.status, 429);
+  assertEquals(result.headers.get('content-type'), 'application/problem+json');
+  assertEquals(result.headers.get('retry-after'), '11');
+  assertEquals(result.headers.get('x-upstream'), 'untouched');
+  assertEquals(result.headers.get(CODEX_RESPONSES_LITE_HEADER), null);
+  assertEquals(result.body, errorBody);
+});
+
+test('generate lifts Lite before the real Anthropic Messages and Chat Completions translations', async () => {
+  installRepo();
+  const payload = makeCodexResponsesLitePayload({ tool_choice: { type: 'custom', name: 'workspace.patch' } });
+  payload.input[0] = {
+    type: 'additional_tools', id: 'at_client', role: 'developer',
+    tools: codexTools.map(tool => tool.type === 'namespace'
+      ? { type: tool.type, name: tool.name, tools: tool.tools } as OpenAIResponsesTool
+      : tool),
+  };
+  payload.input.push(
+    { type: 'function_call', call_id: 'previous_lookup', name: 'lookup', namespace: 'functions', arguments: '{"key":"previous"}', status: 'completed' },
+    { type: 'function_call_output', call_id: 'previous_lookup', output: 'found' },
+    { type: 'custom_tool_call', call_id: 'previous_patch', name: 'patch', namespace: 'workspace', input: 'previous patch' },
+    { type: 'custom_tool_call_output', call_id: 'previous_patch', output: 'applied' },
+    { type: 'message', role: 'user', content: 'Continue.' },
+  );
+
+  let anthropicBody: Omit<AnthropicMessagesPayload, 'model'> | undefined;
+  const callAnthropicMessages = vi.fn(async (
+    _model: ProviderModel,
+    body: Omit<AnthropicMessagesPayload, 'model'>,
+  ): Promise<ProviderStreamResult<AnthropicMessagesStreamEvent>> => {
+    anthropicBody = body;
+    return {
+      ok: true,
+      events: makeProtocolFrames([
+        {
+          type: 'message_start',
+          message: {
+            id: 'msg_anthropic', type: 'message', role: 'assistant', content: [],
+            model: 'anthropic-target', stop_reason: null, stop_sequence: null,
+            usage: { input_tokens: 1, output_tokens: 0 },
+          },
+        },
+        { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'call_patch', name: 'workspace_patch', input: {} } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"input":"apply"}' } },
+        { type: 'content_block_stop', index: 0 },
+        { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'call_lookup', name: 'functions_lookup', input: {} } },
+        { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"key":"value"}' } },
+        { type: 'content_block_stop', index: 1 },
+        { type: 'message_delta', delta: { stop_reason: 'tool_use', stop_sequence: null }, usage: { output_tokens: 2 } },
+        { type: 'message_stop' },
+      ]),
+      modelKey: 'anthropic-key', headers: new Headers(),
+    };
+  });
+  const anthropicUpstream = 'up_lite_anthropic';
+  const anthropicCandidate: ModelCandidate = {
+    provider: {
+      upstreamId: anthropicUpstream, kind: 'custom', name: anthropicUpstream,
+      inboundHeaderAllowlist: [], disabledPublicModelIds: [], modelPrefix: null, modelsCache: null,
+      instance: stubProvider({ callAnthropicMessages }),
+    },
+    model: stubInternalModel({
+      id: 'anthropic-target',
+      endpoints: { anthropicMessages: {} },
+      providerModels: { [anthropicUpstream]: stubProviderModel({ id: 'anthropic-target', endpoints: { anthropicMessages: {} } }) },
+    }, anthropicUpstream),
+    fetcher: directFetcher,
+  };
+
+  const anthropicResult = await openaiResponsesAttempt.generate({
+    payload,
+    ctx: makeGatewayCtx(createOpenAIResponsesHttpStore(testOpenAIResponsesStatePolicy(API_KEY_ID), Date.now(), false)),
+    candidate: anthropicCandidate,
+    headers: new Headers(),
+  });
+  assertEquals(anthropicResult.type, 'events');
+  if (anthropicResult.type !== 'events') throw new Error('unreachable');
+  const anthropicEvents = await collectEvents(anthropicResult.events);
+  assert(anthropicBody !== undefined, 'expected the Anthropic Messages call');
+  assertEquals(anthropicBody.tools?.map(tool => tool.name), ['workspace_patch', 'functions_lookup', 'ping']);
+  assertEquals(anthropicBody.tool_choice, { type: 'tool', name: 'workspace_patch' });
+  assert(JSON.stringify(anthropicBody.system).includes('Use concise answers.'));
+  const anthropicHistory = anthropicBody.messages.flatMap(message =>
+    message.role === 'assistant' && Array.isArray(message.content)
+      ? message.content.filter(block => block.type === 'tool_use').map(block => block.name)
+      : []);
+  assertEquals(anthropicHistory, ['functions_lookup', 'workspace_patch']);
+
+  let chatBody: Omit<OpenAIChatCompletionsPayload, 'model'> | undefined;
+  const callOpenAIChatCompletions = vi.fn(async (
+    _model: ProviderModel,
+    body: Omit<OpenAIChatCompletionsPayload, 'model'>,
+  ): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>> => {
+    chatBody = body;
+    return {
+      ok: true,
+      events: makeProtocolFrames([
+        {
+          id: 'chat_lite', object: 'chat.completion.chunk', created: 0, model: 'chat-target',
+          choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }],
+        },
+        {
+          id: 'chat_lite', object: 'chat.completion.chunk', created: 0, model: 'chat-target',
+          choices: [{
+            index: 0,
+            delta: {
+              tool_calls: [
+                { index: 0, id: 'call_patch', type: 'function', function: { name: 'workspace_patch', arguments: '{"input":"apply"}' } },
+                { index: 1, id: 'call_lookup', type: 'function', function: { name: 'functions_lookup', arguments: '{"key":"value"}' } },
+              ],
+            },
+            finish_reason: 'tool_calls',
+          }],
+        },
+      ]),
+      modelKey: 'chat-key', headers: new Headers(),
+    };
+  });
+  const chatUpstream = 'up_lite_chat';
+  const chatCandidate: ModelCandidate = {
+    provider: {
+      upstreamId: chatUpstream, kind: 'custom', name: chatUpstream,
+      inboundHeaderAllowlist: [], disabledPublicModelIds: [], modelPrefix: null, modelsCache: null,
+      instance: stubProvider({ callOpenAIChatCompletions }),
+    },
+    model: stubInternalModel({
+      id: 'chat-target',
+      endpoints: { openaiChatCompletions: {} },
+      providerModels: { [chatUpstream]: stubProviderModel({ id: 'chat-target', endpoints: { openaiChatCompletions: {} } }) },
+    }, chatUpstream),
+    fetcher: directFetcher,
+  };
+
+  const chatResult = await openaiResponsesAttempt.generate({
+    payload,
+    ctx: makeGatewayCtx(createOpenAIResponsesHttpStore(testOpenAIResponsesStatePolicy(API_KEY_ID), Date.now(), false)),
+    candidate: chatCandidate,
+    headers: new Headers(),
+  });
+  assertEquals(chatResult.type, 'events');
+  if (chatResult.type !== 'events') throw new Error('unreachable');
+  const chatEvents = await collectEvents(chatResult.events);
+  assert(chatBody !== undefined, 'expected the OpenAI Chat Completions call');
+  assertEquals(chatBody.tools?.map(tool => tool.function.name), ['workspace_patch', 'functions_lookup', 'ping']);
+  assertEquals(chatBody.tool_choice, { type: 'function', function: { name: 'workspace_patch' } });
+  assertEquals(chatBody.messages.flatMap(message => message.tool_calls ?? []).map(call => call.function.name), ['functions_lookup', 'workspace_patch']);
+  for (const events of [anthropicEvents, chatEvents]) {
+    const completed = events.find(event => event.type === 'response.completed');
+    assert(completed?.type === 'response.completed', 'expected a translated terminal response');
+    assertEquals(completed.response.output.map(item => {
+      assert(item.type === 'function_call' || item.type === 'custom_tool_call');
+      return [item.type, item.namespace, item.name, item.type === 'function_call' ? item.arguments : item.input];
+    }), [
+      ['custom_tool_call', 'workspace', 'patch', 'apply'],
+      ['function_call', 'functions', 'lookup', '{"key":"value"}'],
+    ]);
+    assertEquals(completed.response.tool_choice, payload.tool_choice);
+  }
+});
+
+test('compact lifts Lite before the compact shim rewrites its standard request', async () => {
+  installRepo();
+  const payload = makeCodexResponsesLitePayload();
+  let observedBody: Omit<CanonicalOpenAIResponsesPayload, 'model'> | undefined;
+  let observedAction: OpenAIResponsesAction | undefined;
+  const callOpenAIResponses = vi.fn(async (
+    _model: ProviderModel,
+    body: Omit<CanonicalOpenAIResponsesPayload, 'model'>,
+    action: OpenAIResponsesAction,
+  ): Promise<ProviderOpenAIResponsesResult> => {
+    observedBody = body;
+    observedAction = action;
+    return {
+      action: 'generate',
+      ok: true,
+      events: makeProviderEvents([{
+        type: 'response.completed',
+        sequence_number: 0,
+        response: makeOpenAIResponsesResult('resp_compact_lite'),
+      }]),
+      modelKey: 'compact-key', headers: new Headers(),
+    };
+  });
+
+  const result = await openaiResponsesAttempt.invoke({
+    payload,
+    action: 'compact',
+    ctx: makeGatewayCtx(createOpenAIResponsesHttpStore(testOpenAIResponsesStatePolicy(API_KEY_ID), Date.now(), false)),
+    candidate: makeCandidate(callOpenAIResponses, new Set(['openai-responses-compact-shim'])),
+    headers: new Headers({ [CODEX_RESPONSES_LITE_HEADER]: 'true' }),
+  });
+
+  assertEquals(result.type, 'result');
+  if (result.type !== 'result') throw new Error('unreachable');
+  assertEquals(result.result.object, 'response.compaction');
+  assertEquals(observedAction, 'generate');
+  assert(observedBody !== undefined, 'expected compact shim to call the standard provider');
+  assertEquals(observedBody.tools, []);
+  assert(!observedBody.input.some(item => item.type === 'additional_tools'), 'Lite additional_tools must not reach the compact shim');
+  const compactorPrompt = observedBody.input[0];
+  assertEquals(compactorPrompt?.type, 'message');
+  assert(compactorPrompt?.type === 'message' && compactorPrompt.role === 'system');
+  assertEquals(result.headers?.get(CODEX_RESPONSES_LITE_HEADER), 'true');
 });

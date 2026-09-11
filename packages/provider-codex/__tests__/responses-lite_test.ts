@@ -3,6 +3,7 @@ import { describe, expect, test } from 'vitest';
 import {
   bridgeCodexResponsesRequest,
   downstreamRequestsCodexResponsesLite,
+  liftCodexResponsesLiteRequest,
   restoreCodexResponsesCompactionResult,
   restoreCodexResponsesEvent,
   restoreCodexResponsesFrames,
@@ -129,7 +130,7 @@ describe('standard to Responses Lite', () => {
 
     const bridged = bridgeCodexResponsesRequest(body, {
       threadId: '11111111-2222-4333-8444-555555555555',
-      downstreamUsesLite: true,
+      downstreamUsesLite: false,
       upstreamUsesLite: true,
     }).body;
 
@@ -291,26 +292,41 @@ describe('standard to Responses Lite', () => {
     expect(itemId(otherThread[1])).not.toBe(itemId(first[1]));
   });
 
-  test('preserves an existing valid Lite prefix and IDs while enforcing Lite controls', () => {
+  test('passes native Lite through unchanged without allocations or response restoration', () => {
+    const image = { type: 'input_image' as const, image_url: 'data:image/png;base64,x', detail: 'high' as const };
+    const laterTools = additionalTools('at_later', [customTool('later')]);
     const body = requestBody({
+      tools: [functionTool('top_level')],
+      instructions: 'Top-level instructions remain caller-owned',
       input: [
         additionalTools('at_existing', [{ type: 'web_search', external_web_access: false }]),
         taggedInstructions('msg_existing', 'Existing base'),
-        { type: 'message', role: 'user', content: 'hello' },
+        { type: 'message', role: 'user', id: 'msg_user', content: [{ type: 'input_text', text: 'hello' }, image] },
+        laterTools,
       ],
-      reasoning: { effort: 'medium' },
+      client_metadata: {
+        ws_request_header_x_openai_internal_codex_responses_lite: 'true',
+        retained: 'value',
+      },
+      reasoning: { effort: 'medium', context: 'current_turn' },
       parallel_tool_calls: true,
-    });
+    } as Partial<CodexResponsesBody>);
 
-    const bridged = bridgeCodexResponsesRequest(body, {
+    const bridge = bridgeCodexResponsesRequest(body, {
       threadId: 'thread',
       downstreamUsesLite: true,
       upstreamUsesLite: true,
-    }).body;
-    expect(bridged.input[0]).toEqual(body.input[0]);
-    expect(bridged.input[1]).toEqual(body.input[1]);
-    expect(bridged.parallel_tool_calls).toBe(false);
-    expect(bridged.reasoning).toEqual({ effort: 'medium', context: 'all_turns' });
+    });
+
+    expect(bridge.body).toBe(body);
+    expect(bridge.callableIdentities.byWireName.size).toBe(0);
+    expect(bridge.requestEchoes).toBeUndefined();
+    expect(bridge.body.input).toBe(body.input);
+    expect(bridge.body.input[2]).toBe(body.input[2]);
+    expect(bridge.body.input[3]).toBe(laterTools);
+    expect(image.detail).toBe('high');
+    expect(bridge.body.parallel_tool_calls).toBe(true);
+    expect(bridge.body.reasoning).toEqual({ effort: 'medium', context: 'current_turn' });
   });
 
   test('keeps duplicate declarations when rebuilding a mixed standard/Lite request', () => {
@@ -326,7 +342,7 @@ describe('standard to Responses Lite', () => {
 
     const bridged = bridgeCodexResponsesRequest(body, {
       threadId: 'thread',
-      downstreamUsesLite: true,
+      downstreamUsesLite: false,
       upstreamUsesLite: true,
     }).body;
     const tools = (bridged.input[0] as Extract<OpenAIResponsesInputItem, { type: 'additional_tools' }>).tools;
@@ -348,7 +364,7 @@ describe('standard to Responses Lite', () => {
 
     const bridged = bridgeCodexResponsesRequest(body, {
       threadId: 'thread',
-      downstreamUsesLite: true,
+      downstreamUsesLite: false,
       upstreamUsesLite: true,
     }).body;
     const carriers = bridged.input.filter(item => item.type === 'additional_tools');
@@ -367,6 +383,81 @@ describe('standard to Responses Lite', () => {
 });
 
 describe('Responses Lite to standard', () => {
+  test('flattens callable namespaces with collision-safe names and reversible history and choices', () => {
+    const body = requestBody({
+      tools: [functionTool('functions_lookup')],
+      input: [
+        additionalTools('at_source', [
+          {
+            type: 'namespace', name: 'functions', description: '', tools: [
+              { type: 'function', name: 'lookup', parameters: { type: 'object' } },
+              { type: 'custom', name: 'patch' },
+            ],
+          },
+          { type: 'namespace', name: 'a.b', description: '', tools: [{ type: 'function', name: 'read', parameters: { type: 'object' } }] },
+          { type: 'namespace', name: 'a_b', description: '', tools: [{ type: 'function', name: 'read', parameters: { type: 'object' } }] },
+          { type: 'namespace', name: 'n'.repeat(40), description: '', tools: [{ type: 'function', name: 't'.repeat(40), parameters: { type: 'object' } }] },
+        ]),
+        { type: 'function_call', call_id: 'c1', name: 'lookup', namespace: 'functions', arguments: '{}', status: 'completed' },
+        { type: 'function_call', call_id: 'c2', name: 'lookup', arguments: '{}', status: 'completed' },
+        { type: 'custom_tool_call', call_id: 'c3', name: 'patch', namespace: 'functions', input: 'apply' },
+      ],
+      tool_choice: { type: 'custom', name: 'functions.patch' },
+    });
+    const original = structuredClone(body);
+    const bridge = liftCodexResponsesLiteRequest(body, { flattenNamespaces: true });
+    const names = bridge.body.tools!.map(tool => {
+      if (tool.type !== 'function' && tool.type !== 'custom') throw new Error('expected a flat callable');
+      return tool.name;
+    });
+    expect(names.slice(0, 5)).toEqual(['functions_lookup', 'functions_lookup_2', 'functions_patch', 'a_b_read', 'a_b_read_2']);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names[5]).toHaveLength(64);
+    expect(names.every(name => /^[a-zA-Z0-9_-]+$/.test(name))).toBe(true);
+    expect(bridge.body.input.map(item => 'name' in item ? item.name : undefined)).toEqual(['functions_lookup_2', 'functions_lookup_2', 'functions_patch']);
+    expect(bridge.body.input.every(item => !('namespace' in item))).toBe(true);
+    expect(bridge.body.tool_choice).toEqual({ type: 'custom', name: 'functions_patch' });
+    const restored = restoreCodexResponsesResult({
+      id: 'resp_flat', object: 'response', model: 'model', status: 'completed', error: null, incomplete_details: null,
+      output: [
+        { type: 'function_call', call_id: 'c1', name: names[1]!, arguments: '{}', status: 'completed' },
+        { type: 'custom_tool_call', call_id: 'c3', name: names[2]!, input: 'apply' },
+      ],
+      tool_choice: bridge.body.tool_choice,
+    }, bridge.callableIdentities, bridge.requestEchoes);
+    expect(restored.output).toEqual([body.input[1], body.input[3]]);
+    expect(restored.tool_choice).toEqual(body.tool_choice);
+    expect(body).toEqual(original);
+  });
+
+  test('keeps flat historical calls distinct and remaps allowed tool choices', () => {
+    const body = requestBody({
+      tools: [{ type: 'function', name: 'lookup', parameters: { type: 'object' } }],
+      input: [
+        additionalTools('at_source', [{
+          type: 'namespace', name: 'functions', description: '', tools: [
+            { type: 'function', name: 'lookup', parameters: { type: 'object' } },
+          ],
+        }]),
+        { type: 'function_call', call_id: 'flat', name: 'lookup', arguments: '{}', status: 'completed' },
+      ],
+      tool_choice: {
+        type: 'allowed_tools', mode: 'auto', tools: [
+          { type: 'function', name: 'lookup' },
+          { type: 'function', name: 'lookup', namespace: 'functions' },
+        ],
+      },
+    });
+    const bridge = liftCodexResponsesLiteRequest(body, { flattenNamespaces: true });
+    expect(bridge.body.input).toEqual([body.input[1]]);
+    expect(bridge.body.tool_choice).toEqual({
+      type: 'allowed_tools', mode: 'auto', tools: [
+        { type: 'function', name: 'lookup' },
+        { type: 'function', name: 'functions_lookup' },
+      ],
+    });
+  });
+
   test('promotes all additional tools after top-level tools and lifts tagged base instructions', () => {
     const body = requestBody({
       tools: [functionTool('top')],
@@ -384,17 +475,26 @@ describe('Responses Lite to standard', () => {
       },
     } as Partial<CodexResponsesBody>);
 
-    const bridged = bridgeCodexResponsesRequest(body, {
+    const bridge = liftCodexResponsesLiteRequest(body);
+    expect(bridge.body.tools).toEqual([functionTool('top'), customTool('first'), functionTool('second')]);
+    expect(bridge.body.input).toEqual([{ type: 'message', role: 'user', content: 'hello' }]);
+    expect(bridge.body.instructions).toBe('Lite base');
+    expect(bridge.body.parallel_tool_calls).toBe(false);
+    expect(bridge.body.reasoning).toEqual({ effort: 'low', context: 'all_turns' });
+    expect((bridge.body as unknown as Record<string, unknown>).client_metadata).toEqual({ retained: 'value' });
+    expect(bridge.requestEchoes).toEqual({
+      tools: body.tools,
+      instructions: body.instructions,
+      parallel_tool_calls: body.parallel_tool_calls,
+      reasoning: body.reasoning,
+    });
+
+    const viaBridge = bridgeCodexResponsesRequest(body, {
       threadId: 'thread',
       downstreamUsesLite: true,
       upstreamUsesLite: false,
-    }).body;
-    expect(bridged.tools).toEqual([functionTool('top'), customTool('first'), functionTool('second')]);
-    expect(bridged.input).toEqual([{ type: 'message', role: 'user', content: 'hello' }]);
-    expect(bridged.instructions).toBe('Lite base');
-    expect(bridged.parallel_tool_calls).toBe(false);
-    expect(bridged.reasoning).toEqual({ effort: 'low', context: 'all_turns' });
-    expect((bridged as unknown as Record<string, unknown>).client_metadata).toEqual({ retained: 'value' });
+    });
+    expect(viaBridge).toEqual(bridge);
   });
 
   test('retains a tagged message when nonempty top-level instructions already exist', () => {
@@ -450,7 +550,7 @@ describe('Responses Lite to standard', () => {
     ]);
   });
 
-  test('leaves an ordinary standard request in standard form', () => {
+  test('returns an ordinary standard request unchanged without allocations or restoration', () => {
     const body = requestBody({
       instructions: 'Base',
       tools: [functionTool('lookup')],
@@ -458,11 +558,14 @@ describe('Responses Lite to standard', () => {
       parallel_tool_calls: true,
     });
 
-    expect(bridgeCodexResponsesRequest(body, {
+    const bridge = bridgeCodexResponsesRequest(body, {
       threadId: 'thread',
       downstreamUsesLite: false,
       upstreamUsesLite: false,
-    }).body).toEqual(body);
+    });
+    expect(bridge.body).toBe(body);
+    expect(bridge.callableIdentities.byWireName.size).toBe(0);
+    expect(bridge.requestEchoes).toBeUndefined();
   });
 
   test('does not lift a non-leading additional-tools item for a standard caller', () => {
@@ -521,36 +624,57 @@ describe('Responses request echo restoration', () => {
     expect(restored.reasoning).toEqual({ effort: 'low', context: 'current_turn' });
   });
 
-  test('restores mixed Lite declarations without hiding effective Lite controls', () => {
+  test('restores every standard request echo after lowering mixed declarations to Lite', () => {
     const tools = [functionTool('lookup')];
     const bridge = bridgeCodexResponsesRequest(requestBody({
       tools,
       instructions: 'Base',
       parallel_tool_calls: true,
       reasoning: { effort: 'low', context: 'current_turn' },
-    }), { threadId: 'thread', downstreamUsesLite: true, upstreamUsesLite: true });
+    }), { threadId: 'thread', downstreamUsesLite: false, upstreamUsesLite: true });
     const wire = response({
       tools: (bridge.body.input[0] as Extract<OpenAIResponsesInputItem, { type: 'additional_tools' }>).tools,
       instructions: null,
       parallel_tool_calls: false,
       reasoning: { effort: 'low', context: 'all_turns' },
     });
-    expect(bridge.requestEchoes).toEqual({ tools, instructions: 'Base' });
+    expect(bridge.requestEchoes).toEqual({
+      tools,
+      instructions: 'Base',
+      parallel_tool_calls: true,
+      reasoning: { effort: 'low', context: 'current_turn' },
+    });
     const restored = restoreCodexResponsesResult(wire, bridge.callableIdentities, bridge.requestEchoes);
     expect(restored.tools).toBe(tools);
     expect(restored.instructions).toBe('Base');
-    expect(restored.parallel_tool_calls).toBe(false);
-    expect(restored.reasoning).toEqual(wire.reasoning);
+    expect(restored.parallel_tool_calls).toBe(true);
+    expect(restored.reasoning).toEqual({ effort: 'low', context: 'current_turn' });
     expect(restoreCodexResponsesEvent({ type: 'response.completed', response: wire } as OpenAIResponsesStreamEvent,
       bridge.callableIdentities, bridge.requestEchoes)).toMatchObject({ response: restored });
   });
 
-  test('does not restore unchanged declaration fields on a native Lite request', () => {
-    const bridge = bridgeCodexResponsesRequest(requestBody({
+  test('does not restore native Lite response fields', () => {
+    const body = requestBody({
       input: [additionalTools('at_client', []), taggedInstructions('msg_client', 'Base')],
       parallel_tool_calls: true,
-    }), { threadId: 'thread', downstreamUsesLite: true, upstreamUsesLite: true });
+    });
+    const bridge = bridgeCodexResponsesRequest(body, {
+      threadId: 'thread', downstreamUsesLite: true, upstreamUsesLite: true,
+    });
+    const wire = response({
+      tools: [functionTool('wire')],
+      instructions: null,
+      parallel_tool_calls: false,
+      reasoning: { effort: 'low', context: 'all_turns' },
+    });
+
+    expect(bridge.body).toBe(body);
     expect(bridge.requestEchoes).toBeUndefined();
+    const restored = restoreCodexResponsesResult(wire, bridge.callableIdentities, bridge.requestEchoes);
+    expect(restored.tools).toBe(wire.tools);
+    expect(restored.instructions).toBe(wire.instructions);
+    expect(restored.parallel_tool_calls).toBe(wire.parallel_tool_calls);
+    expect(restored.reasoning).toBe(wire.reasoning);
   });
 
   test('removes lifted standard request fields from a Lite-facing response', () => {

@@ -31,6 +31,7 @@ export interface CodexResponsesCallableIdentityMap {
 
 export interface CodexResponsesRequestEchoes {
   readonly tools?: CodexResponsesBody['tools'];
+  readonly tool_choice?: CodexResponsesBody['tool_choice'];
   readonly instructions?: CodexResponsesBody['instructions'];
   readonly parallel_tool_calls?: CodexResponsesBody['parallel_tool_calls'];
   readonly reasoning?: CodexResponsesBody['reasoning'];
@@ -81,10 +82,6 @@ const isAdditionalToolsItem = (
   && value.role === 'developer'
   && Array.isArray(value.tools)
   && (value.id === undefined || value.id === null || typeof value.id === 'string');
-
-export const hasLeadingCodexResponsesLiteTools = (
-  input: readonly OpenAIResponsesInputItem[],
-): boolean => isAdditionalToolsItem(input[0]);
 
 export const clientMetadataFrom = (body: CodexResponsesBody): Record<string, unknown> | undefined => {
   const metadata = (body as unknown as Record<string, unknown>).client_metadata;
@@ -399,13 +396,102 @@ const liftToStandard = (body: CodexResponsesBody): CodexResponsesBridgeResult =>
   };
 };
 
-const passStandard = (body: CodexResponsesBody): CodexResponsesBridgeResult => ({
-  body: {
-    ...body,
-    input: [...body.input],
+const withRequestEchoes = (
+  bridge: CodexResponsesBridgeResult,
+  body: CodexResponsesBody,
+): CodexResponsesBridgeResult => ({
+  ...bridge,
+  // Resource-bearing events echo request fields in the upstream representation.
+  // https://github.com/router-for-me/CLIProxyAPI/blob/7fac6b15bcfe5ea55c18c9eaec8e5b7e6457d974/internal/translator/openai/openai/responses/openai_openai-responses_response.go
+  requestEchoes: {
+    tools: body.tools,
+    instructions: body.instructions,
+    parallel_tool_calls: body.parallel_tool_calls,
+    reasoning: body.reasoning,
+    ...(body.tool_choice === bridge.body.tool_choice ? {} : { tool_choice: body.tool_choice }),
   },
-  callableIdentities: { byWireName: new Map() },
 });
+
+// Chat Completions function names are limited to 64 letters, digits, '_' or '-'.
+// https://github.com/openai/openai-node/blob/61539248cbe04665de68a71e6fd878127ae4db87/src/resources/shared.ts
+const MAX_FLAT_TOOL_NAME_LENGTH = 64;
+
+const flattenCallableNamespaces = (bridge: CodexResponsesBridgeResult): CodexResponsesBridgeResult => {
+  const declared = bridge.body.tools ?? [];
+  if (!declared.some(tool => tool.type === 'namespace')) return bridge;
+  const flatNames = new Set(declared.filter(isCallableTool).map(tool => tool.name));
+  const reservedNames = new Set(flatNames);
+  const sourceToTarget = new Map<string, string>();
+  const qualifiedToTarget = new Map<string, string>();
+  const entries = new Map<string, CallableIdentity>();
+  const tools: OpenAIResponsesTool[] = [];
+  for (const tool of declared) {
+    if (tool.type !== 'namespace') {
+      tools.push(tool);
+      registerUnchangedTool(entries, tool);
+      continue;
+    }
+    if (typeof tool.name !== 'string' || !Array.isArray(tool.tools)) {
+      throw new TypeError('Cannot flatten a malformed Codex Responses Lite namespace');
+    }
+    for (const child of tool.tools) {
+      if (!isCallableTool(child)) throw new TypeError(`Cannot flatten a non-callable tool in namespace ${tool.name}`);
+      const sourceKey = callableKey(tool.name, child.name);
+      let name = sourceToTarget.get(sourceKey);
+      if (name === undefined) {
+        const preferred = `${tool.name}_${child.name}`.replaceAll(/[^a-zA-Z0-9_-]/g, '_').slice(0, MAX_FLAT_TOOL_NAME_LENGTH);
+        name = preferred;
+        for (let index = 2; reservedNames.has(name); index++) {
+          const suffix = `_${index}`;
+          name = `${preferred.slice(0, MAX_FLAT_TOOL_NAME_LENGTH - suffix.length)}${suffix}`;
+        }
+        reservedNames.add(name);
+        sourceToTarget.set(sourceKey, name);
+        qualifiedToTarget.set(`${tool.name}.${child.name}`, name);
+      }
+      const flattened = { ...child, name };
+      tools.push(flattened);
+      registerCallable(entries, identityForTool(flattened), identityForTool(child, tool.name));
+    }
+  }
+  const rename = <T extends { name: string; namespace?: string }>(value: T): T => {
+    const name = value.namespace !== undefined
+      ? sourceToTarget.get(callableKey(value.namespace, value.name))
+      : flatNames.has(value.name)
+        ? undefined
+        : qualifiedToTarget.get(value.name) ?? sourceToTarget.get(callableKey(DEFAULT_FUNCTION_NAMESPACE, value.name));
+    if (name === undefined) return value;
+    const next = { ...value, name };
+    delete next.namespace;
+    return next;
+  };
+  const input = bridge.body.input.map(item =>
+    item.type === 'function_call' || item.type === 'custom_tool_call' ? rename(item) : item);
+  let toolChoice = bridge.body.tool_choice;
+  if (typeof toolChoice === 'object' && toolChoice !== null) {
+    if (toolChoice.type === 'function' || toolChoice.type === 'custom') toolChoice = rename(toolChoice);
+    else if (toolChoice.type === 'allowed_tools') {
+      toolChoice = {
+        ...toolChoice,
+        tools: toolChoice.tools.map(tool => typeof tool.name === 'string'
+          ? rename(tool as typeof tool & { name: string; namespace?: string })
+          : tool),
+      };
+    }
+  }
+  return {
+    body: { ...bridge.body, tools, input, ...(toolChoice === undefined ? {} : { tool_choice: toolChoice }) },
+    callableIdentities: { byWireName: entries },
+  };
+};
+
+export const liftCodexResponsesLiteRequest = (
+  body: CodexResponsesBody,
+  options: { flattenNamespaces?: boolean } = {},
+): CodexResponsesBridgeResult => {
+  const bridge = liftToStandard(body);
+  return withRequestEchoes(options.flattenNamespaces ? flattenCallableNamespaces(bridge) : bridge, body);
+};
 
 export const bridgeCodexResponsesRequest = (
   body: CodexResponsesBody,
@@ -415,32 +501,12 @@ export const bridgeCodexResponsesRequest = (
     upstreamUsesLite: boolean;
   },
 ): CodexResponsesBridgeResult => {
-  const bridge = opts.upstreamUsesLite
-    ? lowerToLite(body, opts.threadId)
-    : opts.downstreamUsesLite
-      ? liftToStandard(body)
-      : passStandard(body);
   if (opts.downstreamUsesLite === opts.upstreamUsesLite) {
-    const requestEchoes: CodexResponsesRequestEchoes = {
-      ...(body.tools === bridge.body.tools ? {} : { tools: body.tools }),
-      ...(body.instructions === bridge.body.instructions ? {} : { instructions: body.instructions }),
-    };
-    return Object.keys(requestEchoes).length === 0 ? bridge : { ...bridge, requestEchoes };
+    return { body, callableIdentities: { byWireName: new Map() } };
   }
-  // The upstream can echo the bridged request fields on every resource-bearing
-  // event. Preserve the caller's representation for those echoes while the
-  // callable map below reverses namespace/type changes on output items. This is
-  // the same request-map/response-restore split used by CLIProxyAPI.
-  // https://github.com/router-for-me/CLIProxyAPI/blob/7fac6b15bcfe5ea55c18c9eaec8e5b7e6457d974/internal/translator/openai/openai/responses/openai_openai-responses_response.go
-  return {
-    ...bridge,
-    requestEchoes: {
-      tools: body.tools,
-      instructions: body.instructions,
-      parallel_tool_calls: body.parallel_tool_calls,
-      reasoning: body.reasoning,
-    },
-  };
+  return opts.upstreamUsesLite
+    ? withRequestEchoes(lowerToLite(body, opts.threadId), body)
+    : liftCodexResponsesLiteRequest(body);
 };
 
 // Restore the caller-visible namespace and function/custom identity from the
@@ -480,6 +546,7 @@ const restoreCallableItem = (
 
 const REQUEST_ECHO_FIELDS = [
   'tools',
+  'tool_choice',
   'instructions',
   'parallel_tool_calls',
   'reasoning',

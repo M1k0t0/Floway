@@ -12,7 +12,6 @@ import {
   CODEX_USER_AGENT,
 } from './constants.ts';
 import { sha256JsonUuid, uuidV7 } from './ids.ts';
-import { withDefaultInstructions } from './interceptors/openai-responses/inject-default-instructions.ts';
 import { codexModelUsesResponsesLite, codexPlanSupportsImages } from './models.ts';
 import {
   hasCodexQuotaReading,
@@ -421,14 +420,14 @@ const prepareCodexResponsesRequest = (
   const clientTurnMetadata = callerTurnMetadata(opts, clientMetadata);
   const identity = buildCodexRequestIdentity(opts, body, clientMetadata, clientTurnMetadata);
   const upstreamUsesLite = codexModelUsesResponsesLite(opts.model);
+  if (downstreamUsesLite && !upstreamUsesLite) {
+    throw new TypeError('Codex Responses Lite input must be adapted before dispatch to a standard model');
+  }
   const bridge = bridgeCodexResponsesRequest(body, {
     threadId: identity.threadId,
     downstreamUsesLite,
     upstreamUsesLite,
   });
-  if (!upstreamUsesLite && downstreamUsesLite) {
-    bridge.body = withDefaultInstructions(bridge.body);
-  }
   return {
     identity,
     upstreamUsesLite,
@@ -832,7 +831,7 @@ const synthetic503 = (message: string): Response => new Response(JSON.stringify(
 // content-type as a contract violation, so we synthesize the header on the
 // way through. Body stream is preserved verbatim.
 const ensureSseContentType = (response: Response): Response => {
-  if (isEventStreamMediaType(response.headers.get('content-type'))) return response;
+  if (!response.ok || isEventStreamMediaType(response.headers.get('content-type'))) return response;
   const headers = new Headers(response.headers);
   headers.set('content-type', 'text/event-stream');
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });

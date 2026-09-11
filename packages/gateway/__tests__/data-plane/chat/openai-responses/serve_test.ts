@@ -11,8 +11,9 @@ import type { AnthropicMessagesStreamEvent } from '@floway-dev/protocols/anthrop
 import { type AliasRules, doneFrame, eventFrame, type ModelEndpoints, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
 import type { CanonicalOpenAIResponsesPayload, OpenAIResponsesPayload, OpenAIResponsesResult, OpenAIResponsesStreamEvent } from '@floway-dev/protocols/openai-responses';
-import { type ModelCandidate, directFetcher, type ProviderOpenAIResponsesResult, type ProviderStreamResult, type OpenAIResponsesAction, type UpstreamCallOptions } from '@floway-dev/provider';
-import { assert, assertEquals, stubProvider, stubInternalModel } from '@floway-dev/test-utils';
+import { type ModelCandidate, directFetcher, type ProviderModel, type ProviderOpenAIResponsesResult, type ProviderStreamResult, type OpenAIResponsesAction, type UpstreamCallOptions } from '@floway-dev/provider';
+import { CODEX_RESPONSES_LITE_HEADER, CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY as CODEX_RESPONSES_LITE_MARKER } from '@floway-dev/provider-codex';
+import { assert, assertEquals, stubProvider, stubInternalModel, stubProviderModel } from '@floway-dev/test-utils';
 
 // Mock the resolver seam so each test hands the serve exactly the provider
 // candidates it wants, optionally with an alias-rules overlay attached.
@@ -83,6 +84,34 @@ const makePayload = (overrides: Partial<CanonicalOpenAIResponsesPayload> = {}): 
   ...overrides,
 });
 
+type CodexResponsesLitePayload = CanonicalOpenAIResponsesPayload & {
+  client_metadata: Record<string, unknown>;
+};
+
+const makeCodexResponsesLitePayload = (): CodexResponsesLitePayload => ({
+  model: 'public-codex-alias',
+  input: [
+    { type: 'additional_tools', id: 'at_client', role: 'developer', tools: [] },
+    { type: 'message', id: 'msg_developer', role: 'developer', content: [{ type: 'input_text', text: 'Keep answers brief.' }] },
+    { type: 'message', id: 'msg_user', role: 'user', content: [{ type: 'input_text', text: 'Say hello.' }] },
+  ],
+  client_metadata: {
+    [CODEX_RESPONSES_LITE_MARKER]: 'true',
+    request_trace: 'retry-source',
+  },
+  tool_choice: 'auto',
+  reasoning: { effort: 'low', context: 'all_turns' },
+  parallel_tool_calls: false,
+  stream: true,
+  store: false,
+  text: {
+    format: {
+      type: 'json_schema', name: 'reply',
+      schema: { type: 'object', properties: { greeting: { type: 'string' } } },
+    },
+  },
+});
+
 // Compact tests need a real input array (a bare string can't carry the
 // compaction trigger or item_reference shapes the routing layer cares
 // about). Default to the kept-user-message the existing happy-path test
@@ -143,6 +172,42 @@ const makeCandidate = (overrides: {
       id: overrides.modelId ?? 'test-model',
       ...(overrides.endpoints ? { endpoints: overrides.endpoints } : {}),
     }, upstream),
+    fetcher: directFetcher,
+  };
+};
+
+const makeLiteCandidate = (
+  callOpenAIResponses: (model: ProviderModel, body: Omit<CanonicalOpenAIResponsesPayload, 'model'>, action: OpenAIResponsesAction, signal: AbortSignal | undefined, opts: UpstreamCallOptions) => Promise<ProviderOpenAIResponsesResult>,
+  options: {
+    upstream: string;
+    modelId: string;
+    providerModelId: string;
+    supportsOpenAIResponsesLite: (model: ProviderModel) => boolean;
+  },
+): ModelCandidate => {
+  const provider = stubProvider({ callOpenAIResponses });
+  provider.supportsOpenAIResponsesLite = options.supportsOpenAIResponsesLite;
+  const endpoints = { openaiResponses: {} };
+  return {
+    provider: {
+      upstreamId: options.upstream,
+      kind: 'custom',
+      name: options.upstream,
+      // This makes the test observe the interceptor's delete, rather than the
+      // independent upstream-header allowlist dropping the source header.
+      inboundHeaderAllowlist: [CODEX_RESPONSES_LITE_HEADER],
+      disabledPublicModelIds: [],
+      modelPrefix: null,
+      modelsCache: null,
+      instance: provider,
+    },
+    model: stubInternalModel({
+      id: options.modelId,
+      endpoints,
+      providerModels: {
+        [options.upstream]: stubProviderModel({ id: options.providerModelId, endpoints }),
+      },
+    }, options.upstream),
     fetcher: directFetcher,
   };
 };
@@ -269,6 +334,90 @@ test('generate falls through to the next candidate when the first yields an upst
   const sourceItem = payload.input[0];
   if (sourceItem.type !== 'message' || !Array.isArray(sourceItem.content) || sourceItem.content[0]?.type !== 'input_image') throw new Error('expected source image content');
   assertEquals(sourceItem.content[0].image_url, originalImageUrl);
+});
+
+test('generate retries a bridged Lite request against a native Lite candidate without leaking the first attempt', async () => {
+  installRepo();
+  const payload = makeCodexResponsesLitePayload();
+  const sourcePayload = JSON.parse(JSON.stringify(payload));
+  const headers = new Headers({ [CODEX_RESPONSES_LITE_HEADER]: 'true' });
+  const sourceHeaders = new Headers(headers);
+  const firstError = new Response(JSON.stringify({ error: { message: 'retry me' } }), {
+    status: 503,
+    headers: { 'content-type': 'application/json' },
+  });
+  let firstBody: Omit<CanonicalOpenAIResponsesPayload, 'model'> | undefined;
+  let firstHeaders: Headers | undefined;
+  const firstCall = vi.fn(async (
+    _model: ProviderModel,
+    body: Omit<CanonicalOpenAIResponsesPayload, 'model'>,
+    _action: OpenAIResponsesAction,
+    _signal: AbortSignal | undefined,
+    opts: UpstreamCallOptions,
+  ): Promise<ProviderOpenAIResponsesResult> => {
+    firstBody = body;
+    firstHeaders = opts.headers;
+    return { action: 'generate', ok: false, response: firstError, modelKey: 'standard-key' };
+  });
+  const standard = makeLiteCandidate(firstCall, {
+    upstream: 'up_standard',
+    modelId: 'standard-resolved-model',
+    providerModelId: 'standard-provider-model',
+    supportsOpenAIResponsesLite: () => false,
+  });
+
+  let nativeModel: ProviderModel | undefined;
+  let nativeBody: Omit<CanonicalOpenAIResponsesPayload, 'model'> | undefined;
+  let nativeHeaders: Headers | undefined;
+  const supportsOpenAIResponsesLite = vi.fn((model: ProviderModel) => model.id === 'native-provider-model');
+  const nativeCall = vi.fn(async (
+    model: ProviderModel,
+    body: Omit<CanonicalOpenAIResponsesPayload, 'model'>,
+    _action: OpenAIResponsesAction,
+    _signal: AbortSignal | undefined,
+    opts: UpstreamCallOptions,
+  ): Promise<ProviderOpenAIResponsesResult> => {
+    nativeModel = model;
+    nativeBody = body;
+    nativeHeaders = opts.headers;
+    return {
+      action: 'generate', ok: true,
+      events: makeProtocolFrames([{
+        type: 'response.completed',
+        sequence_number: 0,
+        response: makeOpenAIResponsesResult('resp_native_fallback'),
+      }]),
+      modelKey: 'native-key', headers: new Headers(),
+    };
+  });
+  const native = makeLiteCandidate(nativeCall, {
+    upstream: 'up_native',
+    modelId: 'native-resolved-model',
+    providerModelId: 'native-provider-model',
+    supportsOpenAIResponsesLite,
+  });
+  queueResolution([standard, native]);
+
+  const result = await openaiResponsesServe.generate({ payload, ctx: makeGatewayCtx(), headers });
+
+  assertEquals(result.type, 'events');
+  if (result.type !== 'events') throw new Error('unreachable');
+  await collectEvents(result.events);
+  assertEquals(firstCall.mock.calls.length, 1);
+  assertEquals(nativeCall.mock.calls.length, 1);
+  assert(firstBody !== undefined, 'expected standard fallback attempt');
+  assertEquals(firstBody.input, sourcePayload.input.slice(1));
+  assertEquals(firstBody.tools, []);
+  assertEquals((firstBody as unknown as { client_metadata?: unknown }).client_metadata, { request_trace: 'retry-source' });
+  assertEquals(firstHeaders?.get(CODEX_RESPONSES_LITE_HEADER), null);
+
+  assertEquals(supportsOpenAIResponsesLite.mock.calls.map(([model]) => model.id), ['native-provider-model']);
+  assertEquals(nativeModel?.id, 'native-provider-model');
+  const { model: _sourceModel, ...sourceBody } = sourcePayload;
+  assertEquals(nativeBody, sourceBody);
+  assertEquals(nativeHeaders?.get(CODEX_RESPONSES_LITE_HEADER), 'true');
+  assertEquals(payload, sourcePayload);
+  assertEquals(headers.get(CODEX_RESPONSES_LITE_HEADER), sourceHeaders.get(CODEX_RESPONSES_LITE_HEADER));
 });
 
 // A mid-attempt throw (interceptor bug / translation error / provider-layer

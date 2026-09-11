@@ -42,22 +42,29 @@ test('injects the default when instructions is null', async () => {
   assertEquals(ctx.payload.instructions, "You're a helpful assistant.");
 });
 
-test('does not add a top-level fallback to an already-Lite request', async () => {
+test.each([
+  { name: 'HTTP marker', header: 'true', clientMetadata: undefined },
+  {
+    name: 'WebSocket marker',
+    header: undefined,
+    clientMetadata: { ws_request_header_x_openai_internal_codex_responses_lite: 'true' },
+  },
+])('does not add a fallback to explicit Lite input without a leading carrier ($name)', async ({ header, clientMetadata }) => {
   const input: CanonicalOpenAIResponsesPayload['input'] = [
-    {
-      type: 'additional_tools',
-      role: 'developer',
-      id: 'at_existing',
-      tools: [],
-    },
     { type: 'message', role: 'user', content: 'hello' },
+    { type: 'additional_tools', role: 'developer', id: 'at_later', tools: [] },
   ];
-  const ctx = invocation({ model: 'gpt-test', input });
-  ctx.headers.set('x-openai-internal-codex-responses-lite', 'true');
+  const ctx = invocation({
+    model: 'gpt-test',
+    input,
+    instructions: '',
+    ...(clientMetadata === undefined ? {} : { client_metadata: clientMetadata }),
+  });
+  if (header !== undefined) ctx.headers.set('x-openai-internal-codex-responses-lite', header);
 
   await injectDefaultInstructions(ctx, stubRequest, okEvents);
 
-  assertEquals(ctx.payload.instructions, undefined);
+  assertEquals(ctx.payload.instructions, '');
   assertEquals(ctx.payload.input, input);
 });
 

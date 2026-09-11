@@ -144,6 +144,9 @@ export interface ProviderInstance {
   // defense-in-depth.
   callOpenAICompletions(model: ProviderModel, body: Omit<OpenAICompletionsPayload, 'model'>, signal: AbortSignal | undefined, opts: UpstreamCallOptions): Promise<ProviderCallResult>;
   callOpenAIChatCompletions(model: ProviderModel, body: Omit<OpenAIChatCompletionsPayload, 'model'>, signal: AbortSignal | undefined, opts: UpstreamCallOptions): Promise<ProviderStreamResult<OpenAIChatCompletionsStreamEvent>>;
+  // Absent means standard Responses input. Only the provider interprets its
+  // private model metadata when declaring native Lite support to the gateway.
+  supportsOpenAIResponsesLite?(model: ProviderModel): boolean;
   callOpenAIResponses(model: ProviderModel, body: Omit<CanonicalOpenAIResponsesPayload, 'model'>, action: OpenAIResponsesAction, signal: AbortSignal | undefined, opts: UpstreamCallOptions): Promise<ProviderOpenAIResponsesResult>;
   callAnthropicMessages(model: ProviderModel, body: Omit<AnthropicMessagesPayload, 'model'>, signal: AbortSignal | undefined, opts: AnthropicMessagesUpstreamCallOptions): Promise<ProviderStreamResult<AnthropicMessagesStreamEvent>>;
   // count_tokens is non-streaming JSON; the gateway relays the upstream
