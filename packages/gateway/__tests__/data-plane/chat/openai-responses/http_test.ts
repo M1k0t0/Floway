@@ -3,11 +3,20 @@ import { test, vi } from 'vitest';
 
 import { TEST_OPENAI_RESPONSES_RETENTION_SECONDS } from './test-policy.ts';
 import { missingRequiredCompactionKeys, missingRequiredResourceKeys, responseOnlyKeysAdded } from './test-required-resource-keys.ts';
+import * as responseResource from '../../../../src/data-plane/chat/openai-responses/response-resource.ts';
+import { openaiResponsesServe } from '../../../../src/data-plane/chat/openai-responses/serve.ts';
+import * as chatContext from '../../../../src/data-plane/chat/shared/gateway-ctx.ts';
+import * as liteCodec from '../../../../src/data-plane/codex/responses-lite.ts';
+import { initDumpBroker, initDumpStore } from '../../../../src/dump/registry.ts';
 import type { AuthVars } from '../../../../src/middleware/auth.ts';
 import { initRepo } from '../../../../src/repo/index.ts';
 import type { ApiKey, User } from '../../../../src/repo/types.ts';
+import { installDumpStubs } from '../../../dump/test-fixtures.ts';
 import { InMemoryRepo } from '../../../repo/memory.ts';
+import { flushAsyncWork } from '../../../test-utils/app.ts';
+import type { AnthropicMessagesStreamEvent } from '@floway-dev/protocols/anthropic-messages';
 import { type AliasRules, doneFrame, eventFrame, type ModelEndpoints, type ProtocolFrame } from '@floway-dev/protocols/common';
+import type { OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
 import { openaiResponsesResultToEvents, type CanonicalOpenAIResponsesPayload, type OpenAIResponsesResult, type OpenAIResponsesStreamEvent } from '@floway-dev/protocols/openai-responses';
 import { type FlagId, type ModelCandidate, directFetcher, type ProviderOpenAIResponsesResult, type OpenAIResponsesAction, type UpstreamCallOptions } from '@floway-dev/provider';
 import { assert, assertEquals, stubProvider, stubInternalModel, stubProviderModel } from '@floway-dev/test-utils';
@@ -83,12 +92,12 @@ const buildUser = (overrides: Partial<User> = {}): User => ({
   ...overrides,
 });
 
-const makeApp = (): Hono<{ Variables: AuthVars }> => {
+const makeApp = (apiKeyOverrides: Partial<ApiKey> = {}): Hono<{ Variables: AuthVars }> => {
   const app = new Hono<{ Variables: AuthVars }>();
   // Stamp the authenticated key onto every request so the http entry sees the
   // same value the real auth middleware would set.
   app.use('*', async (c, next) => {
-    c.set('apiKey', buildApiKey());
+    c.set('apiKey', buildApiKey(apiKeyOverrides));
     c.set('user', buildUser());
     await next();
   });
@@ -715,3 +724,314 @@ test('POST /v1/responses nests a mid-stream failure under `error` so an SDK stre
   ) as { response: { id: string } };
   assertEquals(failed.response.id, created.response.id);
 });
+
+const translatedNamespaceCandidate = (
+  target: 'openaiChatCompletions' | 'anthropicMessages',
+  observe: (body: Record<string, unknown>) => void,
+  returnedName?: string,
+  fail = false,
+): ModelCandidate => {
+  const candidate = makeCandidate({ upstream: `up_${target}`, endpoints: { [target]: {} } });
+  const instance = stubProvider({
+    callOpenAIChatCompletions: async (_model, body) => {
+      observe(body as unknown as Record<string, unknown>);
+      if (fail) return { ok: false, response: new Response('retry this candidate', { status: 500 }), modelKey: 'test-model-key' };
+      const chunk = (choices: OpenAIChatCompletionsStreamEvent['choices']): OpenAIChatCompletionsStreamEvent => ({ id: 'chat_namespace', object: 'chat.completion.chunk', created: 0, model: 'test-model', choices });
+      return {
+        ok: true, modelKey: 'test-model-key', events: (async function* () {
+          yield eventFrame(chunk([{ index: 0, delta: { role: 'assistant' }, finish_reason: null }]));
+          yield eventFrame(chunk([{ index: 0, delta: returnedName === undefined ? { content: 'done' } : { tool_calls: [{ index: 0, id: 'call_namespace', type: 'function', function: { name: returnedName, arguments: '{"input":"patch"}' } }] }, finish_reason: null }]));
+          yield eventFrame(chunk([{ index: 0, delta: {}, finish_reason: returnedName === undefined ? 'stop' : 'tool_calls' }]));
+          yield doneFrame();
+        })(),
+      };
+    },
+    callAnthropicMessages: async (_model, body) => {
+      observe(body as unknown as Record<string, unknown>);
+      if (fail) return { ok: false, response: new Response('retry this candidate', { status: 500 }), modelKey: 'test-model-key' };
+      return {
+        ok: true, modelKey: 'test-model-key', events: (async function* () {
+          yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'message_start', message: { id: 'msg_namespace', type: 'message', role: 'assistant', model: 'test-model', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 0 } } });
+          yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'content_block_start', index: 0, content_block: returnedName === undefined ? { type: 'text', text: '' } : { type: 'tool_use', id: 'call_namespace', name: returnedName, input: {} } });
+          yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'content_block_delta', index: 0, delta: returnedName === undefined ? { type: 'text_delta', text: 'done' } : { type: 'input_json_delta', partial_json: '{"input":"patch"}' } });
+          yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'content_block_stop', index: 0 });
+          yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'message_delta', delta: { stop_reason: returnedName === undefined ? 'end_turn' : 'tool_use', stop_sequence: null }, usage: { output_tokens: 1 } });
+          yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'message_stop' });
+        })(),
+      };
+    },
+  });
+  return { ...candidate, provider: { ...candidate.provider, instance } };
+};
+
+for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
+  for (const scope of ['namespace', 'flat'] as const) {
+    test(`${target} continuation keeps historical function and current custom identities distinct in ${scope} tools`, async () => {
+      const repo = installRepo();
+      const bodies: Record<string, unknown>[] = [];
+      const tools = (type: 'function' | 'custom') => scope === 'namespace'
+        ? [{ type: 'namespace', name: 'fs', description: '', tools: [{ type, name: 'read' }] }]
+        : [{ type, name: 'read' }, { type: 'namespace', name: 'unused', description: '', tools: [{ type: 'function', name: 'other' }] }];
+      const currentName = scope === 'namespace' ? 'fs_read' : 'read';
+      queueResolution([translatedNamespaceCandidate(target, body => bodies.push(structuredClone(body)), currentName)]);
+      const first = await makeApp().request('/v1/responses', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'test-model', tools: tools('function'), input: 'read a file' }),
+      });
+      assertEquals(first.status, 200);
+      const previous = await first.json() as OpenAIResponsesResult;
+      const history = previous.output.find(item => item.type === 'function_call');
+      assert(history?.type === 'function_call');
+      queueResolution([translatedNamespaceCandidate(target, body => bodies.push(structuredClone(body)), currentName)]);
+      const second = await makeApp().request('/v1/responses', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'test-model', tools: tools('custom'), previous_response_id: previous.id, input: [{ type: 'function_call_output', call_id: history.call_id, output: 'done' }, { role: 'user', content: 'continue' }] }),
+      });
+      assertEquals(second.status, 200);
+      const current = await second.json() as OpenAIResponsesResult;
+      const output = current.output.find(item => item.type === 'custom_tool_call');
+      assert(output?.type === 'custom_tool_call');
+      assertEquals([output.name, output.namespace, output.input], ['read', scope === 'namespace' ? 'fs' : undefined, 'patch']);
+      assertEquals(bodies.length, 2);
+      assert(JSON.stringify(bodies[1]!.messages).includes(`"name":"${currentName}_2"`), 'historical function must not borrow the current custom alias');
+      const rows = await repo.openaiResponsesItems.lookupMany(API_KEY_ID, [history.id!], 0);
+      assertEquals(rows[0]?.payload.item, history);
+    });
+  }
+
+  test(`Responses Lite ${target} persists canonical namespaces and replays them with a changed tool collision set`, async () => {
+    const repo = installRepo();
+    const bodies: Record<string, unknown>[] = [];
+    const namespace = { type: 'namespace', name: 'files', description: '', tools: [{ type: 'custom', name: 'edit', format: { type: 'text' } }] };
+    const flat = { type: 'function', name: 'files_edit', parameters: { type: 'object' } };
+    queueResolution([translatedNamespaceCandidate(target, body => bodies.push(structuredClone(body)), 'files_edit_2')]);
+    const first = await makeApp().request('/v1/responses', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-openai-internal-codex-responses-lite': 'true' },
+      body: JSON.stringify({ model: 'test-model', tools: [flat], tool_choice: { type: 'custom', name: 'edit', namespace: 'files' }, input: [{ type: 'additional_tools', role: 'developer', tools: [namespace] }, { role: 'user', content: 'edit a file' }] }),
+    });
+    assertEquals(first.status, 200);
+    const firstBody = await first.json() as OpenAIResponsesResult;
+    const item = firstBody.output.find(item => item.type === 'custom_tool_call');
+    assert(item?.type === 'custom_tool_call');
+    assertEquals([item.name, item.namespace, item.input], ['edit', 'files', 'patch']);
+    assertEquals(firstBody.tool_choice, { type: 'custom', name: 'edit', namespace: 'files' });
+    const rows = await repo.openaiResponsesItems.lookupMany(API_KEY_ID, [item.id!], 0);
+    assertEquals(rows.length, 1);
+    assertEquals(rows[0]?.payload.item, item);
+    assertEquals((bodies[0]!.tools as Array<{ name?: string; function?: { name: string } }>).map(tool => tool.name ?? tool.function?.name), ['files_edit', 'files_edit_2']);
+    assertEquals(bodies[0]!.tool_choice, target === 'openaiChatCompletions' ? { type: 'function', function: { name: 'files_edit_2' } } : { type: 'tool', name: 'files_edit_2' });
+
+    queueResolution([translatedNamespaceCandidate(target, body => bodies.push(structuredClone(body)))]);
+    const second = await makeApp().request('/v1/responses', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'test-model', previous_response_id: firstBody.id, tools: [flat, { ...flat, name: 'files_edit_2' }], input: [{ type: 'custom_tool_call_output', call_id: item.call_id, output: 'done' }, { role: 'user', content: 'continue' }] }),
+    });
+    assertEquals(second.status, 200);
+    await second.json();
+    assertEquals(bodies.length, 2);
+    const serializedHistory = JSON.stringify(bodies[1]!.messages);
+    assert(serializedHistory.includes('files_edit_3'), 'hydrated custom history must allocate against the new collision set');
+    assert(!serializedHistory.includes('"name":"files_edit_2"'), 'persisted history must not retain the first attempt wire name');
+
+    let native: Omit<CanonicalOpenAIResponsesPayload, 'model'> | undefined;
+    queueResolution([makeCandidate({
+      callOpenAIResponses: async (_model, body) => {
+        native = body as Omit<CanonicalOpenAIResponsesPayload, 'model'>;
+        return { action: 'generate', ok: true, modelKey: 'test-model-key', events: makeProviderEvents(completedEvents()) };
+      },
+    })]);
+    const third = await makeApp().request('/v1/responses', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'test-model', tools: [namespace], input: [{ type: 'item_reference', id: item.id }, { type: 'custom_tool_call_output', call_id: item.call_id, output: 'done' }] }),
+    });
+    assertEquals(third.status, 200);
+    await third.json();
+    assertEquals(native?.input[0], item);
+    assertEquals(native?.tools, [namespace]);
+  });
+
+  test(`Responses Lite ${target} API-error candidate cannot contaminate a native failover payload`, async () => {
+    installRepo();
+    const namespace = { type: 'namespace', name: 'files', description: '', tools: [{ type: 'function', name: 'read' }] };
+    let translatedCalls = 0;
+    let nativeCalls = 0;
+    const bad = translatedNamespaceCandidate(target, body => {
+      translatedCalls++;
+      assert(JSON.stringify(body.tools).includes('files_read'));
+      body.tools = [];
+    }, undefined, true);
+    const good = makeCandidate({
+      callOpenAIResponses: async (_model, body) => {
+        nativeCalls++;
+        const request = body as Omit<CanonicalOpenAIResponsesPayload, 'model'>;
+        assertEquals(request.tools, [namespace]);
+        assertEquals(request.instructions, 'base');
+        assertEquals(request.tool_choice, { type: 'allowed_tools', mode: 'required', tools: [{ type: 'function', name: 'read', namespace: 'files' }] });
+        assertEquals(request.input.some(item => item.type === 'additional_tools'), false);
+        return { action: 'generate', ok: true, modelKey: 'test-model-key', events: makeProviderEvents(completedEvents()) };
+      },
+    });
+    queueResolution([bad, good]);
+    const response = await makeApp().request('/v1/responses', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-openai-internal-codex-responses-lite': 'true' },
+      body: JSON.stringify({ model: 'test-model', instructions: 'base', tool_choice: { type: 'allowed_tools', mode: 'required', tools: [{ type: 'function', name: 'read', namespace: 'files' }] }, input: [{ type: 'additional_tools', role: 'developer', tools: [namespace] }, { role: 'user', content: 'hello' }] }),
+    });
+    assertEquals(response.status, 200);
+    await response.json();
+    assertEquals([translatedCalls, nativeCalls], [1, 1]);
+  });
+}
+
+for (const transport of ['json', 'stream', 'compact'] as const) {
+  test(`Responses Lite HTTP ${transport} is Standard before ctx/store construction and serve, retaining raw dump bytes`, async () => {
+    installRepo();
+    const dumps = installDumpStubs(initDumpStore, initDumpBroker);
+    const namespace = { type: 'namespace', name: 'files', description: 'Files', tools: [{ type: 'function', name: 'read', parameters: { type: 'object' } }] };
+    const caller = {
+      model: 'test-model', stream: transport === 'stream',
+      client_metadata: { ws_request_header_x_openai_internal_codex_responses_lite: 'true', retain: 'caller' },
+      input: [
+        { type: 'additional_tools', role: 'developer', tools: [namespace] },
+        { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'base rules' }], internal_chat_message_metadata_passthrough: { content_item_kinds: ['model.base_instructions'] } },
+        { role: 'user', content: 'hello' },
+      ],
+    };
+    const raw = JSON.stringify(caller, null, 2);
+    let normalized: ReturnType<typeof liteCodec.normalizeResponsesIngress> | undefined;
+    const normalize = liteCodec.normalizeResponsesIngress;
+    const normalization = vi.spyOn(liteCodec, 'normalizeResponsesIngress').mockImplementation((request, headers) => {
+      normalized = normalize(request, headers);
+      return normalized;
+    });
+    const createCtx = chatContext.createChatGatewayCtxFromHono;
+    const creation = vi.spyOn(chatContext, 'createChatGatewayCtxFromHono').mockImplementation((...args) => {
+      assert(normalized !== undefined, 'normalization must precede context and store construction');
+      assertEquals(normalized.payload.tools, [namespace]);
+      assertEquals(normalized.payload.instructions, 'base rules');
+      assertEquals(normalized.payload.input, [{ type: 'message', role: 'user', content: 'hello' }]);
+      assertEquals(new TextDecoder().decode(args[1].requestBody.bytes), raw);
+      return createCtx(...args);
+    });
+    const action = transport === 'compact' ? 'compact' : 'generate';
+    const serve = openaiResponsesServe[action];
+    const serving = vi.spyOn(openaiResponsesServe, action).mockImplementation(async args => {
+      assert(args.payload === normalized?.payload, 'serve must receive the normalized payload itself');
+      assertEquals(args.headers.get('x-openai-internal-codex-responses-lite'), null);
+      assertEquals((args.payload as unknown as Record<string, unknown>).client_metadata, { retain: 'caller' });
+      return await serve(args);
+    });
+    const called = vi.fn(async (_model: unknown, body: unknown, upstreamAction: OpenAIResponsesAction): Promise<ProviderOpenAIResponsesResult> => {
+      const standard = body as CanonicalOpenAIResponsesPayload;
+      assertEquals(standard.instructions, 'base rules');
+      assertEquals(standard.tools, [namespace]);
+      assertEquals(standard.input.some(item => item.type === 'additional_tools'), false);
+      const resource = { ...makeOpenAIResponsesResult(), tools: standard.tools ?? undefined, instructions: standard.instructions, usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 } };
+      return upstreamAction === 'compact'
+        ? { action: 'compact', ok: true, result: { ...resource, object: 'response.compaction' }, modelKey: 'test-model-key' }
+        : { action: 'generate', ok: true, events: makeProviderEvents(openaiResponsesResultToEvents(resource).map(frame => frame.event)), modelKey: 'test-model-key' };
+    });
+    queueResolution([makeCandidate({ callOpenAIResponses: called })]);
+    try {
+      const response = await makeApp({ dumpRetentionSeconds: 3600 }).request(transport === 'compact' ? '/v1/responses/compact' : '/v1/responses', {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-openai-internal-codex-responses-lite': 'true' }, body: raw,
+      });
+      assertEquals(response.status, 200);
+      assertEquals(response.headers.get('x-openai-internal-codex-responses-lite'), 'true');
+      if (transport === 'stream') {
+        const text = await response.text();
+        const resources = text.split('\n\n').filter(part => part.includes('data: {')).map(part => JSON.parse(part.split('data: ')[1]!) as { response?: Record<string, unknown> }).flatMap(event => event.response === undefined ? [] : [event.response]);
+        assert(resources.length > 0);
+        for (const resource of resources) {
+          assertEquals(missingRequiredResourceKeys(resource), []);
+          assertEquals(resource.tools, []);
+          assertEquals(resource.instructions, null);
+        }
+      } else {
+        const body = await response.json() as Record<string, unknown>;
+        assertEquals(transport === 'compact' ? missingRequiredCompactionKeys(body) : missingRequiredResourceKeys(body), []);
+        assertEquals(body.tools, transport === 'compact' ? undefined : []);
+        assertEquals(body.instructions, transport === 'compact' ? undefined : null);
+      }
+      await flushAsyncWork();
+      assertEquals(called.mock.calls.length, 1);
+      assertEquals(creation.mock.calls.length, 1);
+      assertEquals(serving.mock.calls.length, 1);
+      assertEquals(dumps.stored.length, 1);
+      assertEquals(new TextDecoder().decode(dumps.stored[0]!.record.request.body), raw);
+      assert(dumps.stored[0]!.record.request.headers.some(([name, value]) => name === 'x-openai-internal-codex-responses-lite' && value === 'true'));
+    } finally {
+      serving.mockRestore();
+      creation.mockRestore();
+      normalization.mockRestore();
+    }
+  });
+}
+
+test('Responses Lite client echoes run after item persistence and before required resource completion', async () => {
+  const repo = installRepo();
+  const originalWrap = responseResource.wrapResponseResourceCompletion;
+  let checked = 0;
+  const completion = vi.spyOn(responseResource, 'wrapResponseResourceCompletion').mockImplementation((frames, sources) => {
+    assertEquals(sources.request.instructions, undefined, 'schema fallback must use the caller view, not lifted instructions');
+    assertEquals(sources.request.tools, undefined);
+    const observed = (async function* () {
+      for await (const frame of frames) {
+        if (frame.type === 'event' && frame.event.type === 'response.completed') {
+          assertEquals(frame.event.response.instructions, undefined, 'Lite echoes must already be restored');
+          assertEquals(frame.event.response.tools, undefined);
+          assertEquals(frame.event.response.created_at, undefined, 'resource completion must still be pending');
+          const rows = await repo.openaiResponsesItems.lookupMany(API_KEY_ID, ['fc_lite'], 0);
+          assertEquals(rows.length, 1);
+          assertEquals(rows[0]?.payload.item, { type: 'function_call', id: 'fc_lite', name: 'read', namespace: 'files', call_id: 'call_lite', arguments: '{}', status: 'completed' });
+          const snapshot = await repo.openaiResponsesSnapshots.lookup(API_KEY_ID, frame.event.response.id, 0);
+          assert(snapshot !== null, 'snapshot must commit before client echo/schema egress');
+          checked++;
+        }
+        yield frame;
+      }
+    })();
+    return originalWrap(observed, sources);
+  });
+  queueResolution([makeCandidate({
+    callOpenAIResponses: async () => ({
+      action: 'generate', ok: true, modelKey: 'test-model-key',
+      events: makeProviderEvents(openaiResponsesResultToEvents({
+        ...makeOpenAIResponsesResult(), tools: [{ type: 'namespace', name: 'files', description: '', tools: [{ type: 'function', name: 'read' }] }], instructions: 'lifted',
+        output: [{ type: 'function_call', id: 'fc_lite', name: 'read', namespace: 'files', call_id: 'call_lite', arguments: '{}', status: 'completed' }],
+      }).map(frame => frame.event)),
+    }),
+  })]);
+  try {
+    const response = await makeApp().request('/v1/responses', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-openai-internal-codex-responses-lite': 'true' },
+      body: JSON.stringify({ model: 'test-model', input: [{ type: 'additional_tools', role: 'developer', tools: [] }, { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'lifted' }], internal_chat_message_metadata_passthrough: { content_item_kinds: ['model.base_instructions'] } }] }),
+    });
+    assertEquals(response.status, 200);
+    const body = await response.json() as Record<string, unknown>;
+    assertEquals(missingRequiredResourceKeys(body), []);
+    assertEquals(body.tools, []);
+    assertEquals(body.instructions, null);
+    assertEquals(checked, 1);
+  } finally { completion.mockRestore(); }
+});
+
+for (const action of ['generate', 'compact'] as const) {
+  test(`Responses Lite ${action} preserves upstream API-error status, bytes and headers without a success marker`, async () => {
+    installRepo();
+    const bytes = new Uint8Array([0, 255, 31, 10, 128]);
+    queueResolution([makeCandidate({
+      callOpenAIResponses: async () => ({
+        action, ok: false, response: new Response(bytes, { status: 409, headers: { 'content-type': 'application/octet-stream', 'x-upstream-error': 'kept' } }), modelKey: 'test-model-key',
+      }),
+    })]);
+    const response = await makeApp().request(action === 'compact' ? '/v1/responses/compact' : '/v1/responses', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-openai-internal-codex-responses-lite': 'true' },
+      body: JSON.stringify({ model: 'test-model', input: [{ type: 'additional_tools', role: 'developer', tools: [] }] }),
+    });
+    assertEquals(response.status, 409);
+    assertEquals(response.headers.get('x-upstream-error'), 'kept');
+    assertEquals(response.headers.get('content-type'), 'application/octet-stream');
+    assertEquals(response.headers.get('x-openai-internal-codex-responses-lite'), null);
+    assertEquals(new Uint8Array(await response.arrayBuffer()), bytes);
+  });
+}
