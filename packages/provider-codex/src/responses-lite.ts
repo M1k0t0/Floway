@@ -26,24 +26,20 @@ interface CallableIdentity {
 }
 
 export interface CodexResponsesCallableIdentityMap {
-  readonly byWireName: ReadonlyMap<string, CallableIdentity | null>;
+  readonly byWireName: ReadonlyMap<string, CallableIdentity>;
 }
 
 export interface CodexResponsesRequestEchoes {
-  readonly tools: CodexResponsesBody['tools'];
-  readonly instructions: CodexResponsesBody['instructions'];
-  readonly parallel_tool_calls: CodexResponsesBody['parallel_tool_calls'];
-  readonly reasoning: CodexResponsesBody['reasoning'];
+  readonly tools?: CodexResponsesBody['tools'];
+  readonly instructions?: CodexResponsesBody['instructions'];
+  readonly parallel_tool_calls?: CodexResponsesBody['parallel_tool_calls'];
+  readonly reasoning?: CodexResponsesBody['reasoning'];
 }
 
 export interface CodexResponsesBridgeResult {
   body: CodexResponsesBody;
   callableIdentities: CodexResponsesCallableIdentityMap;
   requestEchoes?: CodexResponsesRequestEchoes;
-}
-
-interface ToolOrigin {
-  tool: OpenAIResponsesTool;
 }
 
 // Official Codex folds flat function/custom tools into this namespace and tags
@@ -90,7 +86,7 @@ export const hasLeadingCodexResponsesLiteTools = (
   input: readonly OpenAIResponsesInputItem[],
 ): boolean => isAdditionalToolsItem(input[0]);
 
-const clientMetadataFrom = (body: CodexResponsesBody): Record<string, unknown> | undefined => {
+export const clientMetadataFrom = (body: CodexResponsesBody): Record<string, unknown> | undefined => {
   const metadata = (body as unknown as Record<string, unknown>).client_metadata;
   return isRecord(metadata) ? metadata : undefined;
 };
@@ -100,8 +96,7 @@ export const downstreamRequestsCodexResponsesLite = (
   body: CodexResponsesBody,
 ): boolean =>
   headers.get(CODEX_RESPONSES_LITE_HEADER)?.trim().toLowerCase() === 'true'
-  || clientMetadataFrom(body)?.[CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY] === 'true'
-  || hasLeadingCodexResponsesLiteTools(body.input);
+  || clientMetadataFrom(body)?.[CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY] === 'true';
 
 const callableKey = (namespace: string | undefined, name: string): string =>
   JSON.stringify([namespace ?? null, name]);
@@ -112,19 +107,16 @@ const sameIdentity = (left: CallableIdentity, right: CallableIdentity): boolean 
   && left.type === right.type;
 
 const registerCallable = (
-  entries: Map<string, CallableIdentity | null>,
+  entries: Map<string, CallableIdentity>,
   wire: CallableIdentity,
   downstream: CallableIdentity,
 ): void => {
   const key = callableKey(wire.namespace, wire.name);
-  if (!entries.has(key)) {
-    entries.set(key, downstream);
-    return;
-  }
   const current = entries.get(key);
-  if (current !== null && current !== undefined && !sameIdentity(current, downstream)) {
-    entries.set(key, null);
+  if (current !== undefined && !sameIdentity(current, downstream)) {
+    throw new TypeError(`Codex Responses Lite cannot preserve distinct callable identities for ${key}`);
   }
+  entries.set(key, downstream);
 };
 
 const identityForTool = (
@@ -137,7 +129,7 @@ const identityForTool = (
 });
 
 const registerUnchangedTool = (
-  entries: Map<string, CallableIdentity | null>,
+  entries: Map<string, CallableIdentity>,
   tool: OpenAIResponsesTool,
 ): void => {
   if (isCallableTool(tool)) {
@@ -156,28 +148,28 @@ const registerUnchangedTool = (
 // Collect the same two Responses declaration surfaces, in wire order, that
 // CLIProxyAPI inventories before translating tools.
 // https://github.com/router-for-me/CLIProxyAPI/blob/7fac6b15bcfe5ea55c18c9eaec8e5b7e6457d974/internal/util/responses_tools.go#L65-L73
-const collectToolOrigins = (body: CodexResponsesBody): ToolOrigin[] => {
-  const origins: ToolOrigin[] = [];
+const collectTools = (body: CodexResponsesBody): OpenAIResponsesTool[] => {
+  const tools: OpenAIResponsesTool[] = [];
   if (Array.isArray(body.tools)) {
-    origins.push(...body.tools.map(tool => ({ tool })));
+    for (const tool of body.tools) tools.push(tool);
   }
   for (const item of body.input) {
     if (!isAdditionalToolsItem(item)) continue;
-    origins.push(...item.tools.map(tool => ({ tool })));
+    for (const tool of item.tools) tools.push(tool);
   }
-  return origins;
+  return tools;
 };
 
 const toolsForLite = (
-  origins: readonly ToolOrigin[],
-  entries: Map<string, CallableIdentity | null>,
+  tools: readonly OpenAIResponsesTool[],
+  entries: Map<string, CallableIdentity>,
 ): OpenAIResponsesTool[] => {
   const output: OpenAIResponsesTool[] = [];
   const functionChildren: Array<Extract<OpenAIResponsesTool, { type: 'function' | 'custom' }>> = [];
   let functionDescription = '';
   let functionIndex: number | undefined;
 
-  for (const { tool } of origins) {
+  for (const tool of tools) {
     if (isCallableTool(tool)) {
       functionIndex ??= output.length;
       functionChildren.push(tool);
@@ -216,11 +208,11 @@ const toolsForLite = (
   return output;
 };
 
-const registerUnchangedOrigins = (
-  origins: readonly ToolOrigin[],
-  entries: Map<string, CallableIdentity | null>,
+const registerUnchangedTools = (
+  tools: readonly OpenAIResponsesTool[],
+  entries: Map<string, CallableIdentity>,
 ): void => {
-  for (const { tool } of origins) registerUnchangedTool(entries, tool);
+  for (const tool of tools) registerUnchangedTool(entries, tool);
 };
 
 // Only consume Codex's exact one-fragment carrier. A mixed developer message
@@ -281,29 +273,30 @@ const makeBaseInstructionsMessage = (
 // do not recurse into tool schemas, metadata, or unrelated extension objects.
 // https://github.com/openai/codex/blob/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/core/src/client_common.rs#L56-L105
 const removeInputImageDetail = <T extends { type: string }>(part: T): T => {
-  if (part.type !== 'input_image') return part;
+  if (part.type !== 'input_image' || !('detail' in part)) return part;
   const next = { ...part };
   delete (next as { detail?: unknown }).detail;
   return next;
 };
 
+const removeInputImageDetails = <T extends { type: string }>(parts: T[]): T[] =>
+  parts.some(part => part.type === 'input_image' && 'detail' in part)
+    ? parts.map(removeInputImageDetail)
+    : parts;
+
 const removeLiteImageDetail = (
   item: OpenAIResponsesInputItem,
 ): OpenAIResponsesInputItem => {
   if (item.type === 'message' && Array.isArray(item.content)) {
-    return {
-      ...item,
-      content: item.content.map(removeInputImageDetail),
-    };
+    const content = removeInputImageDetails(item.content);
+    return content === item.content ? item : { ...item, content };
   }
   if (
     (item.type === 'function_call_output' || item.type === 'custom_tool_call_output')
     && Array.isArray(item.output)
   ) {
-    return {
-      ...item,
-      output: item.output.map(removeInputImageDetail),
-    };
+    const output = removeInputImageDetails(item.output);
+    return output === item.output ? item : { ...item, output };
   }
   return item;
 };
@@ -313,23 +306,22 @@ const lowerToLite = (
   threadId: string,
 ): CodexResponsesBridgeResult => {
   const next: CodexResponsesBody = { ...body };
-  const origins = collectToolOrigins(body);
-  const entries = new Map<string, CallableIdentity | null>();
+  const tools = collectTools(body);
+  const entries = new Map<string, CallableIdentity>();
   const leadingTools = isAdditionalToolsItem(body.input[0]) ? body.input[0] : undefined;
-  const additionalToolsCount = body.input.filter(isAdditionalToolsItem).length;
   const hasTopLevelTools = Array.isArray(body.tools) && body.tools.length > 0;
   const rebuildTools = leadingTools === undefined
     || hasTopLevelTools
-    || additionalToolsCount > 1;
+    || body.input.some((item, index) => index > 0 && isAdditionalToolsItem(item));
   const threadNamespace = makeThreadNamespace(threadId);
-  let input = [...body.input];
+  const input = rebuildTools
+    ? body.input.filter(item => !isAdditionalToolsItem(item))
+    : [...body.input];
 
   if (rebuildTools) {
-    const tools = toolsForLite(origins, entries);
-    input = input.filter(item => !isAdditionalToolsItem(item));
-    input.unshift(makeAdditionalToolsItem(tools, threadNamespace));
+    input.unshift(makeAdditionalToolsItem(toolsForLite(tools, entries), threadNamespace));
   } else {
-    registerUnchangedOrigins(origins, entries);
+    registerUnchangedTools(tools, entries);
   }
 
   if (Array.isArray(body.tools) || body.tools === null) delete next.tools;
@@ -371,14 +363,9 @@ const withoutLiteClientMetadata = (body: CodexResponsesBody): CodexResponsesBody
 
 const liftToStandard = (body: CodexResponsesBody): CodexResponsesBridgeResult => {
   const next = withoutLiteClientMetadata({ ...body });
-  const origins = collectToolOrigins(body);
-  const entries = new Map<string, CallableIdentity | null>();
-  registerUnchangedOrigins(origins, entries);
-
-  const additionalIndexes = new Set<number>();
-  body.input.forEach((item, index) => {
-    if (isAdditionalToolsItem(item)) additionalIndexes.add(index);
-  });
+  const tools = collectTools(body);
+  const entries = new Map<string, CallableIdentity>();
+  registerUnchangedTools(tools, entries);
 
   const leadingTools = isAdditionalToolsItem(body.input[0]);
   const baseMessageIndex = leadingTools && isBaseInstructionsMessage(body.input[1]) ? 1 : undefined;
@@ -392,11 +379,17 @@ const liftToStandard = (body: CodexResponsesBody): CodexResponsesBridgeResult =>
     && promotedInstructions !== undefined
     && promotedInstructions.length > 0;
 
-  next.input = body.input.filter((_item, index) =>
-    !additionalIndexes.has(index) && (!promoteInstructions || index !== baseMessageIndex));
+  let hasAdditionalTools = false;
+  next.input = body.input.filter((item, index) => {
+    if (isAdditionalToolsItem(item)) {
+      hasAdditionalTools = true;
+      return false;
+    }
+    return !promoteInstructions || index !== baseMessageIndex;
+  });
 
-  if (additionalIndexes.size > 0 || Array.isArray(body.tools)) {
-    next.tools = origins.map(({ tool }) => tool);
+  if (hasAdditionalTools || Array.isArray(body.tools)) {
+    next.tools = tools;
   }
   if (promoteInstructions) next.instructions = promotedInstructions;
 
@@ -427,7 +420,13 @@ export const bridgeCodexResponsesRequest = (
     : opts.downstreamUsesLite
       ? liftToStandard(body)
       : passStandard(body);
-  if (opts.downstreamUsesLite === opts.upstreamUsesLite) return bridge;
+  if (opts.downstreamUsesLite === opts.upstreamUsesLite) {
+    const requestEchoes: CodexResponsesRequestEchoes = {
+      ...(body.tools === bridge.body.tools ? {} : { tools: body.tools }),
+      ...(body.instructions === bridge.body.instructions ? {} : { instructions: body.instructions }),
+    };
+    return Object.keys(requestEchoes).length === 0 ? bridge : { ...bridge, requestEchoes };
+  }
   // The upstream can echo the bridged request fields on every resource-bearing
   // event. Preserve the caller's representation for those echoes while the
   // callable map below reverses namespace/type changes on output items. This is
@@ -454,7 +453,7 @@ const restoreCallableItem = (
 ): OpenAIResponsesOutputItem => {
   if (item.type !== 'function_call' && item.type !== 'custom_tool_call') return item;
   const downstream = identities.byWireName.get(callableKey(item.namespace, item.name));
-  if (downstream === undefined || downstream === null) return item;
+  if (downstream === undefined) return item;
 
   const restored = { ...item } as Record<string, unknown>;
   restored.name = downstream.name;
@@ -494,6 +493,7 @@ const restoreCodexRequestEchoes = (
   const restored = { ...result };
   const record = restored as unknown as Record<string, unknown>;
   for (const field of REQUEST_ECHO_FIELDS) {
+    if (!Object.hasOwn(requestEchoes, field)) continue;
     const value = requestEchoes[field];
     if (value === undefined) delete record[field];
     else record[field] = value;

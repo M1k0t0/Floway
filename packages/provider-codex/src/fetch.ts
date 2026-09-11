@@ -12,20 +12,22 @@ import {
   CODEX_USER_AGENT,
 } from './constants.ts';
 import { sha256JsonUuid, uuidV7 } from './ids.ts';
+import { withDefaultInstructions } from './interceptors/openai-responses/inject-default-instructions.ts';
 import { codexModelUsesResponsesLite, codexPlanSupportsImages } from './models.ts';
 import {
+  hasCodexQuotaReading,
+  parseCodexQuotaHeaders,
+  putCodexQuota,
+} from './quota.ts';
+import {
   bridgeCodexResponsesRequest,
+  clientMetadataFrom,
   downstreamRequestsCodexResponsesLite,
   restoreCodexResponsesCompactionResult,
   restoreCodexResponsesFrames,
   type CodexResponsesBody,
   type CodexResponsesBridgeResult,
 } from './responses-lite.ts';
-import {
-  hasCodexQuotaReading,
-  parseCodexQuotaHeaders,
-  putCodexQuota,
-} from './quota.ts';
 import type { CodexAccessTokenEntry, CodexAccountCredential } from './state.ts';
 import { isEventStreamMediaType } from '@floway-dev/protocols/common';
 import type { OpenAIImagesGenerationsPayload } from '@floway-dev/protocols/openai-images';
@@ -90,7 +92,7 @@ export const callCodexOpenAIResponses = async (opts: CallCodexOpenAIResponsesOpt
     return {
       ok: false,
       modelKey: opts.model.id,
-      response: responseForDownstreamMode(ready.response, downstreamWantsLite),
+      response: ready.response,
     };
   }
   const prepared = prepareCodexResponsesRequest(
@@ -102,7 +104,7 @@ export const callCodexOpenAIResponses = async (opts: CallCodexOpenAIResponsesOpt
     downstreamWantsLite,
   );
   const result = await performStreamingOpenAIResponsesCall(opts, prepared, ready.accessToken, false);
-  return streamResultForDownstreamMode(result, downstreamWantsLite);
+  return resultForDownstreamMode(result, downstreamWantsLite);
 };
 
 export const callCodexOpenAIResponsesCompact = async (opts: CallCodexOpenAIResponsesCompactOptions): Promise<ProviderCompactionResult> => {
@@ -112,7 +114,7 @@ export const callCodexOpenAIResponsesCompact = async (opts: CallCodexOpenAIRespo
     return {
       ok: false,
       modelKey: opts.model.id,
-      response: responseForDownstreamMode(ready.response, downstreamWantsLite),
+      response: ready.response,
     };
   }
   const prepared = prepareCodexResponsesRequest(
@@ -122,7 +124,7 @@ export const callCodexOpenAIResponsesCompact = async (opts: CallCodexOpenAIRespo
     downstreamWantsLite,
   );
   const result = await performUnaryCompactCall(opts, prepared, ready.accessToken, false);
-  return compactionResultForDownstreamMode(result, downstreamWantsLite);
+  return resultForDownstreamMode(result, downstreamWantsLite);
 };
 
 export const callCodexAlphaSearch = async (opts: CallCodexAlphaSearchOptions): Promise<ProviderCallResult> => {
@@ -225,12 +227,6 @@ const stringField = (record: Record<string, unknown> | null, key: string): strin
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
-};
-
-const clientCodexClientMetadata = (body: unknown): Record<string, unknown> => {
-  if (!isPlainObject(body)) return {};
-  const candidate = body.client_metadata;
-  return isPlainObject(candidate) ? candidate : {};
 };
 
 const parseClientTurnMetadataJson = (raw: string | null): Record<string, unknown> | null => {
@@ -421,18 +417,22 @@ const prepareCodexResponsesRequest = (
   metadata: CodexTurnMetadataOptions,
   downstreamUsesLite: boolean,
 ): PreparedCodexResponsesRequest => {
-  const clientMetadata = clientCodexClientMetadata(body);
+  const clientMetadata = clientMetadataFrom(body) ?? {};
   const clientTurnMetadata = callerTurnMetadata(opts, clientMetadata);
   const identity = buildCodexRequestIdentity(opts, body, clientMetadata, clientTurnMetadata);
   const upstreamUsesLite = codexModelUsesResponsesLite(opts.model);
+  const bridge = bridgeCodexResponsesRequest(body, {
+    threadId: identity.threadId,
+    downstreamUsesLite,
+    upstreamUsesLite,
+  });
+  if (!upstreamUsesLite && downstreamUsesLite) {
+    bridge.body = withDefaultInstructions(bridge.body);
+  }
   return {
     identity,
     upstreamUsesLite,
-    bridge: bridgeCodexResponsesRequest(body, {
-      threadId: identity.threadId,
-      downstreamUsesLite,
-      upstreamUsesLite,
-    }),
+    bridge,
     turnMetadataJson: buildCodexTurnMetadataJson(identity, metadata, clientTurnMetadata),
   };
 };
@@ -442,7 +442,7 @@ const buildCodexOpenAIResponsesBody = (
   prepared: PreparedCodexResponsesRequest,
 ): Record<string, unknown> => {
   const callerExtras: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(clientCodexClientMetadata(prepared.bridge.body))) {
+  for (const [k, v] of Object.entries(clientMetadataFrom(prepared.bridge.body) ?? {})) {
     if (!IDENTITY_MIRRORED_CLIENT_METADATA_KEYS.has(k)) callerExtras[k] = v;
   }
   const body: Record<string, unknown> = {
@@ -655,13 +655,17 @@ const performStreamingOpenAIResponsesCall = async (
     prepared.upstreamUsesLite,
   ).then(ensureSseContentType);
 
+  const needsRestoration = prepared.bridge.callableIdentities.byWireName.size > 0
+    || prepared.bridge.requestEchoes !== undefined;
   const result = await streamingProviderCall(
     upstreamFetch,
-    (stream, parserOpts) => restoreCodexResponsesFrames(
-      parseOpenAIResponsesStream(stream, parserOpts),
-      prepared.bridge.callableIdentities,
-      prepared.bridge.requestEchoes,
-    ),
+    needsRestoration
+      ? (stream, parserOpts) => restoreCodexResponsesFrames(
+          parseOpenAIResponsesStream(stream, parserOpts),
+          prepared.bridge.callableIdentities,
+          prepared.bridge.requestEchoes,
+        )
+      : parseOpenAIResponsesStream,
     opts.model.id,
     opts.signal,
   );
@@ -774,54 +778,25 @@ const downstreamHeadersForMode = (
   return output;
 };
 
-const responseForDownstreamMode = (
-  response: Response,
-  downstreamWantsLite: boolean,
-): Response => {
-  const current = response.headers.get(CODEX_RESPONSES_LITE_HEADER);
-  if ((downstreamWantsLite && current === 'true') || (!downstreamWantsLite && current === null)) {
-    return response;
-  }
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers: downstreamHeadersForMode(response.headers, downstreamWantsLite),
-  });
-};
-
-const streamResultForDownstreamMode = (
+function resultForDownstreamMode(
   result: ProviderStreamResult<OpenAIResponsesStreamEvent>,
   downstreamWantsLite: boolean,
-): ProviderStreamResult<OpenAIResponsesStreamEvent> => {
-  if (!result.ok) {
-    return {
-      ...result,
-      response: responseForDownstreamMode(result.response, downstreamWantsLite),
-    };
-  }
-  const headers = downstreamHeadersForMode(result.headers, downstreamWantsLite);
-  return {
-    ...result,
-    ...(headers === undefined ? {} : { headers }),
-  };
-};
-
-const compactionResultForDownstreamMode = (
+): ProviderStreamResult<OpenAIResponsesStreamEvent>;
+function resultForDownstreamMode(
   result: ProviderCompactionResult,
   downstreamWantsLite: boolean,
-): ProviderCompactionResult => {
-  if (!result.ok) {
-    return {
-      ...result,
-      response: responseForDownstreamMode(result.response, downstreamWantsLite),
-    };
-  }
+): ProviderCompactionResult;
+function resultForDownstreamMode(
+  result: ProviderStreamResult<OpenAIResponsesStreamEvent> | ProviderCompactionResult,
+  downstreamWantsLite: boolean,
+): ProviderStreamResult<OpenAIResponsesStreamEvent> | ProviderCompactionResult {
+  if (!result.ok) return result;
   const headers = downstreamHeadersForMode(result.headers, downstreamWantsLite);
   return {
     ...result,
     ...(headers === undefined ? {} : { headers }),
   };
-};
+}
 
 const parseUpstreamError = (rawText: string): { code: string | null; message: string } => {
   try {

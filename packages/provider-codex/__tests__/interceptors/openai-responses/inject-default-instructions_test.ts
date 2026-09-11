@@ -53,10 +53,25 @@ test('does not add a top-level fallback to an already-Lite request', async () =>
     { type: 'message', role: 'user', content: 'hello' },
   ];
   const ctx = invocation({ model: 'gpt-test', input });
+  ctx.headers.set('x-openai-internal-codex-responses-lite', 'true');
 
   await injectDefaultInstructions(ctx, stubRequest, okEvents);
 
   assertEquals(ctx.payload.instructions, undefined);
+  assertEquals(ctx.payload.input, input);
+});
+
+test.each([undefined, 'false'])('injects the default for generic leading tools with header %s', async header => {
+  const input: CanonicalOpenAIResponsesPayload['input'] = [
+    { type: 'additional_tools', role: 'developer', tools: [] },
+    { type: 'message', role: 'user', content: 'hello' },
+  ];
+  const ctx = invocation({ model: 'gpt-test', input });
+  if (header !== undefined) ctx.headers.set('x-openai-internal-codex-responses-lite', header);
+
+  await injectDefaultInstructions(ctx, stubRequest, okEvents);
+
+  assertEquals(ctx.payload.instructions, "You're a helpful assistant.");
   assertEquals(ctx.payload.input, input);
 });
 

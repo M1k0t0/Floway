@@ -60,7 +60,7 @@ const taggedInstructions = (id: string, text: string): OpenAIResponsesInputItem 
 });
 
 describe('Responses Lite intent', () => {
-  test('recognizes the HTTP header, WebSocket metadata, and leading additional-tools form', () => {
+  test('recognizes explicit HTTP and WebSocket Lite markers', () => {
     expect(downstreamRequestsCodexResponsesLite(
       new Headers({ 'x-openai-internal-codex-responses-lite': ' true ' }),
       requestBody(),
@@ -70,10 +70,22 @@ describe('Responses Lite intent', () => {
         ws_request_header_x_openai_internal_codex_responses_lite: 'true',
       },
     } as Partial<CodexResponsesBody>))).toBe(true);
-    expect(downstreamRequestsCodexResponsesLite(new Headers(), requestBody({
-      input: [additionalTools('at_existing', []), { type: 'message', role: 'user', content: 'hello' }],
-    }))).toBe(true);
     expect(downstreamRequestsCodexResponsesLite(new Headers(), requestBody())).toBe(false);
+  });
+
+  test.each([undefined, 'false'])('keeps generic leading tools in standard mode with header %s', header => {
+    const body = requestBody({
+      instructions: 'Standard base',
+      input: [additionalTools('at_existing', []), { type: 'message', role: 'user', content: 'hello' }],
+    });
+    const downstreamUsesLite = downstreamRequestsCodexResponsesLite(
+      new Headers(header === undefined ? {} : { 'x-openai-internal-codex-responses-lite': header }),
+      body,
+    );
+    expect(downstreamUsesLite).toBe(false);
+    expect(bridgeCodexResponsesRequest(body, {
+      threadId: 'thread', downstreamUsesLite, upstreamUsesLite: false,
+    }).body).toEqual(body);
   });
 });
 
@@ -221,6 +233,51 @@ describe('standard to Responses Lite', () => {
       call_id: 'call_1',
       output: [{ type: 'input_image', image_url: 'data:image/png;base64,y' }],
     });
+  });
+
+  test('keeps unchanged content containers and only copies image-detail paths', () => {
+    const text = { type: 'input_text' as const, text: 'hello' };
+    const image = { type: 'input_image' as const, image_url: 'data:image/png;base64,x', detail: 'high' as const };
+    const input: OpenAIResponsesInputItem[] = [
+      { type: 'message', role: 'user', content: [text] },
+      { type: 'function_call_output', call_id: 'c1', output: [text] },
+      { type: 'custom_tool_call_output', call_id: 'c2', output: [{ type: 'input_image', image_url: 'data:image/png;base64,x' }] },
+      { type: 'message', role: 'user', content: [text, image] },
+      { type: 'function_call_output', call_id: 'c3', output: [image] },
+      { type: 'custom_tool_call_output', call_id: 'c4', output: [image] },
+    ];
+    const bridged = bridgeCodexResponsesRequest(requestBody({ input }), {
+      threadId: 'thread', downstreamUsesLite: false, upstreamUsesLite: true,
+    }).body;
+    expect(input).toHaveLength(6);
+    for (let index = 0; index < 3; index++) expect(bridged.input[index + 1]).toBe(input[index]);
+    for (let index = 3; index < 6; index++) expect(bridged.input[index + 1]).not.toBe(input[index]);
+    const changed = bridged.input[4] as Extract<OpenAIResponsesInputItem, { type: 'message' }>;
+    expect(changed.content).toEqual([text, { type: 'input_image', image_url: image.image_url }]);
+    if (!Array.isArray(changed.content)) throw new Error('expected array content');
+    expect(changed.content[0]).toBe(text);
+    expect(changed.content[1]).not.toBe(image);
+    expect(image.detail).toBe('high');
+  });
+
+  test.each(['function', 'custom'] as const)('preserves historical %s call input across Lite turns', type => {
+    const tool = type === 'function' ? functionTool('lookup') : customTool('lookup');
+    const call: OpenAIResponsesInputItem = type === 'function'
+      ? { type: 'function_call', call_id: 'c1', name: 'lookup', arguments: '{}', status: 'completed' }
+      : { type: 'custom_tool_call', call_id: 'c1', name: 'lookup', input: 'hello' };
+    const output: OpenAIResponsesInputItem = type === 'function'
+      ? { type: 'function_call_output', call_id: 'c1', output: 'done' }
+      : { type: 'custom_tool_call_output', call_id: 'c1', output: 'done' };
+    const body = requestBody({ tools: [tool] });
+    const first = bridgeCodexResponsesRequest(body, {
+      threadId: 'thread', downstreamUsesLite: false, upstreamUsesLite: true,
+    });
+    const second = bridgeCodexResponsesRequest({ ...body, input: [...body.input, call, output] }, {
+      threadId: 'thread', downstreamUsesLite: false, upstreamUsesLite: true,
+    });
+    expect(second.body.input[0]).toEqual(first.body.input[0]);
+    expect(second.body.input[2]).toBe(call);
+    expect(second.body.input[3]).toBe(output);
   });
 
   test('generates stable thread-scoped IDs', () => {
@@ -464,6 +521,38 @@ describe('Responses request echo restoration', () => {
     expect(restored.reasoning).toEqual({ effort: 'low', context: 'current_turn' });
   });
 
+  test('restores mixed Lite declarations without hiding effective Lite controls', () => {
+    const tools = [functionTool('lookup')];
+    const bridge = bridgeCodexResponsesRequest(requestBody({
+      tools,
+      instructions: 'Base',
+      parallel_tool_calls: true,
+      reasoning: { effort: 'low', context: 'current_turn' },
+    }), { threadId: 'thread', downstreamUsesLite: true, upstreamUsesLite: true });
+    const wire = response({
+      tools: (bridge.body.input[0] as Extract<OpenAIResponsesInputItem, { type: 'additional_tools' }>).tools,
+      instructions: null,
+      parallel_tool_calls: false,
+      reasoning: { effort: 'low', context: 'all_turns' },
+    });
+    expect(bridge.requestEchoes).toEqual({ tools, instructions: 'Base' });
+    const restored = restoreCodexResponsesResult(wire, bridge.callableIdentities, bridge.requestEchoes);
+    expect(restored.tools).toBe(tools);
+    expect(restored.instructions).toBe('Base');
+    expect(restored.parallel_tool_calls).toBe(false);
+    expect(restored.reasoning).toEqual(wire.reasoning);
+    expect(restoreCodexResponsesEvent({ type: 'response.completed', response: wire } as OpenAIResponsesStreamEvent,
+      bridge.callableIdentities, bridge.requestEchoes)).toMatchObject({ response: restored });
+  });
+
+  test('does not restore unchanged declaration fields on a native Lite request', () => {
+    const bridge = bridgeCodexResponsesRequest(requestBody({
+      input: [additionalTools('at_client', []), taggedInstructions('msg_client', 'Base')],
+      parallel_tool_calls: true,
+    }), { threadId: 'thread', downstreamUsesLite: true, upstreamUsesLite: true });
+    expect(bridge.requestEchoes).toBeUndefined();
+  });
+
   test('removes lifted standard request fields from a Lite-facing response', () => {
     const body = requestBody({
       input: [
@@ -559,33 +648,16 @@ describe('Responses Lite callable identity restoration', () => {
     expect(restoredFrames[1]).toEqual({ type: 'done' });
   });
 
-  test('does not guess when two declarations collapse to one wire identity', () => {
-    const bridge = bridgeCodexResponsesRequest(requestBody({
+  test.each(['function', 'custom'] as const)('rejects a flat callable colliding with a namespaced %s', type => {
+    const child = (type === 'function' ? functionTool('same') : customTool('same')) as
+      Extract<OpenAIResponsesTool, { type: 'function' | 'custom' }>;
+    expect(() => bridgeCodexResponsesRequest(requestBody({
       tools: [
         functionTool('same'),
-        {
-          type: 'namespace',
-          name: 'functions',
-          description: '',
-          tools: [customTool('same') as Extract<OpenAIResponsesTool, { type: 'custom' }>],
-        },
+        { type: 'namespace', name: 'functions', description: '', tools: [child] },
       ],
-    }), { threadId: 'thread', downstreamUsesLite: false, upstreamUsesLite: true });
-    const ambiguous = {
-      type: 'function_call',
-      id: 'fc_1',
-      call_id: 'call_1',
-      name: 'same',
-      namespace: 'functions',
-      arguments: '{}',
-      status: 'completed',
-    } as const;
-
-    const restored = restoreCodexResponsesEvent({
-      type: 'response.output_item.done',
-      output_index: 0,
-      item: ambiguous,
-    }, bridge.callableIdentities);
-    expect((restored as Extract<OpenAIResponsesStreamEvent, { type: 'response.output_item.done' }>).item).toEqual(ambiguous);
+    }), { threadId: 'thread', downstreamUsesLite: false, upstreamUsesLite: true })).toThrow(
+      'Codex Responses Lite cannot preserve distinct callable identities for ["functions","same"]',
+    );
   });
 });
