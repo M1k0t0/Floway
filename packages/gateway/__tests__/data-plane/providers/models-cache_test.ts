@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
+import { toPublicModel } from '../../../src/data-plane/models/load.ts';
+import { internalModelFromProviderModel } from '../../../src/data-plane/providers/catalog.ts';
 import { clearInFlightForTesting, fetchUpstreamModelsCached, MODEL_CATALOG_REVISION } from '../../../src/data-plane/providers/models-cache.ts';
 import type { GatewayProvider } from '../../../src/data-plane/providers/registry.ts';
 import { initRepo } from '../../../src/repo/index.ts';
@@ -303,6 +305,50 @@ describe('fetchUpstreamModelsCached', () => {
     expect(result.map(model => model.id)).toEqual(['current-catalog']);
     expect(fetchFn).toHaveBeenCalledTimes(1);
     expect((await storedCache(repo))?.revision).toBe(MODEL_CATALOG_REVISION);
+  });
+
+  test('revision 10 Codex catalog hydrates cold and private Lite metadata survives SQL without public leakage', async () => {
+    const memory = await setupRepo();
+    const row = await memory.upstreams.getById(UPSTREAM_ID);
+    if (!row) throw new Error('upstream row missing');
+    const db = await createSqliteTestDb();
+    const repo = new SqlRepo(db);
+    initRepo(repo);
+    await repo.upstreams.save(row);
+    const model = stubProviderModel({ id: 'future-codex-model', endpoints: { openaiResponses: {} }, providerData: { useResponsesLite: true } });
+    await db.prepare('UPDATE upstreams SET models_cache_json = ? WHERE id = ?').bind(JSON.stringify({
+      revision: 10,
+      fetchedAt: Date.now(),
+      models: [{ ...model, providerData: undefined, enabledFlags: [] }],
+      lastError: null,
+    }), UPSTREAM_ID).run();
+    const oldRow = await repo.upstreams.getById(UPSTREAM_ID);
+    expect(MODEL_CATALOG_REVISION).toBe(11);
+    expect(oldRow?.modelsCache).toBeNull();
+    const fetchFn = vi.fn(async () => [model]);
+    const fresh = await fetchUpstreamModelsCached(stubInstance(fetchFn, oldRow!.modelsCache), { scheduler: () => {}, fetcher: directFetcher });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fresh[0]!.providerData).toEqual({ useResponsesLite: true });
+
+    const stored = (await repo.upstreams.getById(UPSTREAM_ID))?.modelsCache;
+    expect(stored?.revision).toBe(11);
+    const cached = stored?.models[0];
+    if (!cached) throw new Error('fresh catalog did not round-trip through SQL');
+    expect(cached.providerData).toEqual({ useResponsesLite: true });
+    expect(cached.enabledFlags).toBeInstanceOf(Set);
+    const warmFetch = vi.fn(async () => { throw new Error('warm cache must not fetch'); });
+    const warm = await fetchUpstreamModelsCached(stubInstance(warmFetch, stored), { scheduler: () => {}, fetcher: directFetcher });
+    expect(warmFetch).not.toHaveBeenCalled();
+    expect(warm[0]!.providerData).toEqual({ useResponsesLite: true });
+
+    const internal = internalModelFromProviderModel(cached, UPSTREAM_ID);
+    expect(internal.providerModels?.[UPSTREAM_ID]?.providerData).toEqual({ useResponsesLite: true });
+    expect(internal).not.toHaveProperty('providerData');
+    const publicModel = toPublicModel(internal);
+    expect(publicModel.endpoints).toEqual({ openaiResponses: {} });
+    for (const field of ['providerData', 'providerModels', 'useResponsesLite', 'use_responses_lite']) {
+      expect(JSON.stringify(publicModel)).not.toContain(field);
+    }
   });
 
   test('an old-shape stale SQL cache hydrates cold and is replaced by a current fetch', async () => {
