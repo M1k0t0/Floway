@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
 import {
   bridgeCodexResponsesRequest,
@@ -383,6 +383,82 @@ describe('standard to Responses Lite', () => {
 });
 
 describe('Responses Lite to standard', () => {
+  test.each([
+    { name: 'identical preferred names', namespace: 'n'.repeat(64), reservePreferred: false },
+    { name: 'distinct names sharing truncated suffix prefixes', namespace: 'n'.repeat(59), reservePreferred: true },
+  ])('bounds collision checks linearly for $name', ({ namespace, reservePreferred }) => {
+    const count = 1000;
+    const children = Array.from({ length: count }, (_, index) => ({
+      type: 'function' as const,
+      name: String(index).padStart(4, '0'),
+      parameters: { type: 'object' },
+    }));
+    const reserved = reservePreferred
+      ? children.map(child => functionTool(`${namespace}_${child.name}`))
+      : [];
+    const body = requestBody({
+      tools: reserved,
+      input: [additionalTools('at_source', [{ type: 'namespace', name: namespace, description: '', tools: children }])],
+    });
+    const lookups = vi.spyOn(Set.prototype, 'has');
+    let bridge: ReturnType<typeof liftCodexResponsesLiteRequest>;
+    let checks: number;
+    try {
+      bridge = liftCodexResponsesLiteRequest(body, { flattenNamespaces: true });
+      checks = lookups.mock.calls.length;
+    } finally {
+      lookups.mockRestore();
+    }
+    const names = bridge.body.tools!.slice(reserved.length).map(tool => {
+      if (tool.type !== 'function') throw new Error('expected a flattened function');
+      return tool.name;
+    });
+    expect(names).toHaveLength(count);
+    expect(new Set(names).size).toBe(count);
+    expect(names.every(name => name.length <= 64)).toBe(true);
+    expect(bridge.callableIdentities.byWireName.size).toBe(count + reserved.length);
+    expect(checks).toBeGreaterThanOrEqual(count);
+    expect(checks).toBeLessThanOrEqual(2 * count + reserved.length);
+  });
+
+  test('preserves suffix order across shared prefixes, digit widths, reserved names, and duplicate declarations', () => {
+    const namespace = 'n'.repeat(59);
+    const prefix = `${namespace}_`;
+    const childNames = ['aaaa', 'aaab', 'aaac', 'a', 'aa', 'aaaa'];
+    const reserved = [
+      ...childNames.slice(0, -1).map(name => `${prefix}${name}`),
+      ...Array.from({ length: 8 }, (_, index) => `${prefix}aa_${index + 2}`),
+      `${prefix}a_10`,
+      `${prefix}a_12`,
+    ];
+    const body = requestBody({
+      tools: reserved.map(functionTool),
+      input: [
+        additionalTools('at_source', [{
+          type: 'namespace', name: namespace, description: '',
+          tools: childNames.map(name => ({ type: 'function', name, parameters: { type: 'object' } })),
+        }]),
+        { type: 'function_call', call_id: 'c1', name: 'aa', namespace, arguments: '{}', status: 'completed' },
+      ],
+      tool_choice: { type: 'function', name: `${namespace}.aaaa` },
+    });
+    const bridge = liftCodexResponsesLiteRequest(body, { flattenNamespaces: true });
+    const names = bridge.body.tools!.slice(reserved.length).map(tool => {
+      if (tool.type !== 'function') throw new Error('expected a flattened function');
+      return tool.name;
+    });
+    expect(names).toEqual([
+      `${prefix}a_11`, `${prefix}a_13`, `${prefix}a_14`,
+      `${prefix}a_2`, `${prefix}a_15`, `${prefix}a_11`,
+    ]);
+    expect(bridge.body.input[0]).toEqual({ type: 'function_call', call_id: 'c1', name: `${prefix}a_15`, arguments: '{}', status: 'completed' });
+    expect(bridge.body.tool_choice).toEqual({ type: 'function', name: `${prefix}a_11` });
+    expect(restoreCodexResponsesEvent({
+      type: 'response.output_item.done', output_index: 0,
+      item: { type: 'function_call', call_id: 'c1', name: `${prefix}a_15`, arguments: '{}', status: 'completed' },
+    }, bridge.callableIdentities)).toMatchObject({ item: body.input[1] });
+  });
+
   test('flattens callable namespaces with collision-safe names and reversible history and choices', () => {
     const body = requestBody({
       tools: [functionTool('functions_lookup')],

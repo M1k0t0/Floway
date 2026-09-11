@@ -421,6 +421,7 @@ const flattenCallableNamespaces = (bridge: CodexResponsesBridgeResult): CodexRes
   if (!declared.some(tool => tool.type === 'namespace')) return bridge;
   const flatNames = new Set(declared.filter(isCallableTool).map(tool => tool.name));
   const reservedNames = new Set(flatNames);
+  const nextSuffixes = new Map<string, number>();
   const sourceToTarget = new Map<string, string>();
   const qualifiedToTarget = new Map<string, string>();
   const entries = new Map<string, CallableIdentity>();
@@ -441,9 +442,23 @@ const flattenCallableNamespaces = (bridge: CodexResponsesBridgeResult): CodexRes
       if (name === undefined) {
         const preferred = `${tool.name}_${child.name}`.replaceAll(/[^a-zA-Z0-9_-]/g, '_').slice(0, MAX_FLAT_TOOL_NAME_LENGTH);
         name = preferred;
-        for (let index = 2; reservedNames.has(name); index++) {
-          const suffix = `_${index}`;
-          name = `${preferred.slice(0, MAX_FLAT_TOOL_NAME_LENGTH - suffix.length)}${suffix}`;
+        if (reservedNames.has(name)) {
+          let index = 2;
+          for (;;) {
+            const suffix = `_${index}`;
+            const prefix = preferred.slice(0, MAX_FLAT_TOOL_NAME_LENGTH - suffix.length);
+            // A shorter preferred name can share this prefix but still have unused one-digit suffixes.
+            const cursorKey = `${suffix.length}:${prefix}`;
+            const next = nextSuffixes.get(cursorKey);
+            if (next !== undefined && next > index) {
+              index = next;
+              continue;
+            }
+            name = `${prefix}${suffix}`;
+            nextSuffixes.set(cursorKey, index + 1);
+            if (!reservedNames.has(name)) break;
+            index++;
+          }
         }
         reservedNames.add(name);
         sourceToTarget.set(sourceKey, name);
