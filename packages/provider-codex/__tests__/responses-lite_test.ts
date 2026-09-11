@@ -209,11 +209,12 @@ describe('Responses Lite inverse repair', () => {
     expect(restored.tool_choice).toBe('auto');
   });
 
-  test('repairs both callable event families through interleaved item lifecycles', async () => {
+  test.each([undefined, '', 'functions'])('repairs interleaved callable event families with default namespace %j', async namespace => {
     const encoded = encodeCodexResponsesLiteRequest(requestBody({ tools: [functionTool('lookup'), customTool('shell')] }), 'thread');
     const vendor = { encrypted_content: 'opaque+encrypted==', input: 'opaque input', arguments: 'opaque arguments' };
-    const lookup = { type: 'custom_tool_call' as const, id: 'item_lookup', call_id: 'call_lookup', namespace: 'functions', name: 'lookup', input: '', vendor };
-    const shell = { type: 'function_call' as const, id: 'item_shell', call_id: 'call_shell', namespace: 'functions', name: 'shell', arguments: '', status: 'in_progress' as const, vendor };
+    const wireNamespace = namespace === undefined ? {} : { namespace };
+    const lookup = { type: 'custom_tool_call' as const, id: 'item_lookup', call_id: 'call_lookup', ...wireNamespace, name: 'lookup', input: '', vendor };
+    const shell = { type: 'function_call' as const, id: 'item_shell', call_id: 'call_shell', ...wireNamespace, name: 'shell', arguments: '', status: 'in_progress' as const, vendor };
     const standardLookup = { type: 'function_call' as const, id: lookup.id, call_id: lookup.call_id, name: lookup.name, arguments: '', status: 'in_progress' as const, vendor };
     const standardShell = { type: 'custom_tool_call' as const, id: shell.id, call_id: shell.call_id, name: shell.name, input: '', status: 'in_progress' as const, vendor };
     const opaque = { type: 'reasoning' as const, id: 'rs_opaque', summary: [], encrypted_content: 'reasoning+opaque==' };
@@ -284,18 +285,22 @@ describe('Responses Lite inverse repair', () => {
     });
   });
 
-  test('repairs namespace and function/custom identity on items, results, compact and frames', async () => {
+  test.each([undefined, '', 'functions'])('repairs default namespace %j on items, results, compact and frames', async namespace => {
     const encoded = encodeCodexResponsesLiteRequest(requestBody({
       tools: [
         functionTool('lookup'), customTool('shell'),
         { type: 'namespace', name: 'database', description: '', tools: [customTool('query')] },
+        { type: 'namespace', name: 'functions', description: '', tools: [functionTool('explicit')] },
       ],
     }), 'thread');
+    const wireNamespace = namespace === undefined ? {} : { namespace };
     const wire: OpenAIResponsesOutputItem[] = [
-      { type: 'custom_tool_call', id: 'c1', call_id: 'c1', name: 'lookup', namespace: 'functions', input: '{}' },
-      { type: 'function_call', id: 'c2', call_id: 'c2', name: 'shell', namespace: 'functions', arguments: 'ls', status: 'completed' },
+      { type: 'custom_tool_call', id: 'c1', call_id: 'c1', name: 'lookup', ...wireNamespace, input: '{}' },
+      { type: 'function_call', id: 'c2', call_id: 'c2', name: 'shell', ...wireNamespace, arguments: 'ls', status: 'completed' },
       { type: 'function_call', id: 'c3', call_id: 'c3', name: 'query', namespace: 'database', arguments: 'select', status: 'completed' },
-      { type: 'function_call', id: 'c4', call_id: 'c4', name: 'future', namespace: 'unknown', arguments: 'opaque', status: 'completed' },
+      { type: 'function_call', id: 'c4', call_id: 'c4', name: 'explicit', ...wireNamespace, arguments: '{}', status: 'completed' },
+      { type: 'function_call', id: 'c5', call_id: 'c5', name: 'shell', namespace: 'unknown', arguments: 'opaque', status: 'completed' },
+      { type: 'function_call', id: 'c6', call_id: 'c6', name: 'future', ...wireNamespace, arguments: 'opaque', status: 'completed' },
       { type: 'reasoning', id: 'rs_1', summary: [], encrypted_content: 'encrypted+opaque==' },
       { type: 'future_output', encrypted_content: 'future+opaque==', extra: { value: true } } as unknown as OpenAIResponsesOutputItem,
     ];
@@ -303,7 +308,8 @@ describe('Responses Lite inverse repair', () => {
       { type: 'function_call', id: 'c1', call_id: 'c1', name: 'lookup', arguments: '{}', status: 'completed' },
       { type: 'custom_tool_call', id: 'c2', call_id: 'c2', name: 'shell', input: 'ls', status: 'completed' },
       { type: 'custom_tool_call', id: 'c3', call_id: 'c3', name: 'query', namespace: 'database', input: 'select', status: 'completed' },
-      ...wire.slice(3),
+      { type: 'function_call', id: 'c4', call_id: 'c4', name: 'explicit', namespace: 'functions', arguments: '{}', status: 'completed' },
+      ...wire.slice(4),
     ];
     for (const type of ['response.output_item.added', 'response.output_item.done'] as const) {
       wire.forEach((item, output_index) => expect(restoreCodexResponsesEvent({ type, output_index, item }, encoded.callableIdentities)).toEqual({

@@ -82,6 +82,17 @@ const isAdditionalToolsItem = (
 const callableKey = (namespace: string | undefined, name: string): string =>
   JSON.stringify([namespace ?? null, name]);
 
+// Codex accepts absent and empty namespaces as the default function namespace.
+// Use the same lookup for output items and their streaming event lifecycles.
+// https://github.com/openai/codex/blob/6b9826e3aa83b1a5947db50f4332cb9c65f1b340/codex-rs/protocol/src/tool_name.rs#L39-L44
+const lookupLiteCallable = (
+  identities: CodexResponsesCallableIdentityMap,
+  item: Pick<CallableIdentity, 'namespace' | 'name'>,
+): CallableIdentity | undefined => {
+  const namespace = item.namespace ?? DEFAULT_FUNCTION_NAMESPACE;
+  return identities.byWireName.get(callableKey(namespace === '' ? DEFAULT_FUNCTION_NAMESPACE : namespace, item.name));
+};
+
 const registerCallable = (
   entries: Map<string, CallableIdentity>,
   wire: CallableIdentity,
@@ -290,7 +301,7 @@ const restoreCallableItem = (
   missingStatus: 'in_progress' | 'completed' = 'completed',
 ): OpenAIResponsesOutputItem => {
   if (item.type !== 'function_call' && item.type !== 'custom_tool_call') return item;
-  const standard = identities.byWireName.get(callableKey(item.namespace, item.name));
+  const standard = lookupLiteCallable(identities, item);
   if (standard === undefined) return item;
 
   const restored = { ...item } as Record<string, unknown>;
@@ -422,7 +433,7 @@ export const restoreCodexResponsesFrames = async function* (
     if (event.type === 'response.output_item.added' || event.type === 'response.output_item.done') {
       const item = event.item;
       if ((item.type === 'function_call' || item.type === 'custom_tool_call') && typeof item.id === 'string') {
-        const standard = identities.byWireName.get(callableKey(item.namespace, item.name));
+        const standard = lookupLiteCallable(identities, item);
         if (standard !== undefined && standard.type !== item.type) identitiesByItemId.set(item.id, standard);
       }
     }
