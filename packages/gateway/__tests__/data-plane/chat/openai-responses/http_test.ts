@@ -10,10 +10,13 @@ import * as liteCodec from '../../../../src/data-plane/codex/responses-lite.ts';
 import { initDumpBroker, initDumpStore } from '../../../../src/dump/registry.ts';
 import type { AuthVars } from '../../../../src/middleware/auth.ts';
 import { initRepo } from '../../../../src/repo/index.ts';
+import { SqlRepo } from '../../../../src/repo/sql.ts';
 import type { ApiKey, User } from '../../../../src/repo/types.ts';
 import { installDumpStubs } from '../../../dump/test-fixtures.ts';
 import { InMemoryRepo } from '../../../repo/memory.ts';
+import { createSqlJsDatabase, migrationSqlByFilename, wrapSqlJsDatabase } from '../../../repo/test-sqlite.ts';
 import { flushAsyncWork } from '../../../test-utils/app.ts';
+import { initFileStore, MemoryFileStore } from '@floway-dev/platform';
 import type { AnthropicMessagesStreamEvent } from '@floway-dev/protocols/anthropic-messages';
 import { type AliasRules, doneFrame, eventFrame, type ModelEndpoints, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
@@ -947,6 +950,56 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
     assertEquals(native?.tools, [namespace]);
   });
 
+  test(`Responses Lite ${target} projects stored Standard carriers after hydration`, async () => {
+    const repo = installRepo();
+    const carrier = {
+      type: 'additional_tools', role: 'developer', id: 'at_standard_source',
+      tools: [{ type: 'namespace', name: 'files', description: 'File policy', tools: [{ type: 'function', name: 'read', parameters: { type: 'object' } }] }],
+    };
+    queueCompletedResponse();
+    const seed = await makeApp().request('/v1/responses', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'test-model', store: true, input: [carrier, { role: 'user', content: 'original' }] }),
+    });
+    assertEquals(seed.status, 200);
+    const previous = await seed.json() as OpenAIResponsesResult;
+    await flushAsyncWork();
+    const originalSnapshot = await repo.openaiResponsesSnapshots.lookup(API_KEY_ID, previous.id, 0);
+    assert(originalSnapshot !== null);
+    assertEquals(originalSnapshot.sourceItemIds, undefined);
+    assert(originalSnapshot.itemIds.includes(carrier.id));
+    const bodies: Record<string, unknown>[] = [];
+    for (const source of [
+      { input: [{ type: 'item_reference', id: carrier.id }, { role: 'user', content: 'follow-up' }] },
+      { input: [carrier, { role: 'user', content: 'follow-up' }] },
+      { previous_response_id: previous.id, input: [{ role: 'user', content: 'follow-up' }] },
+    ]) {
+      queueResolution([translatedNamespaceCandidate(target, body => bodies.push(structuredClone(body)))]);
+      const response = await makeApp().request('/v1/responses', {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-openai-internal-codex-responses-lite': 'true' },
+        body: JSON.stringify({ model: 'test-model', store: true, ...source }),
+      });
+      const result = await response.json() as OpenAIResponsesResult;
+      assertEquals(response.status, 200, JSON.stringify(result));
+      await flushAsyncWork();
+      const snapshot = await repo.openaiResponsesSnapshots.lookup(API_KEY_ID, result.id, 0);
+      assertEquals(snapshot?.sourceItemIds, [carrier.id]);
+      const [storedCarrier] = await repo.openaiResponsesItems.lookupMany(API_KEY_ID, [carrier.id], 0);
+      assertEquals(storedCarrier?.payload.item, carrier);
+      const referencedRows = await repo.openaiResponsesItems.lookupMany(
+        API_KEY_ID,
+        [...(snapshot?.itemIds ?? []), ...(snapshot?.sourceItemIds ?? [])],
+        0,
+      );
+      assert(referencedRows.every(row => row.payload.private === undefined), 'source context must use ordinary item rows');
+      const body = bodies.at(-1)!;
+      assertEquals((body.tools as Array<{ name?: string; function?: { name: string } }>).map(tool => tool.name ?? tool.function?.name), ['files_read']);
+      assert(!JSON.stringify(body.messages).includes('additional_tools'));
+    }
+    assertEquals(bodies[0]!.tools, bodies[1]!.tools);
+    assertEquals(bodies[0]!.messages, bodies[1]!.messages);
+  });
+
   test(`Responses Lite ${target} API-error candidate cannot contaminate a native failover payload`, async () => {
     installRepo();
     const namespace = { type: 'namespace', name: 'files', description: '', tools: [{ type: 'function', name: 'read' }] };
@@ -1064,7 +1117,7 @@ for (const transport of ['json', 'stream', 'compact'] as const) {
   });
 }
 
-test('Responses Lite HTTP persists context per response branch without inheriting it in Standard requests', async () => {
+test('Responses Lite HTTP persists context per branch and preserves source history for Standard requests', async () => {
   const repo = installRepo();
   const bodies: Omit<CanonicalOpenAIResponsesPayload, 'model'>[] = [];
   const tools = [{ type: 'namespace', name: 'files', description: '', tools: [{ type: 'function', name: 'read', parameters: { type: 'object' } }] }];
@@ -1106,8 +1159,98 @@ test('Responses Lite HTTP persists context per response branch without inheritin
     'Read files first.', 'Query the database first.', 'Query the database first.', 'Read files first.', '',
   ]);
   assertEquals(bodies[3]!.input.flatMap(item => item.type === 'message' && item.role === 'user' ? [item.content] : []), ['first', 'continue original']);
-  assert(bodies.every(body => body.input.every(item => item.type !== 'additional_tools')), 'stored context must stay outside the public input history');
+  assert(bodies.slice(0, 4).every(body => body.input.every(item => item.type !== 'additional_tools')), 'Lite dispatch must use the projected history');
+  assertEquals(bodies[4]!.input.slice(0, 2), prefix(tools, 'Read files first.'));
 });
+
+for (const identified of [false, true]) {
+  test(`Responses Lite HTTP preserves ${identified ? 'supplied' : 'generated'} source item identities across SQL reopen`, async () => {
+    initFileStore(new MemoryFileStore());
+    let database = await createSqlJsDatabase();
+    for (const [, sql] of migrationSqlByFilename) database.run(sql);
+    let repo = new SqlRepo(wrapSqlJsDatabase(database));
+    await repo.apiKeys.save(buildApiKey());
+    initRepo(repo);
+    const tools = [{ type: 'namespace', name: 'functions', description: '', tools: [{ type: 'function', name: 'read', parameters: { type: 'object' } }] }];
+    const input = [
+      { type: 'additional_tools', role: 'developer', tools, ...(identified ? { id: 'at_source' } : {}) },
+      {
+        type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'Retain these base instructions.' }],
+        internal_chat_message_metadata_passthrough: { content_item_kinds: ['model.base_instructions'] }, ...(identified ? { id: 'msg_source' } : {}),
+      },
+      { type: 'message', role: 'user', content: 'first' },
+    ];
+    const bodies: Array<Omit<CanonicalOpenAIResponsesPayload, 'model'>> = [];
+    const effectiveReasoning = { effort: 'high', summary: 'detailed', context: 'all_turns' } as const;
+    const candidate = makeCandidate({
+      callOpenAIResponses: async (_model, body) => {
+        bodies.push(structuredClone(body) as Omit<CanonicalOpenAIResponsesPayload, 'model'>);
+        return {
+          action: 'generate', ok: true, modelKey: 'test-model-key',
+          events: makeProviderEvents(openaiResponsesResultToEvents({ ...makeOpenAIResponsesResult(), output: [], reasoning: effectiveReasoning, parallel_tool_calls: false }).map(frame => frame.event)),
+        };
+      },
+    });
+    const send = async (items: unknown[], previous_response_id?: string, lite = true) => {
+      queueResolution([candidate]);
+      const response = await makeApp().request('/v1/responses', {
+        method: 'POST', headers: { 'content-type': 'application/json', ...(lite ? { 'x-openai-internal-codex-responses-lite': 'true' } : {}) },
+        body: JSON.stringify({ model: 'test-model', store: true, input: items, previous_response_id }),
+      });
+      const result = await response.json() as OpenAIResponsesResult;
+      assertEquals(response.status, 200, JSON.stringify(result));
+      assertEquals(result.reasoning, effectiveReasoning);
+      assertEquals(result.parallel_tool_calls, false);
+      await flushAsyncWork();
+      return result;
+    };
+    try {
+      const first = await send(input);
+      const snapshot = await repo.openaiResponsesSnapshots.lookup(API_KEY_ID, first.id, 0);
+      assert(snapshot !== null);
+      const sourceIds = snapshot.sourceItemIds;
+      assert(sourceIds !== undefined);
+      assertEquals(snapshot.itemIds.slice(0, 2), sourceIds);
+      if (identified) assertEquals(sourceIds, ['at_source', 'msg_source']);
+      const rows = await repo.openaiResponsesItems.lookupMany(API_KEY_ID, sourceIds, 0);
+      for (const [index, id] of sourceIds.entries()) assertEquals(rows.find(row => row.id === id)?.payload.item, input[index]);
+      const snapshotRows = await repo.openaiResponsesItems.lookupMany(
+        API_KEY_ID,
+        [...snapshot.itemIds, ...sourceIds],
+        0,
+      );
+      assert(snapshotRows.every(row => row.payload.private === undefined), 'source context must not create a private item row');
+
+      const image = database.export();
+      database.close();
+      database = await createSqlJsDatabase(image);
+      repo = new SqlRepo(wrapSqlJsDatabase(database));
+      initRepo(repo);
+      assertEquals(await repo.openaiResponsesSnapshots.lookup(API_KEY_ID, first.id, 0), snapshot);
+      await send([{ type: 'message', role: 'user', content: 'continue' }], first.id);
+      assertEquals(bodies.at(-1)?.tools, tools);
+      assertEquals(bodies.at(-1)?.instructions, 'Retain these base instructions.');
+      for (const id of sourceIds) {
+        for (const previous of [undefined, first.id]) await send([{ type: 'item_reference', id }], previous);
+      }
+      await send(sourceIds.map(id => ({ type: 'item_reference', id })));
+      assertEquals(bodies.at(-1)?.tools, tools);
+      assertEquals(bodies.at(-1)?.instructions, 'Retain these base instructions.');
+      assertEquals(bodies.at(-1)?.input, []);
+      const standardSeed = await send(input, undefined, false);
+      await send([{ type: 'message', role: 'user', content: 'Lite continuation of Standard history' }], standardSeed.id);
+      assertEquals(bodies.at(-1)?.tools, tools);
+      assertEquals(bodies.at(-1)?.instructions, undefined);
+      assertEquals(bodies.at(-1)?.input.find(item => item.type === 'message' && item.role === 'developer'), input[1]);
+      await send([{ type: 'message', role: 'user', content: 'Standard continuation' }], first.id, false);
+      assertEquals(bodies.at(-1)?.input.slice(0, 2), input.slice(0, 2));
+      assertEquals(bodies.at(-1)?.tools, undefined);
+    } finally {
+      await flushAsyncWork();
+      database.close();
+    }
+  });
+}
 
 test('Responses Lite client echoes run after item persistence and before required resource completion', async () => {
   const repo = installRepo();

@@ -43,25 +43,18 @@ export class PreviousResponseNotFoundError extends Error {
 export const expandPreviousResponseId = async (
   payload: CanonicalOpenAIResponsesPayload,
   store: OpenAIResponsesStatefulStore,
-  inputContext?: ResponsesLiteInputContext,
-): Promise<CanonicalOpenAIResponsesPayload> => {
+): Promise<{ payload: CanonicalOpenAIResponsesPayload; sourceItemIds?: readonly string[] }> => {
   const previousResponseId = payload.previous_response_id;
   let prepared = payload;
-  let previousContext: unknown;
+  let sourceItemIds: readonly string[] | undefined;
   if (previousResponseId != null) {
     const snapshot = await store.loadSnapshot(previousResponseId);
     if (snapshot === null) throw new PreviousResponseNotFoundError(previousResponseId);
-    if (inputContext !== undefined && snapshot.contextItemId !== undefined) {
-      previousContext = store.getItemById(snapshot.contextItemId)?.payload.private;
-      if (previousContext === undefined) throw new Error(`OpenAI Responses snapshot context missing: ${snapshot.contextItemId}`);
-    }
+    sourceItemIds = snapshot.sourceItemIds;
     const { previous_response_id: _previous, ...rest } = payload;
     prepared = { ...rest, input: [...snapshot.itemIds.map(id => ({ type: 'item_reference' as const, id })), ...payload.input] };
   }
-  if (inputContext === undefined) return prepared;
-  const restored = restoreResponsesLiteInputContext(prepared, inputContext, previousContext);
-  await store.stageSnapshotContext(restored.context);
-  return restored.payload;
+  return { payload: prepared, sourceItemIds };
 };
 
 export type OpenAIResponsesServePlan =
@@ -86,10 +79,12 @@ export const prepareOpenAIResponsesServePlan = async (args: {
   readonly ctx: ChatGatewayCtx;
   readonly inputContext?: ResponsesLiteInputContext;
 }): Promise<OpenAIResponsesServePlan> => {
-  const { payload, ctx } = args;
+  const { ctx } = args;
+  const payload = args.inputContext?.source ?? args.payload;
   const store = ctx.store;
-  const prepared = await expandPreviousResponseId(payload, store, args.inputContext);
-  const inputToStage = prepared.input.slice(prepared.input.length - payload.input.length);
+  const { payload: prepared, sourceItemIds } = await expandPreviousResponseId(payload, store);
+  const currentInputStart = prepared.input.length - payload.input.length;
+  const inputToStage = prepared.input.slice(currentInputStart);
   const { candidates, sawModel, failedUpstreams } = await enumerateModelCandidates({
     upstreamIds: ctx.upstreamIds,
     model: prepared.model,
@@ -107,7 +102,13 @@ export const prepareOpenAIResponsesServePlan = async (args: {
     if (failure === null) throw error;
     return { kind: 'failure', result: renderOpenAIResponsesFailure(failure) };
   }
-  const affinity = await analyzeOpenAIResponsesAffinity(hydrated.payload, ctx.affinity.codec);
+  const lite = args.inputContext === undefined ? undefined : restoreResponsesLiteInputContext(hydrated.payload, {
+    sourceInput: prepared.input,
+    currentInputStart,
+    sourceItemIds,
+    getItem: id => store.getItemById(id)?.payload.item,
+  });
+  const affinity = await analyzeOpenAIResponsesAffinity(lite?.payload ?? hydrated.payload, ctx.affinity.codec);
   const selection = selectAffinityCandidates(viable, affinity);
   if ('kind' in selection) return { kind: 'failure', result: renderOpenAIResponsesFailure(selection) };
   // Stage the user-supplied input from the original payload — not the
@@ -116,6 +117,7 @@ export const prepareOpenAIResponsesServePlan = async (args: {
   // Runs after the affinity walk so any `item_reference` in user-supplied
   // input has its target row loaded.
   await store.stageInputItems(inputToStage);
+  if (lite !== undefined) await store.stageSourceItems(lite.sourceItems);
 
   if (selection.candidates.length === 0) {
     return {

@@ -2,7 +2,6 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { InMemoryRepo } from './memory.ts';
 import { createSqliteTestDb, createSqlJsDatabase, mapRunChangeCount, migrationSqlByFilename, wrapSqlJsDatabase } from './test-sqlite.ts';
-import { createOpenAIResponsesHttpStore } from '../../src/data-plane/chat/openai-responses/items/store.ts';
 import { initRepo } from '../../src/repo/index.ts';
 import { hashOpenAIResponsesJson } from '../../src/repo/openai-responses-hash.ts';
 import { prepareStoredOpenAIResponsesPayload } from '../../src/repo/openai-responses-payload.ts';
@@ -131,19 +130,81 @@ describe.each(backends)('%s OpenAI Responses state repository', (_backend, makeR
     vi.setSystemTime(atDay(4));
     const repo = await makeRepo();
     await repo.apiKeys.save(apiKey());
-    await repo.openaiResponsesSnapshots.insert({ id: 'resp-a', apiKeyId: 'key-a', itemIds: ['new'], contextItemId: 'context-new', refreshedAt: atDay(3) });
-    await repo.openaiResponsesSnapshots.insert({ id: 'resp-a', apiKeyId: 'key-a', itemIds: ['old'], contextItemId: 'context-old', refreshedAt: atDay(2) });
+    await repo.openaiResponsesSnapshots.insert({ id: 'resp-a', apiKeyId: 'key-a', itemIds: ['new'], sourceItemIds: ['source-new'], refreshedAt: atDay(3) });
+    await repo.openaiResponsesSnapshots.insert({ id: 'resp-a', apiKeyId: 'key-a', itemIds: ['old'], sourceItemIds: ['source-old'], refreshedAt: atDay(2) });
 
     expect(await repo.openaiResponsesSnapshots.lookup('key-a', 'resp-a', 0)).toEqual({
       id: 'resp-a',
       apiKeyId: 'key-a',
       itemIds: ['new'],
-      contextItemId: 'context-new',
+      sourceItemIds: ['source-new'],
       refreshedAt: atDay(3),
     });
     expect(await repo.openaiResponsesSnapshots.lookup('key-a', 'resp-a', atDay(3, 1))).toBeNull();
     await repo.openaiResponsesSnapshots.insert({ id: 'resp-a', apiKeyId: 'key-a', itemIds: ['cleared'], refreshedAt: atDay(4) });
-    expect(await repo.openaiResponsesSnapshots.lookup('key-a', 'resp-a', 0)).not.toHaveProperty('contextItemId');
+    expect(await repo.openaiResponsesSnapshots.lookup('key-a', 'resp-a', 0)).not.toHaveProperty('sourceItemIds');
+  });
+
+  test('retains direct source-item order and duplicates', async () => {
+    const repo = await makeRepo();
+    await repo.apiKeys.save(apiKey());
+    const sourceItemIds = ['source-last', 'source-first', 'source-last'];
+    await repo.openaiResponsesSnapshots.insert({
+      id: 'resp-ordered-source-items',
+      apiKeyId: 'key-a',
+      itemIds: [],
+      sourceItemIds,
+      refreshedAt: atDay(3),
+    });
+
+    await expect(repo.openaiResponsesSnapshots.lookup('key-a', 'resp-ordered-source-items', 0)).resolves.toEqual({
+      id: 'resp-ordered-source-items',
+      apiKeyId: 'key-a',
+      itemIds: [],
+      sourceItemIds,
+      refreshedAt: atDay(3),
+    });
+  });
+
+  test('retains an explicit empty source-item list', async () => {
+    const repo = await makeRepo();
+    await repo.apiKeys.save(apiKey());
+    await repo.openaiResponsesSnapshots.insert({
+      id: 'resp-empty-source-items',
+      apiKeyId: 'key-a',
+      itemIds: [],
+      sourceItemIds: [],
+      refreshedAt: atDay(3),
+    });
+
+    await expect(repo.openaiResponsesSnapshots.lookup('key-a', 'resp-empty-source-items', 0)).resolves.toEqual({
+      id: 'resp-empty-source-items',
+      apiKeyId: 'key-a',
+      itemIds: [],
+      sourceItemIds: [],
+      refreshedAt: atDay(3),
+    });
+  });
+
+  test('clones source-item references at the repository boundary', async () => {
+    const repo = await makeRepo();
+    await repo.apiKeys.save(apiKey());
+    const sourceItemIds = ['source-original'];
+    await repo.openaiResponsesSnapshots.insert({
+      id: 'resp-cloned-source-items',
+      apiKeyId: 'key-a',
+      itemIds: [],
+      sourceItemIds,
+      refreshedAt: atDay(3),
+    });
+    sourceItemIds.push('source-mutated-after-insert');
+
+    const loaded = await repo.openaiResponsesSnapshots.lookup('key-a', 'resp-cloned-source-items', 0);
+    if (loaded?.sourceItemIds === undefined) throw new Error('source item references disappeared');
+    expect(loaded.sourceItemIds).toEqual(['source-original']);
+    (loaded.sourceItemIds as string[]).push('source-mutated-after-load');
+    expect((await repo.openaiResponsesSnapshots.lookup('key-a', 'resp-cloned-source-items', 0))?.sourceItemIds)
+      .toEqual(['source-original']);
   });
 
   test('a concurrent shrink does not change an in-flight request retention snapshot', async () => {
@@ -381,9 +442,9 @@ test('SQL performs no item or snapshot mutation after an earlier refresh in the 
   expect(await totalChanges()).toBe(beforeSameDayReuse + 2);
 });
 
-test('snapshot context migration preserves existing history without introducing context', async () => {
+test('0086 adds source item IDs without altering existing snapshot history', async () => {
   const raw = await createSqlJsDatabase();
-  const migrationName = '0084_responses_snapshot_context.sql';
+  const migrationName = '0086_responses_snapshot_context.sql';
   const migrationIndex = migrationSqlByFilename.findIndex(([name]) => name === migrationName);
   expect(migrationIndex).toBeGreaterThan(0);
   for (const [, sql] of migrationSqlByFilename.slice(0, migrationIndex)) raw.run(sql);
@@ -391,51 +452,18 @@ test('snapshot context migration preserves existing history without introducing 
     'INSERT INTO responses_snapshots (id, api_key_id, item_ids_json, refreshed_at) VALUES (?, ?, ?, ?)',
     ['resp_before_migration', 'key-a', '["msg-old"]', atDay(10)],
   );
-  for (const [, sql] of migrationSqlByFilename.slice(migrationIndex)) raw.run(sql);
+  const migration = migrationSqlByFilename[migrationIndex];
+  if (migration === undefined) throw new Error(`missing migration ${migrationName}`);
+  raw.run(migration[1]);
+
+  const columns = raw.exec('PRAGMA table_info(responses_snapshots)')[0]?.values.map(row => row[1]);
+  expect(columns).toContain('source_item_ids_json');
+  expect(columns).not.toContain('context_item_id');
 
   const repo = new SqlRepo(wrapSqlJsDatabase(raw));
   expect(await repo.openaiResponsesSnapshots.lookup('key-a', 'resp_before_migration', 0)).toEqual({
     id: 'resp_before_migration', apiKeyId: 'key-a', itemIds: ['msg-old'], refreshedAt: atDay(10),
   });
-});
-
-test('large snapshot context spills once and is reused across durable snapshots', async () => {
-  vi.useFakeTimers();
-  vi.setSystemTime(atDay(10));
-  const files = new MemoryFileStore();
-  initFileStore(files);
-  const db = await createSqliteTestDb();
-  const repo = new SqlRepo(db);
-  initRepo(repo);
-  const policy = apiKey();
-  await repo.apiKeys.save(policy);
-  const context = { tools: [{ type: 'function', name: 'read_file', description: largeContent() }], instructions: 'use the tools' };
-  const initial = createOpenAIResponsesHttpStore(policy, Date.now(), true);
-  await initial.stageSnapshotContext(context);
-  await initial.commitSnapshot('resp_context', 'append', []);
-  const snapshot = await repo.openaiResponsesSnapshots.lookup('key-a', 'resp_context', 0);
-  expect(snapshot?.itemIds).toEqual([]);
-  expect(snapshot?.contextItemId).toBeDefined();
-  const storedRow = await db.prepare('SELECT payload_file_key FROM responses_items WHERE id = ?').bind(snapshot!.contextItemId!).first<{ payload_file_key: string | null }>();
-  expect(typeof storedRow?.payload_file_key).toBe('string');
-  expect(await files.get(storedRow!.payload_file_key!)).not.toBeNull();
-
-  const reader = createOpenAIResponsesHttpStore(policy, Date.now(), false);
-  expect((await reader.loadSnapshot('resp_context'))?.contextItemId).toBe(snapshot!.contextItemId);
-  expect(reader.getItemById(snapshot!.contextItemId!)?.payload).toEqual({ item: null, private: context });
-
-  // A fresh request without previous_response_id also reuses the same content.
-  const next = createOpenAIResponsesHttpStore(policy, Date.now(), true);
-  await next.stageSnapshotContext(structuredClone(context));
-  await next.commitSnapshot('resp_context_reused', 'append', []);
-  expect((await repo.openaiResponsesSnapshots.lookup('key-a', 'resp_context_reused', 0))?.contextItemId).toBe(snapshot!.contextItemId);
-  expect(await db.prepare('SELECT COUNT(*) AS count FROM responses_items').first()).toEqual({ count: 1 });
-  expect(await db.prepare('SELECT payload_file_key FROM responses_items WHERE id = ?').bind(snapshot!.contextItemId!).first()).toEqual(storedRow);
-
-  vi.setSystemTime(atDay(11));
-  const refreshed = createOpenAIResponsesHttpStore(policy, Date.now(), true);
-  expect((await refreshed.loadSnapshot('resp_context'))?.contextItemId).toBe(snapshot!.contextItemId);
-  expect((await repo.openaiResponsesItems.lookupMany('key-a', [snapshot!.contextItemId!], 0))[0]?.refreshedAt).toBe(atDay(11));
 });
 
 test('SQL rejects shape-invalid snapshot item ids with both row identities', async () => {
@@ -448,6 +476,19 @@ test('SQL rejects shape-invalid snapshot item ids with both row identities', asy
 
   await expect(repo.openaiResponsesSnapshots.lookup('key-a', 'resp-invalid', 0)).rejects.toThrow(
     'responses_snapshots.item_ids_json is invalid for id=resp-invalid, api_key_id=key-a: 1',
+  );
+});
+
+test('SQL rejects shape-invalid snapshot source item ids with both row identities', async () => {
+  const db = await createSqliteTestDb();
+  const repo = new SqlRepo(db);
+  await repo.apiKeys.save(apiKey());
+  await db.prepare(
+    'INSERT INTO responses_snapshots (id, api_key_id, item_ids_json, source_item_ids_json, refreshed_at) VALUES (?, ?, ?, ?, ?)',
+  ).bind('resp-invalid-source', 'key-a', '[]', '["source-valid",42]', atDay(10)).run();
+
+  await expect(repo.openaiResponsesSnapshots.lookup('key-a', 'resp-invalid-source', 0)).rejects.toThrow(
+    'responses_snapshots.source_item_ids_json is invalid for id=resp-invalid-source, api_key_id=key-a: 1',
   );
 });
 

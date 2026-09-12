@@ -515,9 +515,9 @@ export interface StoredOpenAIResponsesSnapshot {
   id: string;
   apiKeyId: string;
   itemIds: string[];
-  // Server-only continuation configuration shares item storage (including
-  // compression and spill files), but is never part of the public history.
-  contextItemId?: string;
+  // Ordered source dependencies survive independently of public history.
+  // Preserve an explicit empty list separately from an absent source set.
+  sourceItemIds?: readonly string[];
   refreshedAt: number;
 }
 

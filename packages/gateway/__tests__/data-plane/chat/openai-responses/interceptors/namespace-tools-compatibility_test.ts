@@ -7,6 +7,7 @@ import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols
 import type { CanonicalOpenAIResponsesPayload, OpenAIResponsesResult, OpenAIResponsesStreamEvent, OpenAIResponsesTool } from '@floway-dev/protocols/openai-responses';
 import { eventResult, readUpstreamApiError } from '@floway-dev/provider';
 import { assert, assertEquals, assertRejects, stubModelCandidate, testTelemetryModelIdentity } from '@floway-dev/test-utils';
+import { TranslatorInputError } from '@floway-dev/translate';
 
 const invocation = (payload: CanonicalOpenAIResponsesPayload, targetApi: OpenAIResponsesInvocation['targetApi'] = 'openaiChatCompletions'): OpenAIResponsesInvocation => ({
   payload, targetApi, candidate: stubModelCandidate(), action: 'generate', headers: new Headers(),
@@ -260,5 +261,160 @@ test('namespace compatibility preserves error identity, distinguishes callable k
   await run(distinct);
   assertEquals(distinct.payload.tools?.map(tool => 'name' in tool ? tool.name : null), ['files_read', 'files_read_2']);
   const ambiguous = invocation({ ...request, tools: [{ type: 'namespace', name: 'a.b', description: '', tools: [functionTool('c')] }, { type: 'namespace', name: 'a', description: '', tools: [functionTool('b.c')] }], tool_choice: { type: 'function', name: 'a.b.c' } });
-  await assertRejects(() => run(ambiguous), TypeError, 'Ambiguous qualified OpenAI Responses callable name');
+  await assertRejects(() => run(ambiguous), TranslatorInputError, 'Ambiguous qualified OpenAI Responses callable name');
+});
+
+for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
+  test(`namespace compatibility retains parent and child descriptions for ${target}`, async () => {
+    const request: CanonicalOpenAIResponsesPayload = {
+      model: 'm', input: [], tools: [
+        { type: 'namespace', name: 'files', description: 'Read-only access. Never modify files.', tools: [{ ...functionTool('read'), description: 'Read a file.' }, { type: 'custom', name: 'inspect' }] },
+        { type: 'namespace', name: 'empty', description: '', tools: [{ ...functionTool('read'), description: 'Child-only description.' }] },
+      ],
+    };
+    const original = structuredClone(request);
+    const call = invocation(request, target);
+    await run(call);
+    assertEquals(call.payload.tools?.map(tool => 'description' in tool ? tool.description : undefined), ['Read-only access. Never modify files.\n\nRead a file.', 'Read-only access. Never modify files.', 'Child-only description.']);
+    assertEquals(request, original);
+  });
+
+  for (const tools of [null, [null], [{ type: 'function', name: 123 }]]) {
+    test(`namespace compatibility uses typed input errors for malformed ${target} namespace children ${JSON.stringify(tools)}`, async () => {
+      const call = invocation({ model: 'm', input: [], tools: [{ type: 'namespace', name: 'invalid', description: '', tools }] } as unknown as CanonicalOpenAIResponsesPayload, target);
+      let reachedTarget = false;
+      await assertRejects(() => withOpenAIResponsesNamespaceToolsCompatibility(call, mockChatGatewayCtx(), async () => {
+        reachedTarget = true;
+        return result();
+      }), TranslatorInputError, 'Cannot flatten');
+      assertEquals(reachedTarget, false);
+    });
+  }
+}
+
+for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
+  test(`terminal tools bridge projects Standard carriers before ${target} namespace allocation without mutating history`, async () => {
+    const developer = { type: 'message' as const, role: 'developer' as const, content: 'Keep this ordinary developer instruction.' };
+    const delayed = { type: 'tool_search_output' as const, tools: [functionTool('delayed')] };
+    const request: CanonicalOpenAIResponsesPayload = {
+      model: 'm', tools: [functionTool('files_edit')],
+      input: [
+        developer,
+        { type: 'additional_tools', role: 'developer', tools: [{ type: 'namespace', name: 'files', description: 'File policy.', tools: [{ type: 'custom', name: 'edit', description: 'Edit a file.' }] }] },
+        { type: 'additional_tools', role: 'developer', tools: [functionTool('read')] },
+        { type: 'custom_tool_call', namespace: 'files', name: 'edit', call_id: 'past', input: 'patch' },
+        delayed,
+      ],
+      tool_choice: { type: 'allowed_tools', mode: 'required', tools: [{ type: 'custom', namespace: 'files', name: 'edit' }] },
+    };
+    const original = structuredClone(request);
+    const call = invocation(request, target);
+    const response = await withOpenAIResponsesNamespaceToolsCompatibility(call, mockChatGatewayCtx(), async () => result([
+      { type: 'response.completed', response: { ...emptyResult(), tools: call.payload.tools ?? undefined, tool_choice: call.payload.tool_choice, output: [{ type: 'function_call', name: 'files_edit_2', call_id: 'current', arguments: 'new patch', status: 'completed' }] } },
+    ]));
+    assertEquals(call.payload.tools?.map(tool => 'name' in tool ? tool.name : undefined), ['files_edit', 'files_edit_2', 'read']);
+    assertEquals(call.payload.tools?.[1], { type: 'custom', name: 'files_edit_2', description: 'File policy.\n\nEdit a file.' });
+    assertEquals(call.payload.input, [developer, { type: 'custom_tool_call', name: 'files_edit_2', call_id: 'past', input: 'patch' }, delayed]);
+    assert(call.payload.input[0] === developer);
+    assert(call.payload.input[2] === delayed, 'search-loaded declarations must not be hoisted');
+    assertEquals(call.payload.tool_choice, { type: 'allowed_tools', mode: 'required', tools: [{ type: 'custom', name: 'files_edit_2' }] });
+    assertEquals(request, original);
+    assert(response.type === 'events');
+    const frames: ProtocolFrame<OpenAIResponsesStreamEvent>[] = [];
+    for await (const frame of response.events) frames.push(frame);
+    const frame = frames[0];
+    assert(frame.type === 'event' && frame.event.type === 'response.completed');
+    assertEquals(frame.event.response.tools, request.tools);
+    assertEquals(frame.event.response.tool_choice, request.tool_choice);
+    assertEquals(frame.event.response.output, [{ type: 'custom_tool_call', name: 'edit', namespace: 'files', call_id: 'current', input: 'new patch', status: 'completed' }]);
+  });
+
+  for (const tools of [undefined, [], [functionTool('existing')]]) {
+    for (const echo of [false, true]) {
+      test(`terminal ${target} carrier projection restores original tool echoes (${tools === undefined ? 'omitted' : tools.length} declarations, upstream echo ${echo})`, async () => {
+        const request: CanonicalOpenAIResponsesPayload = { model: 'm', input: [{ type: 'additional_tools', role: 'developer', tools: [functionTool('read')] }], ...(tools === undefined ? {} : { tools }) };
+        const call = invocation(request, target);
+        const response = await withOpenAIResponsesNamespaceToolsCompatibility(call, mockChatGatewayCtx(), async () => result([
+          { type: 'response.completed', response: { ...emptyResult(), ...(echo ? { tools: call.payload.tools ?? undefined } : {}) } },
+        ]));
+        assertEquals(call.payload.input, []);
+        assertEquals(call.payload.tools, [...(tools ?? []), functionTool('read')]);
+        assert(response.type === 'events');
+        let completed = 0;
+        for await (const frame of response.events) {
+          if (frame.type !== 'event' || frame.event.type !== 'response.completed') continue;
+          completed++;
+          assertEquals(frame.event.response.tools, echo ? tools : undefined);
+          assertEquals(Object.hasOwn(frame.event.response, 'tools'), echo && tools !== undefined);
+        }
+        assertEquals(completed, 1);
+      });
+    }
+  }
+}
+
+test('terminal tools bridge bypasses native Standard carriers without inspection or namespace inference', async () => {
+  const request: CanonicalOpenAIResponsesPayload = { model: 'm', input: [{ type: 'additional_tools', role: 'developer', tools: [functionTool('read')] }, { type: 'message', role: 'developer', content: 'Native instruction.' }] };
+  const call = invocation(request, 'openaiResponses');
+  await run(call);
+  assert(call.payload === request);
+  assertEquals(call.payload.tools, undefined);
+});
+
+for (const carrier of [
+  { type: 'additional_tools', role: 'user', tools: [] },
+  { type: 'additional_tools', role: 'developer', tools: null },
+  { type: 'additional_tools', role: 'developer', tools: [null] },
+  { type: 'additional_tools', role: 'developer', tools: [{ type: 'function', name: 42 }] },
+]) {
+  test(`terminal tools bridge typed-rejects malformed Standard carrier ${JSON.stringify(carrier)}`, async () => {
+    const request = { model: 'm', input: [carrier] } as unknown as CanonicalOpenAIResponsesPayload;
+    const call = invocation(request);
+    let reachedTarget = false;
+    await assertRejects(() => withOpenAIResponsesNamespaceToolsCompatibility(call, mockChatGatewayCtx(), async () => {
+      reachedTarget = true;
+      return result();
+    }), TranslatorInputError, 'additional_tools');
+    assertEquals(reachedTarget, false);
+    assert(call.payload === request);
+  });
+}
+
+test('namespace compatibility indexes explicit replay-only scopes for later qualified history', async () => {
+  const call = invocation({
+    model: 'm', input: [
+      { type: 'function_call', namespace: 'files', name: 'read', call_id: 'a', arguments: '{}', status: 'completed' },
+      { type: 'function_call', name: 'files.read', call_id: 'b', arguments: '{}', status: 'completed' },
+    ],
+  });
+  await run(call);
+  assertEquals(call.payload.input.map(item => item.type === 'function_call' ? [item.name, item.namespace] : []), [['files_read', undefined], ['files_read', undefined]]);
+});
+
+test('namespace compatibility only looks up declared-length prefixes in heavily dotted names', async () => {
+  const namespace = `${'seg.'.repeat(4096)}end`;
+  const qualified = `${namespace}.read`;
+  const missing = qualified.replace('seg', 'bad');
+  const call = invocation({
+    model: 'm', tools: [{ type: 'namespace', name: namespace, description: '', tools: [functionTool('read')] }],
+    input: [{ type: 'function_call', call_id: 'old', name: qualified, arguments: '{}', status: 'completed' }],
+    tool_choice: { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: qualified }, { type: 'function', name: missing }] },
+  });
+  const ctx = mockChatGatewayCtx();
+  const get = vi.spyOn(Map.prototype, 'get');
+  let prefixes: string[] = [];
+  try {
+    await withOpenAIResponsesNamespaceToolsCompatibility(call, ctx, async () => {
+      prefixes = get.mock.calls.map(([key]) => key).filter((key): key is string => typeof key === 'string' && key.includes('.') && qualified.startsWith(key) && key !== qualified);
+      get.mockRestore();
+      return result();
+    });
+  } finally { get.mockRestore(); }
+  assert(prefixes.length > 0, 'instrument must observe qualification lookups');
+  assert(prefixes.every(prefix => prefix === namespace), 'qualification must never hash undeclared dot prefixes');
+  assert(prefixes.length <= 5, `expected bounded declared-prefix lookups, observed ${prefixes.length}`);
+  const flatName = call.payload.tools?.[0];
+  assert(flatName?.type === 'function');
+  assertEquals(call.payload.input[0], { type: 'function_call', call_id: 'old', name: flatName.name, arguments: '{}', status: 'completed' });
+  assertEquals(call.payload.tool_choice, { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: flatName.name }, { type: 'function', name: missing }] });
 });

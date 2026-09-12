@@ -1,6 +1,7 @@
 import type { OpenAIResponsesInterceptor } from './types.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import { isOpenAIResponsesTerminalEvent, type CanonicalOpenAIResponsesPayload, type OpenAIResponsesOutputItem, type OpenAIResponsesResult, type OpenAIResponsesStreamEvent, type OpenAIResponsesTool } from '@floway-dev/protocols/openai-responses';
+import { TranslatorInputError } from '@floway-dev/translate';
 
 interface CallableIdentity {
   readonly name: string;
@@ -23,7 +24,19 @@ const flattenNamespaces = (request: CanonicalOpenAIResponsesPayload): {
   payload: CanonicalOpenAIResponsesPayload;
   identities: ReadonlyMap<string, CallableIdentity>;
 } => {
-  const declared = request.tools ?? [];
+  // additional_tools is a Standard input item as well as a persisted source
+  // carrier. Translated targets need its declarations at request level, but
+  // canonical/native history must retain the original item and its position.
+  // https://github.com/openai/openai-node/blob/61539248cbe04665de68a71e6fd878127ae4db87/src/resources/responses/responses.ts#L4265-L4285
+  const carriers = request.input.filter(item => item.type === 'additional_tools');
+  for (const carrier of carriers) {
+    if (carrier.role !== 'developer' || !Array.isArray(carrier.tools)
+      || carrier.tools.some(tool => typeof tool !== 'object' || typeof tool?.type !== 'string'
+        || ((tool.type === 'function' || tool.type === 'custom') && !isCallableTool(tool)))) {
+      throw new TranslatorInputError('Cannot project a malformed OpenAI Responses additional_tools item');
+    }
+  }
+  const declared = carriers.length === 0 ? request.tools ?? [] : [...(request.tools ?? []), ...carriers.flatMap(carrier => carrier.tools)];
   const choice = request.tool_choice;
   const choices = typeof choice === 'object' && choice !== null ? choice.type === 'allowed_tools' ? choice.tools : [choice] : [];
   const history = request.input.filter(item => item.type === 'function_call' || item.type === 'custom_tool_call');
@@ -39,12 +52,14 @@ const flattenNamespaces = (request: CanonicalOpenAIResponsesPayload): {
   // Kind is part of identity: a historical function may share namespace/name
   // with a current custom declaration without borrowing its wire identity.
   const scopes = new Map<string | undefined, Map<string, Map<CallableIdentity['type'], string>>>();
+  const namespaceLengths = new Set<number>();
   const identities = new Map<string, CallableIdentity>();
   const allocate = (source: CallableIdentity): string => {
     let scope = scopes.get(source.namespace);
     if (scope === undefined) {
       scope = new Map();
       scopes.set(source.namespace, scope);
+      if (source.namespace !== undefined) namespaceLengths.add(source.namespace.length);
     }
     let kinds = scope.get(source.name);
     if (kinds === undefined) {
@@ -94,23 +109,34 @@ const flattenNamespaces = (request: CanonicalOpenAIResponsesPayload): {
       tools.push(isCallableTool(tool) ? { ...tool, name: allocate(toolIdentity(tool)) } : tool);
       continue;
     }
-    if (typeof tool.name !== 'string' || !Array.isArray(tool.tools)) throw new TypeError('Cannot flatten a malformed OpenAI Responses namespace');
+    if (typeof tool.name !== 'string' || !Array.isArray(tool.tools)) throw new TranslatorInputError('Cannot flatten a malformed OpenAI Responses namespace');
     for (const child of tool.tools) {
-      if (!isCallableTool(child)) throw new TypeError(`Cannot flatten a non-callable tool in namespace ${tool.name}`);
-      tools.push({ ...child, name: allocate(toolIdentity(child, tool.name)) });
+      if (!isCallableTool(child)) throw new TranslatorInputError(`Cannot flatten a non-callable tool in namespace ${tool.name}`);
+      tools.push({
+        ...child,
+        name: allocate(toolIdentity(child, tool.name)),
+        ...(tool.description ? { description: child.description ? `${tool.description}\n\n${child.description}` : tool.description } : {}),
+      });
     }
   }
   // Qualified Standard names are already accepted by the translators. Resolve
   // them through the same structured scope index rather than storing repeated
   // `namespace.child` strings; explicit flat declarations retain priority.
   const canonicalIdentity = (source: CallableIdentity): CallableIdentity => {
+    if (typeof source.name !== 'string' || (source.namespace !== undefined && typeof source.namespace !== 'string')) {
+      throw new TranslatorInputError('Cannot flatten a malformed OpenAI Responses callable identity');
+    }
     if (source.namespace !== undefined || flatNames.has(source.name)) return source;
     let qualified: CallableIdentity | undefined;
-    for (let dot = source.name.indexOf('.'); dot !== -1; dot = source.name.indexOf('.', dot + 1)) {
-      const namespace = source.name.slice(0, dot);
-      const name = source.name.slice(dot + 1);
+    // Only registered scope lengths can split a qualified name, including
+    // explicit scopes from replay-only history. Scanning every dot would
+    // repeatedly hash growing, undeclared prefixes of long names.
+    for (const length of namespaceLengths) {
+      if (source.name[length] !== '.') continue;
+      const namespace = source.name.slice(0, length);
+      const name = source.name.slice(length + 1);
       if (!scopes.get(namespace)?.has(name)) continue;
-      if (qualified !== undefined) throw new TypeError(`Ambiguous qualified OpenAI Responses callable name '${source.name}'`);
+      if (qualified !== undefined) throw new TranslatorInputError(`Ambiguous qualified OpenAI Responses callable name '${source.name}'`);
       qualified = { ...source, namespace, name };
     }
     return qualified ?? source;
@@ -123,7 +149,7 @@ const flattenNamespaces = (request: CanonicalOpenAIResponsesPayload): {
     delete next.namespace;
     return next;
   };
-  const input = request.input.map(item => item.type === 'function_call' || item.type === 'custom_tool_call' ? rename(item, item.type) : item);
+  const input = request.input.filter(item => item.type !== 'additional_tools').map(item => item.type === 'function_call' || item.type === 'custom_tool_call' ? rename(item, item.type) : item);
   const renameChoice = <T>(value: T): T => {
     if (!isCallableTool(value)) return value;
     return rename(value as T & { name: string; namespace?: string }, value.type === 'function' ? 'function_call' : 'custom_tool_call');
@@ -138,7 +164,7 @@ const flattenNamespaces = (request: CanonicalOpenAIResponsesPayload): {
     }
   }
   return {
-    payload: { ...request, input, ...(request.tools == null ? {} : { tools }), ...(toolChoice === undefined ? {} : { tool_choice: toolChoice }) },
+    payload: { ...request, input, ...(request.tools == null && carriers.length === 0 ? {} : { tools }), ...(toolChoice === undefined ? {} : { tool_choice: toolChoice }) },
     identities,
   };
 };
@@ -166,6 +192,7 @@ const restoreFrames = async function* (
   frames: AsyncIterable<ProtocolFrame<OpenAIResponsesStreamEvent>>,
   identities: ReadonlyMap<string, CallableIdentity>,
   request: CanonicalOpenAIResponsesPayload,
+  toolsChanged: boolean,
   toolChoiceChanged: boolean,
 ): AsyncGenerator<ProtocolFrame<OpenAIResponsesStreamEvent>> {
   const items = new Map<string, CallableIdentity>();
@@ -203,9 +230,12 @@ const restoreFrames = async function* (
         output: event.response.output.map(item => restoreItem(item, identities, isOpenAIResponsesTerminalEvent(event) ? 'completed' : 'in_progress')),
         // Preserve absent echoes; only undo fields actually stated by the
         // translated result. The outer shim must not observe invented tools.
-        ...(event.response.tools === undefined || !request.tools?.some(tool => tool.type === 'namespace') ? {} : { tools: request.tools }),
         ...(event.response.tool_choice === undefined || !toolChoiceChanged ? {} : { tool_choice: request.tool_choice }),
       };
+      if (toolsChanged && event.response.tools !== undefined) {
+        if (request.tools == null) delete response.tools;
+        else response.tools = request.tools;
+      }
       yield { ...frame, event: { ...event, response } } as ProtocolFrame<OpenAIResponsesStreamEvent>;
     } else yield frame;
   }
@@ -218,13 +248,18 @@ export const withOpenAIResponsesNamespaceToolsCompatibility: OpenAIResponsesInte
   if (invocation.targetApi === 'openaiResponses') return await run();
   const request = invocation.payload;
   const choice = request.tool_choice;
+  if (typeof choice === 'object' && choice !== null && choice.type === 'allowed_tools' && !Array.isArray(choice.tools)) {
+    throw new TranslatorInputError('Cannot translate malformed allowed_tools tools array.');
+  }
   const hasNamespacedChoice = typeof choice === 'object' && choice !== null
     && ((isCallableTool(choice) && 'namespace' in choice) || (choice.type === 'allowed_tools' && choice.tools.some(tool => isCallableTool(tool) && 'namespace' in tool)));
-  if (!request.tools?.some(tool => tool.type === 'namespace')
+  const toolsChanged = request.tools?.some(tool => tool.type === 'namespace') === true
+    || request.input.some(item => item.type === 'additional_tools');
+  if (!toolsChanged
     && !request.input.some(item => (item.type === 'function_call' || item.type === 'custom_tool_call') && item.namespace !== undefined)
     && !hasNamespacedChoice) return await run();
   const bridge = flattenNamespaces(request);
   invocation.payload = bridge.payload;
   const result = await run();
-  return result.type === 'events' ? { ...result, events: restoreFrames(result.events, bridge.identities, request, bridge.payload.tool_choice !== request.tool_choice) } : result;
+  return result.type === 'events' ? { ...result, events: restoreFrames(result.events, bridge.identities, request, toolsChanged, bridge.payload.tool_choice !== request.tool_choice) } : result;
 };

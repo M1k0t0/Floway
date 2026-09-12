@@ -1,5 +1,6 @@
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type { CanonicalOpenAIResponsesPayload, OpenAIResponsesInputItem, OpenAIResponsesStreamEvent, OpenAIResponsesTool } from '@floway-dev/protocols/openai-responses';
+import { TranslatorInputError } from '@floway-dev/translate';
 
 // Official Codex sends the HTTP marker as per-operation metadata on WebSocket.
 // These describe the caller's representation, never an upstream capability.
@@ -11,6 +12,7 @@ const RESPONSES_LITE_METADATA_KEY = 'ws_request_header_x_openai_internal_codex_r
 // the one-fragment base-instructions message that follows the tools carrier.
 // https://github.com/openai/codex/blob/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/tools/src/tool_spec.rs#L95-L141
 // https://github.com/openai/codex/blob/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/core/src/context/base_instructions.rs#L5-L12
+// https://github.com/openai/codex/blob/6b9826e3aa83b1a5947db50f4332cb9c65f1b340/codex-rs/protocol/src/tool_name.rs#L39-L50
 const DEFAULT_FUNCTION_NAMESPACE = 'functions';
 const BASE_INSTRUCTIONS_CONTENT_KIND = 'model.base_instructions';
 
@@ -35,16 +37,14 @@ const baseInstructionsText = (value: unknown): string | undefined => {
 };
 
 export interface ResponsesLiteClientView {
-  // Captured before lifting. Only the final client edge may read this view;
-  // routing, hydration, shims, and persistence all receive the Standard payload.
+  // Captured before lifting and read only by the final client edge.
   readonly request: CanonicalOpenAIResponsesPayload;
   readonly toolChoiceChanged: boolean;
 }
 
 export interface ResponsesLiteInputContext {
   readonly type: 'responses_lite';
-  readonly tools?: OpenAIResponsesTool[];
-  readonly instructions?: string;
+  readonly source: CanonicalOpenAIResponsesPayload;
 }
 
 interface ResponsesIngress {
@@ -61,6 +61,7 @@ const qualifyLiteCallables = (payload: CanonicalOpenAIResponsesPayload): Canonic
   // Store each scope once. Qualified lookup uses this same index instead of
   // concatenating a potentially long namespace into every child's key.
   const namespaces = new Map<string, Set<string>>();
+  const namespaceLengths = new Set<number>();
   for (const tool of (payload.tools ?? []) as readonly unknown[]) {
     if (!isRecord(tool)) continue;
     if ((tool.type === 'function' || tool.type === 'custom') && typeof tool.name === 'string') flatNames.add(tool.name);
@@ -69,6 +70,7 @@ const qualifyLiteCallables = (payload: CanonicalOpenAIResponsesPayload): Canonic
     if (children === undefined) {
       children = new Set();
       namespaces.set(tool.name, children);
+      namespaceLengths.add(tool.name.length);
     }
     for (const child of tool.tools as readonly unknown[]) {
       if (!isRecord(child) || (child.type !== 'function' && child.type !== 'custom') || typeof child.name !== 'string') continue;
@@ -76,19 +78,22 @@ const qualifyLiteCallables = (payload: CanonicalOpenAIResponsesPayload): Canonic
     }
   }
   const qualify = <T extends { name: string; namespace?: string }>(value: T): T => {
-    if (value.namespace !== undefined || flatNames.has(value.name)) return value;
+    const source = value.namespace === '' || value.namespace === null ? { ...value } : value;
+    if (source !== value) delete source.namespace;
+    if (source.namespace !== undefined || flatNames.has(source.name)) return source;
     let identity: { name: string; namespace: string } | undefined;
-    for (let dot = value.name.indexOf('.'); dot !== -1; dot = value.name.indexOf('.', dot + 1)) {
-      const namespace = value.name.slice(0, dot);
-      const name = value.name.slice(dot + 1);
+    for (const length of namespaceLengths) {
+      if (source.name[length] !== '.') continue;
+      const namespace = source.name.slice(0, length);
+      const name = source.name.slice(length + 1);
       if (!namespaces.get(namespace)?.has(name)) continue;
-      if (identity !== undefined) throw new TypeError(`Ambiguous qualified Responses Lite callable name '${value.name}'`);
+      if (identity !== undefined) throw new TranslatorInputError(`Ambiguous qualified Responses Lite callable name '${source.name}'`, { param: 'input' });
       identity = { name, namespace };
     }
-    if (identity === undefined && namespaces.get(DEFAULT_FUNCTION_NAMESPACE)?.has(value.name)) {
-      identity = { name: value.name, namespace: DEFAULT_FUNCTION_NAMESPACE };
+    if (identity === undefined && namespaces.get(DEFAULT_FUNCTION_NAMESPACE)?.has(source.name)) {
+      identity = { name: source.name, namespace: DEFAULT_FUNCTION_NAMESPACE };
     }
-    return identity === undefined ? value : { ...value, ...identity };
+    return identity === undefined ? source : { ...source, ...identity };
   };
   const input = payload.input.map(item => item.type === 'function_call' || item.type === 'custom_tool_call' ? qualify(item) : item);
   let toolChoice = payload.tool_choice;
@@ -103,6 +108,38 @@ const qualifyLiteCallables = (payload: CanonicalOpenAIResponsesPayload): Canonic
     }
   }
   return { ...payload, input, ...(toolChoice === undefined ? {} : { tool_choice: toolChoice }) };
+};
+
+const liftResponsesLiteInput = (request: CanonicalOpenAIResponsesPayload): {
+  payload: CanonicalOpenAIResponsesPayload;
+  consumedIndices: readonly number[];
+} => {
+  const tools: OpenAIResponsesTool[] = [...(request.tools ?? [])];
+  const instructions = isAdditionalToolsItem(request.input[0]) ? baseInstructionsText(request.input[1]) : undefined;
+  const promote = (request.instructions == null || request.instructions === '') && instructions !== undefined && instructions.length > 0;
+  const consumedIndices: number[] = [];
+  let hasAdditionalTools = false;
+  const input = request.input.filter((item, index) => {
+    if (isAdditionalToolsItem(item)) {
+      hasAdditionalTools = true;
+      for (const tool of item.tools) tools.push(tool);
+      consumedIndices.push(index);
+      return false;
+    }
+    if (promote && index === 1) {
+      consumedIndices.push(index);
+      return false;
+    }
+    return true;
+  });
+  return {
+    payload: {
+      ...request, input,
+      ...(hasAdditionalTools || Array.isArray(request.tools) ? { tools } : {}),
+      ...(promote ? { instructions } : {}),
+    },
+    consumedIndices,
+  };
 };
 
 export const normalizeResponsesIngress = (request: CanonicalOpenAIResponsesPayload, sourceHeaders: Headers, transport: 'http' | 'websocket' = 'http'): ResponsesIngress => {
@@ -122,84 +159,86 @@ export const normalizeResponsesIngress = (request: CanonicalOpenAIResponsesPaylo
   }
   if (!usesLite) return { payload, headers };
 
-  const tools: OpenAIResponsesTool[] = [...(request.tools ?? [])];
-  const leadingTools = isAdditionalToolsItem(request.input[0]);
-  const instructions = leadingTools ? baseInstructionsText(request.input[1]) : undefined;
-  const promote = (request.instructions === undefined || request.instructions === null || request.instructions === '')
-    && instructions !== undefined && instructions.length > 0;
-  let hasAdditionalTools = false;
-  const contextTools: OpenAIResponsesTool[] = [];
-  const input = request.input.filter((item, index) => {
-    if (isAdditionalToolsItem(item)) {
-      hasAdditionalTools = true;
-      for (const tool of item.tools) {
-        tools.push(tool);
-        contextTools.push(tool);
-      }
-      return false;
-    }
-    return !promote || index !== 1;
-  });
-  payload = {
-    ...payload,
-    input,
-    ...(hasAdditionalTools || Array.isArray(request.tools) ? { tools } : {}),
-    ...(promote ? { instructions } : {}),
-  };
-  // Continuations need the complete inherited tool set before resolving names.
-  if (request.previous_response_id == null) payload = qualifyLiteCallables(payload);
+  const source = payload;
+  payload = liftResponsesLiteInput(source).payload;
+  const hasReferences = request.input.some(item => isRecord(item) && typeof item.id === 'string');
+  // Stored identities are authoritative, including when the caller supplies a body.
+  if (request.previous_response_id == null && !hasReferences) payload = qualifyLiteCallables(payload);
   return {
     payload,
     headers,
-    inputContext: {
-      type: 'responses_lite',
-      ...(hasAdditionalTools ? { tools: contextTools } : {}),
-      ...(promote ? { instructions } : {}),
-    },
+    inputContext: { type: 'responses_lite', source },
     clientView: {
       request,
-      // A continuation can qualify selectors only after loading its tools.
+      // Referenced declarations are available only after history hydration.
       toolChoiceChanged: payload.tool_choice !== request.tool_choice
-        || (request.previous_response_id != null && isRecord(request.tool_choice)),
+        || ((request.previous_response_id != null || hasReferences) && isRecord(request.tool_choice)),
     },
   };
 };
 
 // Codex's incremental WebSocket request omits its unchanged tools/base prefix.
-// Preserve the lifted input context independently of create-only request fields.
+// Restore the referenced source items independently of create-only request fields.
 // https://github.com/openai/codex/blob/6b9826e3aa83b1a5947db50f4332cb9c65f1b340/codex-rs/core/tests/suite/client_websockets.rs#L1887-L1953
 export const restoreResponsesLiteInputContext = (
   payload: CanonicalOpenAIResponsesPayload,
-  current: ResponsesLiteInputContext,
-  previous: unknown,
-): { payload: CanonicalOpenAIResponsesPayload; context: ResponsesLiteInputContext } => {
-  if (previous !== undefined && (!isRecord(previous) || previous.type !== 'responses_lite'
-    || (previous.tools !== undefined && !Array.isArray(previous.tools))
-    || (previous.instructions !== undefined && typeof previous.instructions !== 'string'))) {
-    throw new TypeError('Invalid stored Responses Lite input context');
+  options: {
+    readonly sourceInput: readonly OpenAIResponsesInputItem[];
+    readonly currentInputStart: number;
+    readonly sourceItemIds?: readonly string[];
+    readonly getItem: (id: string) => unknown;
+  },
+): { payload: CanonicalOpenAIResponsesPayload; sourceItems: readonly OpenAIResponsesInputItem[] } => {
+  const sourceItems: OpenAIResponsesInputItem[] = [];
+  const inheritedItems: OpenAIResponsesInputItem[] = [];
+  const remaining = new Map<string, number>();
+  for (const id of options.sourceItemIds ?? []) {
+    const item = options.getItem(id);
+    if (!isAdditionalToolsItem(item) && baseInstructionsText(item) === undefined) {
+      throw new TypeError(`Invalid stored Responses Lite source item '${id}'`);
+    }
+    inheritedItems.push(item as OpenAIResponsesInputItem);
+    sourceItems.push({ type: 'item_reference', id });
+    remaining.set(id, (remaining.get(id) ?? 0) + 1);
   }
-  const inherited = previous as ResponsesLiteInputContext | undefined;
-  const context: ResponsesLiteInputContext = {
-    type: 'responses_lite',
-    ...(inherited?.tools === undefined && current.tools === undefined ? {} : {
-      tools: [...(inherited?.tools ?? []), ...(current.tools ?? [])],
-    }),
-    ...(current.instructions === undefined && inherited?.instructions === undefined ? {} : {
-      instructions: current.instructions ?? inherited?.instructions,
-    }),
+
+  const tools = [...(payload.tools ?? [])];
+  let hasCarrier = false;
+  let inheritedInstructions: string | undefined;
+  for (const item of inheritedItems) {
+    if (isAdditionalToolsItem(item)) {
+      hasCarrier = true;
+      for (const tool of item.tools) tools.push(tool);
+    } else inheritedInstructions = baseInstructionsText(item);
+  }
+  const history: OpenAIResponsesInputItem[] = [];
+  for (let index = 0; index < options.currentInputStart; index++) {
+    const source = options.sourceInput[index]!;
+    const id = source.type === 'item_reference' ? source.id : undefined;
+    const count = id === undefined ? 0 : remaining.get(id) ?? 0;
+    if (id !== undefined && count > 0) {
+      remaining.set(id, count - 1);
+      continue;
+    }
+    const item = payload.input[index]!;
+    if (isAdditionalToolsItem(item)) {
+      hasCarrier = true;
+      for (const tool of item.tools) tools.push(tool);
+      sourceItems.push(source);
+    } else history.push(item);
+  }
+  const current = liftResponsesLiteInput({
+    ...payload,
+    input: payload.input.slice(options.currentInputStart),
+    ...(hasCarrier || Array.isArray(payload.tools) ? { tools } : {}),
+  });
+  for (const index of current.consumedIndices) sourceItems.push(options.sourceInput[options.currentInputStart + index]!);
+  const restored = {
+    ...current.payload,
+    input: [...history, ...current.payload.input],
+    ...((current.payload.instructions == null || current.payload.instructions === '') && inheritedInstructions !== undefined ? { instructions: inheritedInstructions } : {}),
   };
-  let restored = payload;
-  if (inherited?.tools !== undefined) {
-    // Top-level tools precede every input carrier. Insert inherited carriers
-    // ahead of this turn's additions, without duplicating the lifted suffix.
-    const tools = payload.tools ?? [];
-    const split = tools.length - (current.tools?.length ?? 0);
-    restored = { ...restored, tools: [...tools.slice(0, split), ...inherited.tools, ...tools.slice(split)] };
-  }
-  if ((payload.instructions == null || payload.instructions === '') && context.instructions !== undefined) {
-    restored = { ...restored, instructions: context.instructions };
-  }
-  return { payload: qualifyLiteCallables(restored), context };
+  return { payload: qualifyLiteCallables(restored), sourceItems };
 };
 
 // Restore representation-dependent echoes before resource completion. Undefined
@@ -207,7 +246,7 @@ export const restoreResponsesLiteInputContext = (
 // after the client schema has been completed.
 export const restoreResponsesLiteEchoes = <T extends object>(resource: T, view: ResponsesLiteClientView): T => {
   const restored = { ...resource } as T & Record<string, unknown>;
-  for (const field of ['tools', 'instructions', 'parallel_tool_calls', 'reasoning', ...(view.toolChoiceChanged ? ['tool_choice'] as const : [])] as const) {
+  for (const field of ['tools', 'instructions', ...(view.toolChoiceChanged ? ['tool_choice'] as const : [])] as const) {
     const value = view.request[field];
     if (value === undefined) delete restored[field];
     else Object.assign(restored, { [field]: value });
