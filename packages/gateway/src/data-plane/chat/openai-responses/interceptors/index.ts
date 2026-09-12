@@ -1,6 +1,7 @@
 import { withRoleCompatibilityApplied } from './apply-role-compatibility.ts';
 import { withOpenAIResponsesCompactShim } from './compact-shim.ts';
 import { withReasoningDisabledOnForcedToolChoice } from './disable-reasoning-on-forced-tool-choice.ts';
+import { withOpenAIResponsesNamespaceToolsCompatibility } from './namespace-tools-compatibility.ts';
 import { withExclusiveCachedTokensNormalized } from './normalize-exclusive-cached-tokens.ts';
 import { withOpenAIResponsesServerToolShim } from './server-tool-shim.ts';
 import { imageGenerationServerTool } from './server-tools/image-generation.ts';
@@ -57,4 +58,11 @@ export const openaiResponsesInterceptors: readonly OpenAIResponsesInterceptor[] 
   withExclusiveCachedTokensNormalized,
   withVendorDeepSeekOpenAIResponsesNormalize,
   withVendorQwenOpenAIResponsesNormalize,
+];
+
+// These run on an isolated invocation inside the outer chain's terminal. The
+// server-tool loop can dispatch repeatedly and must keep canonical names in its
+// own payload; compact expansion must already have exposed any stored history.
+export const openaiResponsesTranslationInterceptors: readonly OpenAIResponsesInterceptor[] = [
+  withOpenAIResponsesNamespaceToolsCompatibility,
 ];
