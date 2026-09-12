@@ -7,7 +7,12 @@ import {
   type PreparedStoredOpenAIResponsesPayload,
 } from './openai-responses-payload.ts';
 import { quantizeOpenAIResponsesRefreshedAt, OPENAI_RESPONSES_REFRESH_GRANULARITY_MS } from './openai-responses-retention.ts';
-import { decodeOpenAIResponsesSnapshotItemIds, encodeOpenAIResponsesSnapshotItemIds } from './openai-responses-snapshot-codec.ts';
+import {
+  decodeOpenAIResponsesSnapshotItemIds,
+  decodeOpenAIResponsesSnapshotSourceItemIds,
+  encodeOpenAIResponsesSnapshotItemIds,
+  encodeOpenAIResponsesSnapshotSourceItemIds,
+} from './openai-responses-snapshot-codec.ts';
 import { SPILLED_FILE_STAGE_GRACE_MS } from './spilled-files-policy.ts';
 import { runStatements } from './sql-batch.ts';
 import type {
@@ -344,6 +349,7 @@ interface OpenAIResponsesSnapshotRow {
   id: string;
   api_key_id: string;
   item_ids_json: string;
+  source_item_ids_json: string | null;
   refreshed_at: number;
 }
 
@@ -352,6 +358,9 @@ const toStoredOpenAIResponsesSnapshot = (row: OpenAIResponsesSnapshotRow): Store
     id: row.id,
     apiKeyId: row.api_key_id,
     itemIds: decodeOpenAIResponsesSnapshotItemIds(row.item_ids_json, row.id, row.api_key_id),
+    ...(row.source_item_ids_json === null
+      ? {}
+      : { sourceItemIds: decodeOpenAIResponsesSnapshotSourceItemIds(row.source_item_ids_json, row.id, row.api_key_id) }),
     refreshedAt: row.refreshed_at,
   };
 };
@@ -362,7 +371,7 @@ export class SqlOpenAIResponsesSnapshotsRepo implements OpenAIResponsesSnapshots
   async lookup(apiKeyId: string, id: string, earliestVisibleCutoff: number): Promise<StoredOpenAIResponsesSnapshot | null> {
     const row = await this.db
       .prepare(
-        `SELECT id, api_key_id, item_ids_json, refreshed_at FROM responses_snapshots
+        `SELECT id, api_key_id, item_ids_json, source_item_ids_json, refreshed_at FROM responses_snapshots
          WHERE id = ? AND api_key_id = ? AND refreshed_at >= ?`,
       )
       .bind(id, apiKeyId, earliestVisibleCutoff)
@@ -377,10 +386,11 @@ export class SqlOpenAIResponsesSnapshotsRepo implements OpenAIResponsesSnapshots
     };
     await this.db
       .prepare(
-        `INSERT INTO responses_snapshots (id, api_key_id, item_ids_json, refreshed_at)
-         VALUES (?, ?, ?, ?)
+        `INSERT INTO responses_snapshots (id, api_key_id, item_ids_json, source_item_ids_json, refreshed_at)
+         VALUES (?, ?, ?, ?, ?)
          ON CONFLICT (id, api_key_id) DO UPDATE SET
            item_ids_json = excluded.item_ids_json,
+           source_item_ids_json = excluded.source_item_ids_json,
            refreshed_at = excluded.refreshed_at
          WHERE responses_snapshots.refreshed_at < excluded.refreshed_at`,
       )
@@ -388,6 +398,7 @@ export class SqlOpenAIResponsesSnapshotsRepo implements OpenAIResponsesSnapshots
         quantized.id,
         quantized.apiKeyId,
         encodeOpenAIResponsesSnapshotItemIds(quantized.itemIds),
+        quantized.sourceItemIds === undefined ? null : encodeOpenAIResponsesSnapshotSourceItemIds(quantized.sourceItemIds),
         quantized.refreshedAt,
       )
       .run();

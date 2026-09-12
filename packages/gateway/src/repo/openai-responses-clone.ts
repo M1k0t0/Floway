@@ -10,6 +10,7 @@ export const cloneStoredOpenAIResponsesItem = (item: StoredOpenAIResponsesItem):
 export const cloneStoredOpenAIResponsesSnapshot = (snapshot: StoredOpenAIResponsesSnapshot): StoredOpenAIResponsesSnapshot => ({
   ...snapshot,
   itemIds: [...snapshot.itemIds],
+  ...(snapshot.sourceItemIds === undefined ? {} : { sourceItemIds: [...snapshot.sourceItemIds] }),
 });
 
 export const scopedOpenAIResponsesKey = (apiKeyId: string, id: string): string => `${apiKeyId}\0${id}`;
