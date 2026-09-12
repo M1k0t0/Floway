@@ -1,5 +1,6 @@
 import { test } from 'vitest';
 
+import { RESPONSES_LITE_HEADER } from '../../../../src/data-plane/codex/responses-lite.ts';
 import { buildCustomUpstreamRecord, requestApp, setupAppTest, sseResponse } from '../../../test-utils/app.ts';
 import { flushBackground } from '../../../test-utils/background-tracker.ts';
 import type { OpenAIResponsesResult } from '@floway-dev/protocols/openai-responses';
@@ -44,7 +45,8 @@ const toolCallResponse = (target: TargetApi, name: string): Response => {
 };
 
 for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
-  for (const representation of ['Standard', 'Standard carrier'] as const) {
+  for (const representation of ['Standard', 'Lite', 'Standard carrier'] as const) {
+    const lite = representation === 'Lite';
     for (const mode of ['auto', 'required'] as const) {
       test(`HTTP ${representation} preserves namespace allowed_tools and descriptions on final ${target} wire (${mode})`, async () => {
         const { apiKey } = await setup(target);
@@ -59,7 +61,7 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
           wire.push(body);
           return toolCallResponse(target, 'payments_read');
         }, async () => {
-          const response = await requestApp('/v1/responses', { method: 'POST', headers: { authorization: `Bearer ${apiKey.key}`, 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+          const response = await requestApp('/v1/responses', { method: 'POST', headers: { authorization: `Bearer ${apiKey.key}`, 'content-type': 'application/json', ...(lite ? { [RESPONSES_LITE_HEADER]: 'true' } : {}) }, body: JSON.stringify(payload) });
           const resource = await response.json() as OpenAIResponsesResult;
           assertEquals(response.status, 200);
           assertEquals(resource.status, 'completed');
