@@ -2,6 +2,7 @@ import { wrapOpenAIResponsesAffinityEgress } from './affinity/egress.ts';
 import { wrapOpenAIResponsesClientOutput, wrapOpenAIResponsesObservedOutput } from './items/output.ts';
 import { createOpenAIResponsesResponseId } from './response-id.ts';
 import { wrapResponseResourceCompletion } from './response-resource.ts';
+import { wrapResponsesLiteClientEchoes, type ResponsesLiteClientView } from '../../codex/responses-lite.ts';
 import type { GatewayCtx } from '../../shared/gateway-ctx.ts';
 import { affinityEgressOptions } from '../shared/affinity/index.ts';
 import type { ChatGatewayCtx } from '../shared/gateway-ctx.ts';
@@ -36,11 +37,16 @@ export const wrapOpenAIResponsesClientEgress = (
   frames: AsyncIterable<ProtocolFrame<OpenAIResponsesStreamEvent>>,
   ctx: GatewayCtx,
   request: CanonicalOpenAIResponsesPayload,
+  clientView?: ResponsesLiteClientView,
 ): AsyncIterable<ProtocolFrame<ClientOpenAIResponsesStreamEvent>> => {
   if (!('affinity' in ctx) || !('store' in ctx)) throw new Error('OpenAI Responses output requires chat context');
   const chatCtx = ctx as ChatGatewayCtx;
-  return wrapResponseResourceCompletion(wrapOpenAIResponsesStatefulOutput(frames, chatCtx), {
-    request,
+  const stateful = wrapOpenAIResponsesStatefulOutput(frames, chatCtx);
+  // Stored items and snapshots remain Standard. Caller echoes are a final view,
+  // completed afterwards so absent Lite fields cannot violate the client schema.
+  const callerFrames = clientView === undefined ? stateful : wrapResponsesLiteClientEchoes(stateful, clientView);
+  return wrapResponseResourceCompletion(callerFrames, {
+    request: clientView?.request ?? request,
     createdAt: openaiResponsesCreatedAt(ctx),
     stored: chatCtx.store.writesState,
   });
