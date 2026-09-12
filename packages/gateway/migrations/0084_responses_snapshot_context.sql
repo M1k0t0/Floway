@@ -1,2 +1,2 @@
-ALTER TABLE responses_snapshots ADD COLUMN context_item_id TEXT
-  CHECK (context_item_id IS NULL OR length(context_item_id) > 0);
+ALTER TABLE responses_snapshots ADD COLUMN source_item_ids_json TEXT
+  CHECK (source_item_ids_json IS NULL OR length(source_item_ids_json) > 0);

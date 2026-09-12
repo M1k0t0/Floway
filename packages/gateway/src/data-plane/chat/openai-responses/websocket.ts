@@ -216,6 +216,7 @@ const handleClientMessage = async (
   const signal = downstreamAbortController.signal;
   let eventId: string | undefined;
   let ctx: ChatGatewayCtx | undefined;
+  let apiKeyId: string | undefined;
   let previousResponseId: string | undefined;
 
   // "If a continuation turn fails with a `4xx` or `5xx` error, the server MUST
@@ -234,8 +235,8 @@ const handleClientMessage = async (
   // `Map.delete` makes the second call inert.
   const turnFailure: OpenAIResponsesWsTurnFailure = {
     evict: () => {
-      if (ctx === undefined || previousResponseId === undefined) return;
-      session.evictSnapshot(ctx.store.apiKeyId, previousResponseId);
+      if (apiKeyId === undefined || previousResponseId === undefined) return;
+      session.evictSnapshot(apiKeyId, previousResponseId);
     },
     fail: (status, error) => {
       turnFailure.evict();
@@ -279,8 +280,9 @@ const handleClientMessage = async (
     const source = message.response && typeof message.response === 'object'
       ? message.response
       : Object.fromEntries(Object.entries(message).filter(([key]) => key !== 'type' && key !== 'event_id'));
+    apiKeyId = apiKeyFromContext(c).id;
+    previousResponseId = typeof source.previous_response_id === 'string' ? source.previous_response_id : undefined;
     const { payload, headers, clientView, inputContext } = normalizeResponsesIngress(openaiResponsesPayloadFromClientSource(source), inboundHeaders(c), 'websocket');
-    previousResponseId = payload.previous_response_id ?? undefined;
     ctx = createChatGatewayCtxFromHono(c, {
       wantsStream: true,
       downstreamAbortController,

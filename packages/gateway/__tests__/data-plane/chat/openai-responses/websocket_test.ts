@@ -933,6 +933,61 @@ for (const durable of [false, true]) {
   });
 }
 
+for (const envelope of ['top-level', 'nested'] as const) {
+  for (const invalid of [{ model: 123 }, { tools: {} }]) {
+    test(`OpenAI Responses WebSocket evicts a ${envelope} Lite continuation rejected before dispatch (${Object.keys(invalid)[0]})`, async () => {
+      const { apiKey, repo } = await setupAppTest();
+      await repo.apiKeys.save({ ...apiKey, openaiResponsesRetentionSeconds: 0 });
+      let responseCalls = 0;
+      await withMockedFetch(async request => {
+        const url = new URL(request.url);
+        if (url.hostname === 'update.code.visualstudio.com') return jsonResponse(['1.110.1']);
+        if (url.pathname === '/copilot_internal/v2/token') {
+          return jsonResponse({ token: 'copilot-access-token', expires_at: 4102444800, refresh_in: 3600, endpoints: { api: 'https://api.individual.githubcopilot.com' } });
+        }
+        if (url.pathname === '/models') return jsonResponse(copilotModels([{ id: 'gpt-direct-responses', supported_endpoints: ['/responses'] }]));
+        if (url.pathname === '/responses') {
+          responseCalls++;
+          return sseOpenAIResponsesResponse({
+            id: `resp_ws_lite_validation_${responseCalls}`, object: 'response', model: 'gpt-direct-responses',
+            status: 'completed', output: [], output_text: 'done',
+          });
+        }
+        throw new Error(`Unhandled fetch ${request.url}`);
+      }, async () => await withWorkerWebSocketRuntime(async () => {
+        const { client, sessionLifetime } = await connectOpenAIResponsesWebSocketCapturingSessionLifetime(apiKey.key);
+        try {
+          const first = waitForMessages(client, messages => messages.some(isTerminalResponseEvent));
+          client.send(JSON.stringify({ type: 'response.create', model: 'gpt-direct-responses', input: 'first', store: false }));
+          const previousResponseId = terminalResponseId(await first);
+          assertEquals(await repo.openaiResponsesSnapshots.lookup(apiKey.id, previousResponseId, 0), null);
+          const source = {
+            model: 'gpt-direct-responses', input: 'invalid continuation', store: false, previous_response_id: previousResponseId,
+            client_metadata: { ws_request_header_x_openai_internal_codex_responses_lite: 'true' }, ...invalid,
+          };
+          const rejected = waitForMessages(client, messages => messages.some(message => message.type === 'error'));
+          client.send(JSON.stringify(envelope === 'nested'
+            ? { type: 'response.create', previous_response_id: 'outer-id-is-not-the-continuation', response: source }
+            : { type: 'response.create', ...source }));
+          const error = (await rejected).at(-1)!;
+          assert(typeof error.status === 'number' && error.status >= 400 && error.status < 600);
+          assertEquals(responseCalls, 1);
+
+          const retry = waitForMessages(client, messages => messages.some(message => message.type === 'error') || messages.some(isTerminalResponseEvent));
+          client.send(JSON.stringify({ type: 'response.create', model: 'gpt-direct-responses', input: 'retry', store: false, previous_response_id: previousResponseId }));
+          const result = (await retry).at(-1)!;
+          assertEquals(result.type, 'error');
+          assertEquals((result.error as { code: string }).code, 'previous_response_not_found');
+          assertEquals(responseCalls, 1);
+        } finally {
+          client.close();
+          await sessionLifetime;
+        }
+      }));
+    });
+  }
+}
+
 test('OpenAI Responses WebSocket evicts a failed continuation target so the next attempt reports previous_response_not_found', async () => {
   const { apiKey } = await setupAppTest();
   let responseCalls = 0;
