@@ -515,6 +515,9 @@ export interface StoredOpenAIResponsesSnapshot {
   id: string;
   apiKeyId: string;
   itemIds: string[];
+  // Server-only continuation configuration shares item storage (including
+  // compression and spill files), but is never part of the public history.
+  contextItemId?: string;
   refreshedAt: number;
 }
 

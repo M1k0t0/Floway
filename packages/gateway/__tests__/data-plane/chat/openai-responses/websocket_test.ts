@@ -1,6 +1,7 @@
 import type { ExecutionContext } from 'hono';
 import { onTestFinished, test, vi } from 'vitest';
 
+import { TEST_OPENAI_RESPONSES_RETENTION_SECONDS } from './test-policy.ts';
 import { missingRequiredResourceKeys } from './test-required-resource-keys.ts';
 import { app } from '../../../../src/app.ts';
 import { hashOpenAIResponsesItem } from '../../../../src/data-plane/chat/openai-responses/items/identity.ts';
@@ -859,6 +860,80 @@ test('OpenAI Responses WebSocket store:false keeps session snapshots without dur
     }),
   );
 });
+
+for (const durable of [false, true]) {
+  test(`Responses Lite WebSocket retains incremental context ${durable ? 'across sessions with retention enabled' : 'in session with retention off and store:false'}`, async () => {
+    const { apiKey, repo } = await setupAppTest();
+    await repo.apiKeys.save({ ...apiKey, openaiResponsesRetentionSeconds: durable ? TEST_OPENAI_RESPONSES_RETENTION_SECONDS : 0 });
+    const upstreamBodies: Record<string, unknown>[] = [];
+    const tools = [{ type: 'namespace', name: 'files', description: 'File tools', tools: [{ type: 'function', name: 'read', parameters: { type: 'object' } }] }];
+    const instructions = 'Read relevant files before answering.';
+    await withMockedFetch(async request => {
+      const url = new URL(request.url);
+      if (url.hostname === 'update.code.visualstudio.com') return jsonResponse(['1.110.1']);
+      if (url.pathname === '/copilot_internal/v2/token') {
+        return jsonResponse({ token: 'copilot-access-token', expires_at: 4102444800, refresh_in: 3600, endpoints: { api: 'https://api.individual.githubcopilot.com' } });
+      }
+      if (url.pathname === '/models') return jsonResponse(copilotModels([{ id: 'gpt-direct-responses', supported_endpoints: ['/responses'] }]));
+      if (url.pathname === '/responses') {
+        upstreamBodies.push(await request.json() as Record<string, unknown>);
+        return sseOpenAIResponsesResponse({
+          id: `resp_ws_lite_context_${upstreamBodies.length}`, object: 'response', model: 'gpt-direct-responses',
+          status: 'completed', error: null, incomplete_details: null, output: [], output_text: 'done',
+        });
+      }
+      throw new Error(`Unhandled fetch ${request.url}`);
+    }, async () => await withWorkerWebSocketRuntime(async () => {
+      let session = await connectOpenAIResponsesWebSocketCapturingSessionLifetime(apiKey.key);
+      const sendTurn = async (input: unknown[], previous_response_id?: string): Promise<string> => {
+        const received = waitForMessages(session.client, messages => messages.some(isTerminalResponseEvent) || messages.some(message => message.type === 'error'));
+        session.client.send(JSON.stringify({
+          type: 'response.create', model: 'gpt-direct-responses', store: durable, instructions: '', input, previous_response_id,
+          client_metadata: { ws_request_header_x_openai_internal_codex_responses_lite: 'true' },
+        }));
+        const messages = await received;
+        assertEquals(messages.at(-1)?.type, 'response.completed', JSON.stringify(messages));
+        await waitForMicrotasks();
+        return terminalResponseId(messages);
+      };
+      try {
+        const firstId = await sendTurn([
+          { type: 'additional_tools', role: 'developer', id: 'at_ws_context', tools },
+          {
+            type: 'message', role: 'developer', id: 'msg_ws_base', content: [{ type: 'input_text', text: instructions }],
+            internal_chat_message_metadata_passthrough: { content_item_kinds: ['model.base_instructions'] },
+          },
+          { type: 'message', role: 'user', content: 'first question' },
+        ]);
+        if (durable) {
+          session.client.close();
+          await session.sessionLifetime;
+          assertExists(await repo.openaiResponsesSnapshots.lookup(apiKey.id, firstId, 0));
+          session = await connectOpenAIResponsesWebSocketCapturingSessionLifetime(apiKey.key);
+        } else {
+          assertEquals(await repo.openaiResponsesSnapshots.lookup(apiKey.id, firstId, 0), null);
+        }
+        const secondId = await sendTurn([{ type: 'message', role: 'user', content: 'follow-up question' }], firstId);
+        assertEquals(upstreamBodies.length, 2);
+        for (const body of upstreamBodies) {
+          assertEquals(body.tools, tools);
+          assertEquals(body.instructions, instructions);
+        }
+        assertEquals((upstreamBodies[1]!.input as Array<{ role: string; content: unknown }>).map(item => [item.role, item.content]), [
+          ['user', 'first question'], ['user', 'follow-up question'],
+        ]);
+        if (!durable) assertEquals(await repo.openaiResponsesSnapshots.lookup(apiKey.id, secondId, 0), null);
+      } finally {
+        session.client.close();
+        await session.sessionLifetime;
+      }
+      if (!durable) {
+        assertEquals(await repo.openaiResponsesItems.findOldestRefreshedAt(apiKey.id), null);
+        assertEquals(await repo.openaiResponsesSnapshots.findOldestRefreshedAt(apiKey.id), null);
+      }
+    }));
+  });
+}
 
 test('OpenAI Responses WebSocket evicts a failed continuation target so the next attempt reports previous_response_not_found', async () => {
   const { apiKey } = await setupAppTest();

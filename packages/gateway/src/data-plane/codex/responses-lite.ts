@@ -41,10 +41,17 @@ export interface ResponsesLiteClientView {
   readonly toolChoiceChanged: boolean;
 }
 
+export interface ResponsesLiteInputContext {
+  readonly type: 'responses_lite';
+  readonly tools?: OpenAIResponsesTool[];
+  readonly instructions?: string;
+}
+
 interface ResponsesIngress {
   readonly payload: CanonicalOpenAIResponsesPayload;
   readonly headers: Headers;
   readonly clientView?: ResponsesLiteClientView;
+  readonly inputContext?: ResponsesLiteInputContext;
 }
 
 // Resolve Lite's implicit identities without flattening semantic namespaces.
@@ -121,21 +128,78 @@ export const normalizeResponsesIngress = (request: CanonicalOpenAIResponsesPaylo
   const promote = (request.instructions === undefined || request.instructions === null || request.instructions === '')
     && instructions !== undefined && instructions.length > 0;
   let hasAdditionalTools = false;
+  const contextTools: OpenAIResponsesTool[] = [];
   const input = request.input.filter((item, index) => {
     if (isAdditionalToolsItem(item)) {
       hasAdditionalTools = true;
-      for (const tool of item.tools) tools.push(tool);
+      for (const tool of item.tools) {
+        tools.push(tool);
+        contextTools.push(tool);
+      }
       return false;
     }
     return !promote || index !== 1;
   });
-  payload = qualifyLiteCallables({
+  payload = {
     ...payload,
     input,
     ...(hasAdditionalTools || Array.isArray(request.tools) ? { tools } : {}),
     ...(promote ? { instructions } : {}),
-  });
-  return { payload, headers, clientView: { request, toolChoiceChanged: payload.tool_choice !== request.tool_choice } };
+  };
+  // Continuations need the complete inherited tool set before resolving names.
+  if (request.previous_response_id == null) payload = qualifyLiteCallables(payload);
+  return {
+    payload,
+    headers,
+    inputContext: {
+      type: 'responses_lite',
+      ...(hasAdditionalTools ? { tools: contextTools } : {}),
+      ...(promote ? { instructions } : {}),
+    },
+    clientView: {
+      request,
+      // A continuation can qualify selectors only after loading its tools.
+      toolChoiceChanged: payload.tool_choice !== request.tool_choice
+        || (request.previous_response_id != null && isRecord(request.tool_choice)),
+    },
+  };
+};
+
+// Codex's incremental WebSocket request omits its unchanged tools/base prefix.
+// Preserve the lifted input context independently of create-only request fields.
+// https://github.com/openai/codex/blob/6b9826e3aa83b1a5947db50f4332cb9c65f1b340/codex-rs/core/tests/suite/client_websockets.rs#L1887-L1953
+export const restoreResponsesLiteInputContext = (
+  payload: CanonicalOpenAIResponsesPayload,
+  current: ResponsesLiteInputContext,
+  previous: unknown,
+): { payload: CanonicalOpenAIResponsesPayload; context: ResponsesLiteInputContext } => {
+  if (previous !== undefined && (!isRecord(previous) || previous.type !== 'responses_lite'
+    || (previous.tools !== undefined && !Array.isArray(previous.tools))
+    || (previous.instructions !== undefined && typeof previous.instructions !== 'string'))) {
+    throw new TypeError('Invalid stored Responses Lite input context');
+  }
+  const inherited = previous as ResponsesLiteInputContext | undefined;
+  const context: ResponsesLiteInputContext = {
+    type: 'responses_lite',
+    ...(inherited?.tools === undefined && current.tools === undefined ? {} : {
+      tools: [...(inherited?.tools ?? []), ...(current.tools ?? [])],
+    }),
+    ...(current.instructions === undefined && inherited?.instructions === undefined ? {} : {
+      instructions: current.instructions ?? inherited?.instructions,
+    }),
+  };
+  let restored = payload;
+  if (inherited?.tools !== undefined) {
+    // Top-level tools precede every input carrier. Insert inherited carriers
+    // ahead of this turn's additions, without duplicating the lifted suffix.
+    const tools = payload.tools ?? [];
+    const split = tools.length - (current.tools?.length ?? 0);
+    restored = { ...restored, tools: [...tools.slice(0, split), ...inherited.tools, ...tools.slice(split)] };
+  }
+  if ((payload.instructions == null || payload.instructions === '') && context.instructions !== undefined) {
+    restored = { ...restored, instructions: context.instructions };
+  }
+  return { payload: qualifyLiteCallables(restored), context };
 };
 
 // Restore representation-dependent echoes before resource completion. Undefined

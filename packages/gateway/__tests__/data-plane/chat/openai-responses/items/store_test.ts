@@ -31,6 +31,7 @@ describe('OpenAIResponsesStatefulStore', () => {
     expect(store.writesState).toBe(false);
 
     await store.stageInputItems([{ type: 'message', role: 'user', content: 'hello' }]);
+    await store.stageSnapshotContext({ instructions: 'private context' });
     await store.commitSnapshot('resp_none', 'append', []);
     expect(await repo.openaiResponsesSnapshots.lookup('key-a', 'resp_none', 0)).toBeNull();
   });
@@ -41,6 +42,7 @@ describe('OpenAIResponsesStatefulStore', () => {
     const store = createOpenAIResponsesHttpStore(testOpenAIResponsesStatePolicy(), Date.now(), false);
 
     await store.stageInputItems([{ type: 'message', role: 'user', content: 'hello' }]);
+    await store.stageSnapshotContext({ instructions: 'private context' });
 
     expect(digest).not.toHaveBeenCalled();
     digest.mockRestore();
@@ -314,10 +316,13 @@ describe('OpenAIResponsesStatefulStore', () => {
     const session = createOpenAIResponsesWsSession();
     const local = session.createStore(testOpenAIResponsesStatePolicy(), Date.now(), false);
     await local.stageInputItems([{ type: 'message', role: 'user', content: 'local' }]);
+    await local.stageSnapshotContext({ instructions: 'local instructions' });
     await local.commitSnapshot('resp_local', 'append', []);
 
     const durable = session.createStore(testOpenAIResponsesStatePolicy(), Date.now(), true);
-    expect(await durable.loadSnapshot('resp_local')).not.toBeNull();
+    const previous = await durable.loadSnapshot('resp_local');
+    expect(previous?.contextItemId).toBeDefined();
+    await durable.stageSnapshotContext(durable.getItemById(previous!.contextItemId!)?.payload.private);
     await durable.stageInputItems([{ type: 'message', role: 'user', content: 'durable' }]);
     await durable.commitSnapshot('resp_durable', 'append', []);
 
@@ -325,6 +330,98 @@ describe('OpenAIResponsesStatefulStore', () => {
     expect(snapshot).not.toBeNull();
     if (snapshot === null) throw new Error('Expected durable snapshot');
     expect(await repo.openaiResponsesItems.lookupMany('key-a', snapshot.itemIds, 0)).toHaveLength(snapshot.itemIds.length);
+    expect(snapshot.contextItemId).toBe(previous!.contextItemId);
+    const http = createOpenAIResponsesHttpStore(testOpenAIResponsesStatePolicy(), Date.now(), false);
+    expect((await http.loadSnapshot('resp_durable'))?.contextItemId).toBe(snapshot.contextItemId);
+    expect(http.getItemById(snapshot.contextItemId!)?.payload.private).toEqual({ instructions: 'local instructions' });
+  });
+
+  test.each([
+    ['store=false', TEST_OPENAI_RESPONSES_RETENTION_SECONDS, false],
+    ['retention off', 0, true],
+  ] as const)('WebSocket %s retains private context without public history or durable rows', async (_name, retention, store) => {
+    const repo = installRepo();
+    const session = createOpenAIResponsesWsSession();
+    const policy = { ...testOpenAIResponsesStatePolicy(), openaiResponsesRetentionSeconds: retention };
+    const first = session.createStore(policy, Date.now(), store);
+    const context = { tools: [{ name: 'read_file' }], instructions: 'read before answering' };
+    await first.stageSnapshotContext(context);
+    context.tools[0].name = 'mutated';
+    await first.commitSnapshot('resp_context_only', 'append', []);
+
+    expect(await repo.openaiResponsesSnapshots.lookup('key-a', 'resp_context_only', 0)).toBeNull();
+    const next = session.createStore(policy, Date.now(), store);
+    const snapshot = await next.loadSnapshot('resp_context_only');
+    expect(snapshot?.itemIds).toEqual([]);
+    expect(Number.isFinite(snapshot?.refreshedAt)).toBe(true);
+    expect(snapshot?.contextItemId).toBeDefined();
+    const row = next.getItemById(snapshot!.contextItemId!);
+    expect(row?.payload).toEqual({ item: null, private: { tools: [{ name: 'read_file' }], instructions: 'read before answering' } });
+    (row!.payload.private as typeof context).tools[0].name = 'changed after reading';
+    expect(next.getItemById(snapshot!.contextItemId!)?.payload.private).toEqual({ tools: [{ name: 'read_file' }], instructions: 'read before answering' });
+    expect(await repo.openaiResponsesItems.lookupMany('key-a', [snapshot!.contextItemId!], 0)).toEqual([]);
+  });
+
+  test('context follows the referenced branch and survives compact replacement without entering history', async () => {
+    const repo = installRepo();
+    const policy = testOpenAIResponsesStatePolicy();
+    const initial = createOpenAIResponsesHttpStore(policy, Date.now(), true);
+    await initial.stageInputItems([{ type: 'message', role: 'user', content: 'initial' }]);
+    await initial.stageSnapshotContext({ instructions: 'initial instructions' });
+    await initial.commitSnapshot('resp_initial', 'append', []);
+    const first = await repo.openaiResponsesSnapshots.lookup('key-a', 'resp_initial', 0);
+
+    const updated = createOpenAIResponsesHttpStore(policy, Date.now(), true);
+    await updated.loadSnapshot('resp_initial');
+    await updated.stageSnapshotContext({ instructions: 'updated instructions' });
+    await updated.commitSnapshot('resp_updated', 'append', []);
+    const updatedSnapshot = await repo.openaiResponsesSnapshots.lookup('key-a', 'resp_updated', 0);
+    expect(updatedSnapshot?.contextItemId).not.toBe(first?.contextItemId);
+
+    const fork = createOpenAIResponsesHttpStore(policy, Date.now(), true);
+    const original = await fork.loadSnapshot('resp_initial');
+    await fork.stageSnapshotContext(fork.getItemById(original!.contextItemId!)?.payload.private);
+    await fork.commitSnapshot('resp_compact', 'replace', []);
+    expect(await repo.openaiResponsesSnapshots.lookup('key-a', 'resp_compact', 0)).toMatchObject({
+      itemIds: [], contextItemId: first!.contextItemId,
+    });
+    expect(updatedSnapshot?.itemIds).toEqual(first?.itemIds);
+  });
+
+  test('loading a context does not implicitly inherit it and staging undefined clears it', async () => {
+    const repo = installRepo();
+    const policy = testOpenAIResponsesStatePolicy();
+    const first = createOpenAIResponsesHttpStore(policy, Date.now(), true);
+    await first.stageInputItems([{ type: 'message', role: 'user', content: 'initial' }]);
+    await first.stageSnapshotContext({ instructions: 'initial instructions' });
+    await first.commitSnapshot('resp_initial', 'append', []);
+
+    for (const stageThenClear of [false, true]) {
+      const next = createOpenAIResponsesHttpStore(policy, Date.now(), true);
+      await next.loadSnapshot('resp_initial');
+      if (stageThenClear) {
+        await next.stageSnapshotContext({ instructions: 'temporary instructions' });
+        await next.stageSnapshotContext(undefined);
+      }
+      const responseId = `resp_standard_${String(stageThenClear)}`;
+      await next.commitSnapshot(responseId, 'append', []);
+      const snapshot = await repo.openaiResponsesSnapshots.lookup('key-a', responseId, 0);
+      expect(snapshot?.itemIds).toHaveLength(1);
+      expect(snapshot).not.toHaveProperty('contextItemId');
+    }
+  });
+
+  test('a snapshot with missing private context cannot be partially resumed', async () => {
+    const repo = installRepo();
+    const policy = testOpenAIResponsesStatePolicy();
+    const initial = createOpenAIResponsesHttpStore(policy, Date.now(), true);
+    await initial.stageInputItems([{ type: 'message', role: 'user', content: 'initial' }]);
+    await initial.commitSnapshot('resp_initial', 'append', []);
+    const snapshot = await repo.openaiResponsesSnapshots.lookup('key-a', 'resp_initial', 0);
+    await repo.openaiResponsesSnapshots.insert({ ...snapshot!, id: 'resp_missing_context', contextItemId: 'missing' });
+
+    const next = createOpenAIResponsesHttpStore(policy, Date.now(), false);
+    expect(await next.loadSnapshot('resp_missing_context')).toBeNull();
   });
 
   test('per-attempt private payloads reset on each beginAttempt', () => {

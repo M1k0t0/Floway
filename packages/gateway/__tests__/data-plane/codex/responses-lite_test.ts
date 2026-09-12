@@ -1,6 +1,6 @@
 import { test, vi } from 'vitest';
 
-import { normalizeResponsesIngress, responsesLiteSuccessHeaders, restoreResponsesLiteEchoes, wrapResponsesLiteClientEchoes } from '../../../src/data-plane/codex/responses-lite.ts';
+import { normalizeResponsesIngress, responsesLiteSuccessHeaders, restoreResponsesLiteEchoes, restoreResponsesLiteInputContext, wrapResponsesLiteClientEchoes } from '../../../src/data-plane/codex/responses-lite.ts';
 import { doneFrame, eventFrame } from '@floway-dev/protocols/common';
 import type { CanonicalOpenAIResponsesPayload, OpenAIResponsesInputItem, OpenAIResponsesResult, OpenAIResponsesTool } from '@floway-dev/protocols/openai-responses';
 import { assert, assertEquals } from '@floway-dev/test-utils';
@@ -175,6 +175,74 @@ test('Responses Lite qualification stores a long namespace once rather than once
   } finally { keys.mockRestore(); }
   assert(keyBytes >= namespace.length, 'instrument must observe the qualification registry');
   assert(keyBytes <= namespace.length + count * 64, `qualification repeated the full namespace: ${keyBytes} key bytes`);
+});
+
+test('Responses Lite continuation restores carrier tools before qualifying new calls and selectors', () => {
+  const namespace: OpenAIResponsesTool = { type: 'namespace', name: 'functions', description: '', tools: [functionTool] };
+  const previous = { type: 'responses_lite' as const, tools: [namespace], instructions: 'base rules' };
+  const request = makeRequest({
+    previous_response_id: 'original', instructions: '',
+    input: [{ type: 'function_call', name: 'read', call_id: 'call_1', arguments: '{}', status: 'completed' }],
+    tool_choice: { type: 'function', name: 'read' },
+  });
+  const original = structuredClone(request);
+  const normalized = normalizeResponsesIngress(request, liteHeaders());
+  assert(normalized.inputContext !== undefined && normalized.clientView !== undefined);
+  const restored = restoreResponsesLiteInputContext(normalized.payload, normalized.inputContext, previous);
+  assertEquals(restored.payload.tools, [namespace]);
+  assertEquals(restored.payload.instructions, 'base rules');
+  assertEquals(restored.payload.input, [{ ...request.input[0], namespace: 'functions' }]);
+  assertEquals(restored.payload.tool_choice, { type: 'function', name: 'read', namespace: 'functions' });
+  assertEquals(restoreResponsesLiteEchoes({ ...restored.payload, output: [] } as unknown as OpenAIResponsesResult, normalized.clientView).tool_choice, request.tool_choice);
+  assertEquals(restored.context, previous);
+  assertEquals(request, original);
+  assertEquals(previous, { type: 'responses_lite', tools: [namespace], instructions: 'base rules' });
+});
+
+test('Responses Lite continuation orders inherited carriers between top-level tools and current additions', () => {
+  const inherited = { type: 'responses_lite' as const, tools: [functionTool], instructions: 'original rules' };
+  const top: OpenAIResponsesTool = { type: 'custom', name: 'top' };
+  const added: OpenAIResponsesTool = { type: 'function', name: 'added' };
+  const normalized = normalizeResponsesIngress(makeRequest({
+    tools: [top], input: [{ ...toolsItem, tools: [added, functionTool] }, baseMessage('updated rules')],
+  }), liteHeaders());
+  assert(normalized.inputContext !== undefined);
+  const restored = restoreResponsesLiteInputContext(normalized.payload, normalized.inputContext, inherited);
+  assertEquals(restored.payload.tools, [top, functionTool, added, functionTool]);
+  assertEquals(restored.payload.instructions, 'updated rules');
+  assertEquals(restored.context, { type: 'responses_lite', tools: [functionTool, added, functionTool], instructions: 'updated rules' });
+  assertEquals(inherited, { type: 'responses_lite', tools: [functionTool], instructions: 'original rules' });
+});
+
+test('Responses Lite continuation resolves exact flat names against all inherited and added declarations', () => {
+  const flat: OpenAIResponsesTool = { type: 'function', name: 'files.read' };
+  const added: OpenAIResponsesTool = { type: 'namespace', name: 'files', description: '', tools: [functionTool] };
+  const request = makeRequest({
+    previous_response_id: 'original',
+    input: [{ ...toolsItem, tools: [added] }, { type: 'function_call', name: 'files.read', call_id: 'call_1', arguments: '{}', status: 'completed' }],
+    tool_choice: { type: 'function', name: 'files.read' },
+  });
+  const normalized = normalizeResponsesIngress(request, liteHeaders());
+  assert(normalized.inputContext !== undefined);
+  const restored = restoreResponsesLiteInputContext(normalized.payload, normalized.inputContext, { type: 'responses_lite', tools: [flat] });
+  assertEquals(restored.payload.tools, [flat, added]);
+  assertEquals(restored.payload.input, [request.input[1]]);
+  assertEquals(restored.payload.tool_choice, request.tool_choice);
+});
+
+test('Responses Lite context retains only consumed input carriers and respects explicit current instructions', () => {
+  const normalized = normalizeResponsesIngress(makeRequest({ tools: [functionTool], instructions: 'current rules', input: [] }), liteHeaders());
+  assert(normalized.inputContext !== undefined);
+  const first = restoreResponsesLiteInputContext(normalized.payload, normalized.inputContext, undefined);
+  assertEquals(first.context, { type: 'responses_lite' });
+  const restored = restoreResponsesLiteInputContext(normalized.payload, normalized.inputContext, { type: 'responses_lite', instructions: 'inherited rules' });
+  assertEquals(restored.payload.instructions, 'current rules');
+  assertEquals(restored.context, { type: 'responses_lite', instructions: 'inherited rules' });
+  for (const previous of [null, {}, { type: 'responses_lite', tools: {} }, { type: 'responses_lite', instructions: 42 }]) {
+    let error: unknown;
+    try { restoreResponsesLiteInputContext(normalized.payload, normalized.inputContext, previous); } catch (caught) { error = caught; }
+    assert(error instanceof TypeError, 'invalid stored configuration must fail instead of dropping context');
+  }
 });
 
 test('Responses Lite echoes keep caller omissions and extensions while leaving events and successful headers immutable', async () => {

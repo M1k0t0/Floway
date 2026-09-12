@@ -3,6 +3,7 @@ import { openaiResponsesTarget } from './attempt.ts';
 import { renderOpenAIResponsesFailure, type OpenAIResponsesServeFailure } from './errors.ts';
 import { hydrateOpenAIResponsesPayload } from './items/hydrate.ts';
 import type { OpenAIResponsesStatefulStore } from './items/store.ts';
+import { restoreResponsesLiteInputContext, type ResponsesLiteInputContext } from '../../codex/responses-lite.ts';
 import { enumerateModelCandidates } from '../../providers/resolution.ts';
 import type { AffinityCandidateSelection } from '../shared/affinity/index.ts';
 import { selectAffinityCandidates } from '../shared/affinity/index.ts';
@@ -42,21 +43,25 @@ export class PreviousResponseNotFoundError extends Error {
 export const expandPreviousResponseId = async (
   payload: CanonicalOpenAIResponsesPayload,
   store: OpenAIResponsesStatefulStore,
+  inputContext?: ResponsesLiteInputContext,
 ): Promise<CanonicalOpenAIResponsesPayload> => {
   const previousResponseId = payload.previous_response_id;
-  if (previousResponseId === undefined || previousResponseId === null) return payload;
-
-  const snapshot = await store.loadSnapshot(previousResponseId);
-  if (snapshot === null) throw new PreviousResponseNotFoundError(previousResponseId);
-
-  const { previous_response_id: _previous, ...rest } = payload;
-  return {
-    ...rest,
-    input: [
-      ...snapshot.itemIds.map(id => ({ type: 'item_reference' as const, id })),
-      ...payload.input,
-    ],
-  };
+  let prepared = payload;
+  let previousContext: unknown;
+  if (previousResponseId != null) {
+    const snapshot = await store.loadSnapshot(previousResponseId);
+    if (snapshot === null) throw new PreviousResponseNotFoundError(previousResponseId);
+    if (inputContext !== undefined && snapshot.contextItemId !== undefined) {
+      previousContext = store.getItemById(snapshot.contextItemId)?.payload.private;
+      if (previousContext === undefined) throw new Error(`OpenAI Responses snapshot context missing: ${snapshot.contextItemId}`);
+    }
+    const { previous_response_id: _previous, ...rest } = payload;
+    prepared = { ...rest, input: [...snapshot.itemIds.map(id => ({ type: 'item_reference' as const, id })), ...payload.input] };
+  }
+  if (inputContext === undefined) return prepared;
+  const restored = restoreResponsesLiteInputContext(prepared, inputContext, previousContext);
+  await store.stageSnapshotContext(restored.context);
+  return restored.payload;
 };
 
 export type OpenAIResponsesServePlan =
@@ -79,10 +84,12 @@ export type OpenAIResponsesServePlan =
 export const prepareOpenAIResponsesServePlan = async (args: {
   readonly payload: CanonicalOpenAIResponsesPayload;
   readonly ctx: ChatGatewayCtx;
+  readonly inputContext?: ResponsesLiteInputContext;
 }): Promise<OpenAIResponsesServePlan> => {
   const { payload, ctx } = args;
   const store = ctx.store;
-  const prepared = await expandPreviousResponseId(payload, store);
+  const prepared = await expandPreviousResponseId(payload, store, args.inputContext);
+  const inputToStage = prepared.input.slice(prepared.input.length - payload.input.length);
   const { candidates, sawModel, failedUpstreams } = await enumerateModelCandidates({
     upstreamIds: ctx.upstreamIds,
     model: prepared.model,
@@ -91,7 +98,7 @@ export const prepareOpenAIResponsesServePlan = async (args: {
     runtimeLocation: ctx.runtimeLocation,
   });
   const viable = candidates.filter(c => openaiResponsesTarget.canServe(c.model.endpoints));
-  await store.loadInputItems(prepared.input, payload.input);
+  await store.loadInputItems(prepared.input, inputToStage);
   let hydrated: ReturnType<typeof hydrateOpenAIResponsesPayload>;
   try {
     hydrated = hydrateOpenAIResponsesPayload(prepared, store);
@@ -108,7 +115,7 @@ export const prepareOpenAIResponsesServePlan = async (args: {
   // up the new user items in addition to the prior snapshot history.
   // Runs after the affinity walk so any `item_reference` in user-supplied
   // input has its target row loaded.
-  await store.stageInputItems(payload.input);
+  await store.stageInputItems(inputToStage);
 
   if (selection.candidates.length === 0) {
     return {
