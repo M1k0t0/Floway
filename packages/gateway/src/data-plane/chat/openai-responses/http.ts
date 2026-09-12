@@ -76,10 +76,10 @@ export const openaiResponsesHttp = {
     const requestBody = await readRequestBody(c);
     let ctx: ChatGatewayCtx | undefined;
     try {
-      const { payload, headers, clientView } = normalizeResponsesIngress(parsePayload(requestBody), inboundHeaders(c));
+      const { payload, headers, clientView, inputContext } = normalizeResponsesIngress(parsePayload(requestBody), inboundHeaders(c));
       const wantsStream = payload.stream === true;
       ctx = createChatGatewayCtxFromHono(c, { wantsStream, requestBody: takeRequestBody(requestBody), model: payload.model, backgroundScheduler: backgroundSchedulerFromContext(c) }, (apiKey, requestStartedAt) => createOpenAIResponsesHttpStore(apiKey, requestStartedAt, payload.store ?? undefined));
-      const result = await openaiResponsesServe.generate({ payload, ctx, headers });
+      const result = await openaiResponsesServe.generate({ payload, ctx, headers, inputContext });
       const response = await respondOpenAIResponses(c, result, wantsStream, ctx, payload, clientView);
       return finalizeGatewayResponse(ctx, response);
     } catch (error) {
@@ -91,9 +91,9 @@ export const openaiResponsesHttp = {
     const requestBody = await readRequestBody(c);
     let ctx: ChatGatewayCtx | undefined;
     try {
-      const { payload, headers, clientView } = normalizeResponsesIngress(parsePayload(requestBody), inboundHeaders(c));
+      const { payload, headers, clientView, inputContext } = normalizeResponsesIngress(parsePayload(requestBody), inboundHeaders(c));
       ctx = createChatGatewayCtxFromHono(c, { wantsStream: false, requestBody: takeRequestBody(requestBody), model: payload.model, backgroundScheduler: backgroundSchedulerFromContext(c) }, (apiKey, requestStartedAt) => createOpenAIResponsesHttpStore(apiKey, requestStartedAt, payload.store ?? undefined));
-      const result = await openaiResponsesServe.compact({ payload, ctx, headers });
+      const result = await openaiResponsesServe.compact({ payload, ctx, headers, inputContext });
       if (result.type === 'result') {
         // Compact drains the upstream stream into a single compaction
         // resource with no per-token stamps; recordPerformance therefore
