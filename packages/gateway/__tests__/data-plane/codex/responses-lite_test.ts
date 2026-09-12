@@ -1,6 +1,6 @@
 import { test, vi } from 'vitest';
 
-import { normalizeResponsesIngress, responsesLiteSuccessHeaders, restoreResponsesLiteEchoes, wrapResponsesLiteClientEchoes } from '../../../src/data-plane/codex/responses-lite.ts';
+import { normalizeResponsesIngress, responsesLiteSuccessHeaders, restoreResponsesLiteEchoes, restoreResponsesLiteInputContext, wrapResponsesLiteClientEchoes } from '../../../src/data-plane/codex/responses-lite.ts';
 import { doneFrame, eventFrame } from '@floway-dev/protocols/common';
 import type { CanonicalOpenAIResponsesPayload, OpenAIResponsesInputItem, OpenAIResponsesResult, OpenAIResponsesTool } from '@floway-dev/protocols/openai-responses';
 import { assert, assertEquals } from '@floway-dev/test-utils';
@@ -15,6 +15,16 @@ const makeRequest = (overrides: Record<string, unknown> = {}): CanonicalOpenAIRe
   model: 'test-model', input: [toolsItem, baseMessage(), { type: 'message', role: 'user', content: 'hello' }], ...overrides,
 } as CanonicalOpenAIResponsesPayload);
 const liteHeaders = (): Headers => new Headers({ 'x-openai-internal-codex-responses-lite': 'true' });
+const restoreCurrentInput = (
+  normalized: ReturnType<typeof normalizeResponsesIngress>,
+  sourceItemIds?: readonly string[],
+  getItem: (id: string) => unknown = () => undefined,
+) => {
+  assert(normalized.inputContext !== undefined);
+  const source = normalized.inputContext.source;
+  return restoreResponsesLiteInputContext(source, { sourceInput: source.input, currentInputStart: 0, sourceItemIds, getItem });
+};
+
 test('Responses Lite ingress recognizes only literal explicit controls and consumes reserved markers on copies', () => {
   for (const [header, metadata, enabled] of [
     ['true', undefined, true], [' TRUE ', undefined, true], ['false', 'true', true], [undefined, 'true', true],
@@ -222,6 +232,147 @@ test('Responses Lite qualification stores a long namespace once rather than once
   } finally { keys.mockRestore(); }
   assert(keyBytes >= namespace.length, 'instrument must observe the qualification registry');
   assert(keyBytes <= namespace.length + count * 64, `qualification repeated the full namespace: ${keyBytes} key bytes`);
+});
+
+test('Responses Lite continuation restores direct source rows before qualifying new calls and selectors', () => {
+  const namespace: OpenAIResponsesTool = { type: 'namespace', name: 'functions', description: '', tools: [functionTool] };
+  const stored = new Map<string, OpenAIResponsesInputItem>([
+    ['at_previous', { ...toolsItem, id: 'at_previous', tools: [namespace] }],
+    ['msg_previous', { ...baseMessage(), id: 'msg_previous' } as OpenAIResponsesInputItem],
+  ]);
+  const request = makeRequest({
+    previous_response_id: 'original', instructions: '',
+    input: [{ type: 'function_call', name: 'read', call_id: 'call_1', arguments: '{}', status: 'completed' }],
+    tool_choice: { type: 'function', name: 'read' },
+  });
+  const original = structuredClone(request);
+  const normalized = normalizeResponsesIngress(request, liteHeaders());
+  assert(normalized.inputContext !== undefined && normalized.clientView !== undefined);
+  const restored = restoreCurrentInput(normalized, ['at_previous', 'msg_previous', 'at_previous'], id => stored.get(id));
+  assertEquals(restored.payload.tools, [namespace, namespace]);
+  assertEquals(restored.payload.instructions, 'base rules');
+  assertEquals(restored.payload.input, [{ ...request.input[0], namespace: 'functions' }]);
+  assertEquals(restored.payload.tool_choice, { type: 'function', name: 'read', namespace: 'functions' });
+  assertEquals(restoreResponsesLiteEchoes({ ...restored.payload, output: [] } as unknown as OpenAIResponsesResult, normalized.clientView).tool_choice, request.tool_choice);
+  assertEquals(restored.sourceItems, [
+    { type: 'item_reference', id: 'at_previous' },
+    { type: 'item_reference', id: 'msg_previous' },
+    { type: 'item_reference', id: 'at_previous' },
+  ]);
+  assertEquals(request, original);
+});
+
+test('Responses Lite continuation orders direct inherited sources before current additions', () => {
+  const inheritedTools = { ...toolsItem, id: 'at_inherited', tools: [functionTool] };
+  const inheritedInstructions = { ...baseMessage('original rules'), id: 'msg_inherited' } as OpenAIResponsesInputItem;
+  const stored = new Map<string, OpenAIResponsesInputItem>([
+    ['at_inherited', inheritedTools],
+    ['msg_inherited', inheritedInstructions],
+  ]);
+  const top: OpenAIResponsesTool = { type: 'custom', name: 'top' };
+  const added: OpenAIResponsesTool = { type: 'function', name: 'added' };
+  const normalized = normalizeResponsesIngress(makeRequest({
+    tools: [top], input: [{ ...toolsItem, tools: [added, functionTool] }, baseMessage('updated rules')],
+  }), liteHeaders());
+  assert(normalized.inputContext !== undefined);
+  const restored = restoreCurrentInput(normalized, ['at_inherited', 'msg_inherited'], id => stored.get(id));
+  assertEquals(restored.payload.tools, [top, functionTool, added, functionTool]);
+  assertEquals(restored.payload.instructions, 'updated rules');
+  assertEquals(restored.sourceItems, [
+    { type: 'item_reference', id: 'at_inherited' },
+    { type: 'item_reference', id: 'msg_inherited' },
+    { ...toolsItem, tools: [added, functionTool] },
+    baseMessage('updated rules'),
+  ]);
+});
+
+test('Responses Lite continuation resolves exact flat names against direct inherited and added declarations', () => {
+  const flat: OpenAIResponsesTool = { type: 'function', name: 'files.read' };
+  const inherited = { ...toolsItem, id: 'at_flat', tools: [flat] };
+  const added: OpenAIResponsesTool = { type: 'namespace', name: 'files', description: '', tools: [functionTool] };
+  const request = makeRequest({
+    previous_response_id: 'original',
+    input: [{ ...toolsItem, tools: [added] }, { type: 'function_call', name: 'files.read', call_id: 'call_1', arguments: '{}', status: 'completed' }],
+    tool_choice: { type: 'function', name: 'files.read' },
+  });
+  const normalized = normalizeResponsesIngress(request, liteHeaders());
+  assert(normalized.inputContext !== undefined);
+  const restored = restoreCurrentInput(normalized, ['at_flat'], id => id === 'at_flat' ? inherited : undefined);
+  assertEquals(restored.payload.tools, [flat, added]);
+  assertEquals(restored.payload.input, [request.input[1]]);
+  assertEquals(restored.payload.tool_choice, request.tool_choice);
+  assertEquals(restored.sourceItems, [
+    { type: 'item_reference', id: 'at_flat' },
+    request.input[0],
+  ]);
+});
+
+test('Responses Lite source IDs retain only consumed carriers and reject invalid stored rows', () => {
+  const normalized = normalizeResponsesIngress(makeRequest({ tools: [functionTool], instructions: 'current rules', input: [] }), liteHeaders());
+  assert(normalized.inputContext !== undefined);
+  const first = restoreCurrentInput(normalized);
+  assertEquals(first.sourceItems, []);
+  const inherited = { ...baseMessage('inherited rules'), id: 'msg_inherited' } as OpenAIResponsesInputItem;
+  const restored = restoreCurrentInput(normalized, ['msg_inherited'], id => id === 'msg_inherited' ? inherited : undefined);
+  assertEquals(restored.payload.instructions, 'current rules');
+  assertEquals(restored.sourceItems, [{ type: 'item_reference', id: 'msg_inherited' }]);
+  for (const invalid of [undefined, {}, { ...toolsItem, role: 'user' }]) {
+    let error: unknown;
+    try { restoreCurrentInput(normalized, ['bad'], () => invalid); } catch (caught) { error = caught; }
+    assert(error instanceof TypeError, 'invalid stored source rows must fail instead of dropping context');
+  }
+});
+
+test('Responses Lite projection consumes referenced carriers only after hydration', () => {
+  const stored = new Map<string, OpenAIResponsesInputItem>([
+    ['at_ref', { ...toolsItem, id: 'at_ref' }],
+    ['msg_ref', { ...baseMessage(), id: 'msg_ref' } as OpenAIResponsesInputItem],
+  ]);
+  const source = makeRequest({ input: [{ type: 'item_reference', id: 'at_ref' }, { type: 'item_reference', id: 'msg_ref' }, { type: 'message', role: 'user', content: 'hello' }] });
+  const normalized = normalizeResponsesIngress(source, liteHeaders());
+  assert(normalized.inputContext !== undefined);
+  const hydrated = { ...normalized.inputContext.source, input: source.input.map(item => item.type === 'item_reference' ? stored.get(item.id)! : item) };
+  const restored = restoreResponsesLiteInputContext(hydrated, { sourceInput: source.input, currentInputStart: 0, getItem: id => stored.get(id) });
+  assertEquals(restored.payload.tools, [functionTool]);
+  assertEquals(restored.payload.instructions, 'base rules');
+  assertEquals(restored.payload.input, [source.input[2]]);
+  assertEquals(restored.sourceItems, source.input.slice(0, 2));
+  const literal = restoreCurrentInput(normalizeResponsesIngress(hydrated, liteHeaders()));
+  assertEquals(restored.payload, literal.payload);
+});
+
+test('Responses Lite projection preserves ordinary historical occurrences and untagged developer messages', () => {
+  const stored = new Map<string, OpenAIResponsesInputItem>([
+    ['at_ref', { ...toolsItem, id: 'at_ref' }],
+    ['msg_ref', { ...baseMessage(), id: 'msg_ref' } as OpenAIResponsesInputItem],
+    ['ordinary', { type: 'message', id: 'ordinary', role: 'developer', content: 'ordinary rules' }],
+  ]);
+  const source = makeRequest({
+    input: [
+      { type: 'item_reference', id: 'at_ref' }, { type: 'item_reference', id: 'msg_ref' },
+      { type: 'item_reference', id: 'msg_ref' }, { type: 'item_reference', id: 'ordinary' },
+      { type: 'message', role: 'user', content: 'next' },
+    ],
+  });
+  const hydrated = { ...source, input: source.input.map(item => item.type === 'item_reference' ? stored.get(item.id)! : item) };
+  const restored = restoreResponsesLiteInputContext(hydrated, {
+    sourceInput: source.input, currentInputStart: 4, sourceItemIds: ['at_ref', 'msg_ref'], getItem: id => stored.get(id),
+  });
+  assertEquals(restored.payload.tools, [functionTool]);
+  assertEquals(restored.payload.instructions, 'base rules');
+  assertEquals(restored.payload.input, [stored.get('msg_ref'), stored.get('ordinary'), source.input[4]]);
+  assertEquals(restored.sourceItems, source.input.slice(0, 2));
+});
+
+test('Responses Lite projection lifts referenced tools inherited from Standard history', () => {
+  const item = { ...toolsItem, id: 'at_standard' };
+  const source = makeRequest({ input: [{ type: 'item_reference', id: 'at_standard' }, { type: 'message', role: 'user', content: 'next' }] });
+  const restored = restoreResponsesLiteInputContext({ ...source, input: [item, source.input[1]!] }, {
+    sourceInput: source.input, currentInputStart: 1, getItem: () => item,
+  });
+  assertEquals(restored.payload.tools, [functionTool]);
+  assertEquals(restored.payload.input, [source.input[1]]);
+  assertEquals(restored.sourceItems, [source.input[0]]);
 });
 
 test('Responses Lite echoes keep caller omissions and extensions while leaving events and successful headers immutable', async () => {

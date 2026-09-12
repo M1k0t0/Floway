@@ -25,8 +25,8 @@ export const wrapSqlJsDatabase = (db: SqlJsDatabase): SqlDatabase => new SqlJsSq
 
 // The only way to open a sql.js database here, so no test can reach one that
 // is missing a function the deployment targets have.
-export const createSqlJsDatabase = async (): Promise<SqlJsDatabase> => {
-  const db = new (await initSqlJs()).Database();
+export const createSqlJsDatabase = async (data?: Uint8Array): Promise<SqlJsDatabase> => {
+  const db = new (await initSqlJs()).Database(data);
   registerTargetMathFunctions(db);
   return db;
 };
