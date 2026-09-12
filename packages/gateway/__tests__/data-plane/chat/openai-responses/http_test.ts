@@ -967,6 +967,51 @@ for (const transport of ['json', 'stream', 'compact'] as const) {
   });
 }
 
+test('Responses Lite HTTP persists context per response branch without inheriting it in Standard requests', async () => {
+  const repo = installRepo();
+  const bodies: Omit<CanonicalOpenAIResponsesPayload, 'model'>[] = [];
+  const tools = [{ type: 'namespace', name: 'files', description: '', tools: [{ type: 'function', name: 'read', parameters: { type: 'object' } }] }];
+  const addedTools = [{ type: 'namespace', name: 'database', description: '', tools: [{ type: 'function', name: 'query', parameters: { type: 'object' } }] }];
+  const prefix = (declarations: unknown[], instructions: string) => [
+    { type: 'additional_tools', role: 'developer', tools: declarations },
+    {
+      type: 'message', role: 'developer', content: [{ type: 'input_text', text: instructions }],
+      internal_chat_message_metadata_passthrough: { content_item_kinds: ['model.base_instructions'] },
+    },
+  ];
+  const create = async (input: unknown[], previous_response_id?: string, lite = true): Promise<OpenAIResponsesResult> => {
+    queueResolution([makeCandidate({
+      callOpenAIResponses: async (_model, body) => {
+        bodies.push(structuredClone(body) as Omit<CanonicalOpenAIResponsesPayload, 'model'>);
+        return { action: 'generate', ok: true, modelKey: 'test-model-key', events: makeProviderEvents(completedEvents()) };
+      },
+    })]);
+    const response = await makeApp().request('/v1/responses', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(lite ? { 'x-openai-internal-codex-responses-lite': 'true' } : {}) },
+      body: JSON.stringify({ model: 'test-model', store: true, instructions: '', input, previous_response_id }),
+    });
+    assertEquals(response.status, 200);
+    const result = await response.json() as OpenAIResponsesResult;
+    await flushAsyncWork();
+    assert((await repo.openaiResponsesSnapshots.lookup(API_KEY_ID, result.id, 0)) !== null);
+    return result;
+  };
+
+  const first = await create([...prefix(tools, 'Read files first.'), { role: 'user', content: 'first' }]);
+  const branch = await create([...prefix(addedTools, 'Query the database first.'), { role: 'user', content: 'branch' }], first.id);
+  await create([{ role: 'user', content: 'continue branch' }], branch.id);
+  await create([{ role: 'user', content: 'continue original' }], first.id);
+  await create([{ role: 'user', content: 'Standard follow-up' }], first.id, false);
+
+  assertEquals(bodies.map(body => body.tools), [tools, [...tools, ...addedTools], [...tools, ...addedTools], tools, undefined]);
+  assertEquals(bodies.map(body => body.instructions), [
+    'Read files first.', 'Query the database first.', 'Query the database first.', 'Read files first.', '',
+  ]);
+  assertEquals(bodies[3]!.input.flatMap(item => item.type === 'message' && item.role === 'user' ? [item.content] : []), ['first', 'continue original']);
+  assert(bodies.every(body => body.input.every(item => item.type !== 'additional_tools')), 'stored context must stay outside the public input history');
+});
+
 test('Responses Lite client echoes run after item persistence and before required resource completion', async () => {
   const repo = installRepo();
   const originalWrap = responseResource.wrapResponseResourceCompletion;
