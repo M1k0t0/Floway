@@ -1,6 +1,6 @@
 import { klona } from 'klona/json';
 
-import { openaiResponsesInterceptors } from './interceptors/index.ts';
+import { openaiResponsesInterceptors, openaiResponsesTranslationInterceptors } from './interceptors/index.ts';
 import type { OpenAIResponsesAttemptResult, OpenAIResponsesInvocation } from './interceptors/types.ts';
 import { normalizeAssistantInputText } from './items/normalize-assistant-content.ts';
 import { syntheticEventsFromCompaction } from './items/output.ts';
@@ -101,8 +101,15 @@ export const openaiResponsesAttempt = {
       targetApi,
       headers,
     };
-    const chainResult = await runInterceptors(invocation, ctx, openaiResponsesInterceptors, async () =>
-      await dispatchOpenAIResponses(invocation, ctx));
+    const chainResult = await runInterceptors(invocation, ctx, openaiResponsesInterceptors, async () => {
+      if (invocation.targetApi === 'openaiResponses') return await dispatchOpenAIResponses(invocation, ctx);
+      // Wire-only names must not mutate the outer server-tool loop's payload.
+      // Each dispatch gets its own invocation after history/compact expansion,
+      // with Standard events restored before returning to the outer chain.
+      const translated = { ...invocation, payload: klona(invocation.payload), headers: new Headers(invocation.headers) };
+      return await runInterceptors(translated, ctx, openaiResponsesTranslationInterceptors, async () =>
+        await dispatchOpenAIResponses(translated, ctx));
+    });
 
     if (chainResult.type !== 'events') return chainResult;
 
