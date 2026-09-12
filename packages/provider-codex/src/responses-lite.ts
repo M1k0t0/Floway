@@ -21,16 +21,25 @@ interface CallableIdentity {
   type: 'function_call' | 'custom_tool_call';
 }
 
+type CallableEntries = Map<string, Map<string, CallableIdentity>>;
+
 interface CodexResponsesCallableIdentityMap {
-  readonly byWireName: ReadonlyMap<string, CallableIdentity>;
+  readonly byNamespace: ReadonlyMap<string, ReadonlyMap<string, CallableIdentity>>;
 }
 
-type CodexResponsesRequestEchoes = Pick<CodexResponsesBody, 'tools' | 'instructions' | 'parallel_tool_calls' | 'reasoning'>;
+type CodexResponsesRequestEchoes = Pick<CodexResponsesBody, 'tools' | 'instructions'>;
+
+interface CodexResponsesGeneratedPrefixItem {
+  item: OpenAIResponsesInputAdditionalToolsItem | CodexBaseInstructionsMessage;
+  sourceItems: readonly OpenAIResponsesInputAdditionalToolsItem[];
+  callerCopies: number;
+}
 
 export interface CodexResponsesLiteRequest {
   body: CodexResponsesBody;
   callableIdentities: CodexResponsesCallableIdentityMap;
   requestEchoes: CodexResponsesRequestEchoes;
+  generatedPrefix: readonly CodexResponsesGeneratedPrefixItem[];
 }
 
 // Official Codex folds flat function/custom tools into this namespace and tags
@@ -79,33 +88,36 @@ const isAdditionalToolsItem = (
   && Array.isArray(value.tools)
   && (value.id === undefined || value.id === null || typeof value.id === 'string');
 
-const callableKey = (namespace: string | undefined, name: string): string =>
-  JSON.stringify([namespace ?? null, name]);
-
 // Codex accepts absent and empty namespaces as the default function namespace.
 // Use the same lookup for output items and their streaming event lifecycles.
 // https://github.com/openai/codex/blob/6b9826e3aa83b1a5947db50f4332cb9c65f1b340/codex-rs/protocol/src/tool_name.rs#L39-L44
+const liteNamespace = (namespace: string | null | undefined): string =>
+  namespace == null || namespace === '' ? DEFAULT_FUNCTION_NAMESPACE : namespace;
+
 const lookupLiteCallable = (
   identities: CodexResponsesCallableIdentityMap,
   item: Pick<CallableIdentity, 'namespace' | 'name'>,
-): CallableIdentity | undefined => {
-  const namespace = item.namespace ?? DEFAULT_FUNCTION_NAMESPACE;
-  return identities.byWireName.get(callableKey(namespace === '' ? DEFAULT_FUNCTION_NAMESPACE : namespace, item.name));
-};
+): CallableIdentity | undefined =>
+  identities.byNamespace.get(liteNamespace(item.namespace))?.get(item.name);
 
 const registerCallable = (
-  entries: Map<string, CallableIdentity>,
+  entries: CallableEntries,
   wire: CallableIdentity,
   standard: CallableIdentity,
 ): void => {
-  const key = callableKey(wire.namespace, wire.name);
-  const current = entries.get(key);
+  const namespace = liteNamespace(wire.namespace);
+  let names = entries.get(namespace);
+  if (names === undefined) {
+    names = new Map();
+    entries.set(namespace, names);
+  }
+  const current = names.get(wire.name);
   if (current !== undefined && (
     current.name !== standard.name || current.namespace !== standard.namespace || current.type !== standard.type
   )) {
-    throw new TypeError(`Codex Responses Lite cannot preserve distinct callable identities for ${key}`);
+    throw new TypeError(`Codex Responses Lite cannot preserve distinct callable identities for ${JSON.stringify([namespace, wire.name])}`);
   }
-  entries.set(key, standard);
+  names.set(wire.name, standard);
 };
 
 const identityForTool = (
@@ -117,10 +129,14 @@ const identityForTool = (
   type: tool.type === 'function' ? 'function_call' : 'custom_tool_call',
 });
 
-const registerUnchangedTool = (
-  entries: Map<string, CallableIdentity>,
+const registerToolIdentities = (
+  entries: CallableEntries,
   tool: OpenAIResponsesTool,
 ): void => {
+  if (isCallableTool(tool)) {
+    registerCallable(entries, identityForTool(tool, DEFAULT_FUNCTION_NAMESPACE), identityForTool(tool));
+    return;
+  }
   if (!isNamespaceTool(tool)) return;
   for (const child of tool.tools) {
     if (!isCallableTool(child)) continue;
@@ -129,10 +145,11 @@ const registerUnchangedTool = (
   }
 };
 
-// Collect the same two Responses declaration surfaces, in wire order, that
-// CLIProxyAPI inventories before translating tools.
+// Only these two declaration surfaces are consolidated into the Lite prefix.
+// Search-loaded declarations stay at their input position and are inventoried
+// separately, without becoming prefix tools.
 // https://github.com/router-for-me/CLIProxyAPI/blob/7fac6b15bcfe5ea55c18c9eaec8e5b7e6457d974/internal/util/responses_tools.go#L65-L73
-const collectTools = (body: CodexResponsesBody): OpenAIResponsesTool[] => {
+const collectPrefixTools = (body: CodexResponsesBody): OpenAIResponsesTool[] => {
   const tools: OpenAIResponsesTool[] = [];
   if (Array.isArray(body.tools)) {
     for (const tool of body.tools) tools.push(tool);
@@ -146,7 +163,6 @@ const collectTools = (body: CodexResponsesBody): OpenAIResponsesTool[] => {
 
 const toolsForLite = (
   tools: readonly OpenAIResponsesTool[],
-  entries: Map<string, CallableIdentity>,
 ): OpenAIResponsesTool[] => {
   const output: OpenAIResponsesTool[] = [];
   const functionChildren: Array<Extract<OpenAIResponsesTool, { type: 'function' | 'custom' }>> = [];
@@ -157,27 +173,16 @@ const toolsForLite = (
     if (isCallableTool(tool)) {
       functionIndex ??= output.length;
       functionChildren.push(tool);
-      registerCallable(
-        entries,
-        identityForTool(tool, DEFAULT_FUNCTION_NAMESPACE),
-        identityForTool(tool),
-      );
       continue;
     }
     if (isNamespaceTool(tool) && tool.name === DEFAULT_FUNCTION_NAMESPACE) {
       functionIndex ??= output.length;
       if (tool.description.trim() !== '') functionDescription = tool.description;
-      for (const child of tool.tools) {
-        functionChildren.push(child);
-        if (!isCallableTool(child)) continue;
-        const identity = identityForTool(child, DEFAULT_FUNCTION_NAMESPACE);
-        registerCallable(entries, identity, identity);
-      }
+      for (const child of tool.tools) functionChildren.push(child);
       continue;
     }
 
     output.push(tool);
-    registerUnchangedTool(entries, tool);
   }
 
   if (functionIndex !== undefined && functionChildren.length > 0) {
@@ -247,19 +252,54 @@ const removeLiteImageDetail = (
   return item;
 };
 
+// Prefix matching is structural rather than ID-only: caller history can carry
+// the same metadata or IDs, and JSON object key order need not survive the wire.
+const sameJsonValue = (left: unknown, right: unknown): boolean => {
+  if (left === right) return true;
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length && left.every((value, index) => sameJsonValue(value, right[index]));
+  }
+  if (!isRecord(left) || !isRecord(right)) return false;
+  const leftKeys = Object.keys(left).filter(key => left[key] !== undefined);
+  const rightKeys = Object.keys(right).filter(key => right[key] !== undefined);
+  return leftKeys.length === rightKeys.length && leftKeys.every(key => Object.hasOwn(right, key) && sameJsonValue(left[key], right[key]));
+};
+
+const matchesGeneratedPrefix = (
+  item: OpenAIResponsesInputItem | OpenAIResponsesOutputItem,
+  generated: CodexResponsesGeneratedPrefixItem['item'],
+): boolean => item.type === generated.type && 'id' in item && item.id === generated.id && sameJsonValue(item, generated);
+
 export const encodeCodexResponsesLiteRequest = (
   body: CodexResponsesBody,
   threadId: string,
 ): CodexResponsesLiteRequest => {
   const next: CodexResponsesBody = { ...body };
-  const entries = new Map<string, CallableIdentity>();
+  const entries: CallableEntries = new Map();
+  const tools = collectPrefixTools(body);
+  for (const tool of tools) registerToolIdentities(entries, tool);
+  // Search results declare callable identities at their existing history position.
+  // Inventory them for inverse repair without moving or rewriting their tools.
+  // https://github.com/openai/openai-node/blob/39a15b412fc129df15339ebd6e3e6547854aa81f/src/resources/responses/responses.ts#L7119-L7223
+  for (const item of body.input) {
+    if (item.type !== 'tool_search_output' || !Array.isArray(item.tools)) continue;
+    for (const tool of item.tools) registerToolIdentities(entries, tool);
+  }
   const threadNamespace = uuidV5(threadId, UUID_NAMESPACE_OID);
   const input: OpenAIResponsesInputItem[] = body.input.filter(item => !isAdditionalToolsItem(item));
-  input.unshift(makeAdditionalToolsItem(toolsForLite(collectTools(body), entries), threadNamespace));
+  const toolsItem = makeAdditionalToolsItem(toolsForLite(tools), threadNamespace);
+  const generatedPrefix: CodexResponsesGeneratedPrefixItem[] = [{
+    item: toolsItem, sourceItems: body.input.filter(isAdditionalToolsItem), callerCopies: 0,
+  }];
+  input.unshift(toolsItem);
   if (Array.isArray(body.tools) || body.tools === null) delete next.tools;
 
   if (typeof body.instructions === 'string' && body.instructions.length > 0) {
-    input.splice(1, 0, makeBaseInstructionsMessage(body.instructions, threadNamespace));
+    const item = makeBaseInstructionsMessage(body.instructions, threadNamespace);
+    generatedPrefix.push({
+      item, sourceItems: [], callerCopies: body.input.filter(source => matchesGeneratedPrefix(source, item)).length,
+    });
+    input.splice(1, 0, item);
     delete next.instructions;
   } else if (body.instructions === undefined || body.instructions === null || body.instructions === '') {
     delete next.instructions;
@@ -279,14 +319,13 @@ export const encodeCodexResponsesLiteRequest = (
 
   return {
     body: next,
-    callableIdentities: { byWireName: entries },
+    callableIdentities: { byNamespace: entries },
+    generatedPrefix,
     // Resource-bearing events echo request fields in the upstream format.
     // https://github.com/router-for-me/CLIProxyAPI/blob/7fac6b15bcfe5ea55c18c9eaec8e5b7e6457d974/internal/translator/openai/openai/responses/openai_openai-responses_response.go
     requestEchoes: {
       tools: body.tools,
       instructions: body.instructions,
-      parallel_tool_calls: body.parallel_tool_calls,
-      reasoning: body.reasoning,
     },
   };
 };
@@ -302,7 +341,9 @@ const restoreCallableItem = (
 ): OpenAIResponsesOutputItem => {
   if (item.type !== 'function_call' && item.type !== 'custom_tool_call') return item;
   const standard = lookupLiteCallable(identities, item);
-  if (standard === undefined) return item;
+  if (standard === undefined || (
+    item.type === standard.type && item.name === standard.name && item.namespace === standard.namespace
+  )) return item;
 
   const restored = { ...item } as Record<string, unknown>;
   restored.name = standard.name;
@@ -327,7 +368,10 @@ const restoreCallableItem = (
   return restored as unknown as OpenAIResponsesOutputItem;
 };
 
-const REQUEST_ECHO_FIELDS = ['tools', 'instructions', 'parallel_tool_calls', 'reasoning'] as const;
+// Only these fields changed representation. Reasoning (including context) and
+// parallel_tool_calls report effective upstream settings, not request echoes.
+// https://github.com/openai/openai-node/blob/61539248cbe04665de68a71e6fd878127ae4db87/src/resources/shared.ts#L262-L269
+const REQUEST_ECHO_FIELDS = ['tools', 'instructions'] as const;
 
 export const restoreCodexResponsesResult = (
   result: OpenAIResponsesResult,
@@ -350,12 +394,39 @@ export const restoreCodexResponsesResult = (
   return restored;
 };
 
+// Remote compact output can retain instruction/tool prefixes. Unlike Codex's
+// session-specific filter, this boundary must keep caller-owned developer items.
+// Invert one matching generated representation, never an entire item family.
+// https://github.com/openai/codex/blob/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/core/src/compact_remote.rs
+const restoreCompactedPrefix = (
+  output: OpenAIResponsesOutputItem[],
+  generatedPrefix: readonly CodexResponsesGeneratedPrefixItem[],
+): OpenAIResponsesOutputItem[] => {
+  let restored = output;
+  for (const generated of generatedPrefix) {
+    const matches = restored.filter(item => matchesGeneratedPrefix(item, generated.item));
+    // Identical caller history makes a lone echo ambiguous. Preserve those
+    // copies, and consume at most the one extra representation we generated.
+    if (matches.length <= generated.callerCopies) continue;
+    let replaced = false;
+    restored = restored.flatMap(item => {
+      if (replaced || !matchesGeneratedPrefix(item, generated.item)) return [item];
+      replaced = true;
+      // Only input carriers were merged into this prefix; top-level tools and
+      // instructions remain request fields, so they contribute no history here.
+      return generated.sourceItems as readonly OpenAIResponsesOutputItem[];
+    });
+  }
+  return restored;
+};
+
 export const restoreCodexResponsesCompactionResult = (
   result: OpenAIResponsesCompactionResult,
   identities: CodexResponsesCallableIdentityMap,
+  generatedPrefix: readonly CodexResponsesGeneratedPrefixItem[] = [],
 ): OpenAIResponsesCompactionResult => ({
   ...result,
-  output: result.output.map(item => restoreCallableItem(item, identities)),
+  output: restoreCompactedPrefix(result.output, generatedPrefix).map(item => restoreCallableItem(item, identities)),
 });
 
 export const restoreCodexResponsesEvent = (

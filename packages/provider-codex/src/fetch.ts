@@ -684,7 +684,7 @@ const performUnaryCompactCall = async (
     modelKey: opts.model.id,
     result: prepared.lite === undefined
       ? result
-      : restoreCodexResponsesCompactionResult(result, prepared.lite.callableIdentities),
+      : restoreCodexResponsesCompactionResult(result, prepared.lite.callableIdentities, prepared.lite.generatedPrefix),
   };
 };
 

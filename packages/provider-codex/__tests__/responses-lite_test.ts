@@ -92,7 +92,7 @@ describe('Standard to Responses Lite encoder', () => {
       tools: [{ type: 'namespace', name: 'functions', description: '', tools: [functionTool('lookup')] }],
     }]);
     expect(itemId(encoded.body.input[0])).not.toBe('at_standard');
-    expect(encoded.callableIdentities.byWireName.size).toBe(1);
+    expect(encoded.callableIdentities.byNamespace.get('functions')?.size).toBe(1);
   });
 
   test.each([undefined, null, ''])('emits an empty tools carrier without empty instructions %s', instructions => {
@@ -168,11 +168,213 @@ describe('Standard to Responses Lite encoder', () => {
     expect(encodeCodexResponsesLiteRequest(body, 'thread').body.tool_choice).toBe(tool_choice);
   });
 
+  test('indexes a long namespace once rather than repeating it in every callable key', () => {
+    const namespace = 'n'.repeat(65_536);
+    const tools = Array.from({ length: 1_000 }, (_, index) => functionTool(`tool${index}`));
+    const encoded = encodeCodexResponsesLiteRequest(requestBody({
+      tools: [{ type: 'namespace', name: namespace, description: '', tools }],
+    }), 'thread');
+    const scopes = encoded.callableIdentities.byNamespace;
+    expect([...scopes.keys()]).toEqual([namespace]);
+    const names = scopes.get(namespace)!;
+    expect([...names.keys()]).toEqual(tools.map(tool => tool.name));
+    expect(namespace.length + [...names.keys()].reduce((size, name) => size + name.length, 0)).toBeLessThan(75_000);
+    for (const tool of tools) expect(names.get(tool.name)).toEqual({ namespace, name: tool.name, type: 'function_call' });
+  });
+
+  test('keeps namespace/name pairs and callable kinds distinct, including implicit namespace aliases', () => {
+    const tools: OpenAIResponsesTool[] = [
+      { type: 'namespace', name: 'a.b', description: '', tools: [functionTool('c')] },
+      { type: 'namespace', name: 'a', description: '', tools: [customTool('b.c')] },
+      { type: 'namespace', name: '', description: '', tools: [customTool('implicit')] },
+    ];
+    const encoded = encodeCodexResponsesLiteRequest(requestBody({ tools }), 'thread');
+    expect(encoded.callableIdentities.byNamespace.get('a.b')?.get('c')).toEqual({ namespace: 'a.b', name: 'c', type: 'function_call' });
+    expect(encoded.callableIdentities.byNamespace.get('a')?.get('b.c')).toEqual({ namespace: 'a', name: 'b.c', type: 'custom_tool_call' });
+    for (const namespace of [undefined, null, '', 'functions']) {
+      expect(restoreCodexResponsesResult(response({
+        output: [{
+          type: 'function_call', id: 'fc_implicit', call_id: 'call_implicit', name: 'implicit', namespace, arguments: 'text', status: 'completed',
+        } as OpenAIResponsesOutputItem],
+      }), encoded.callableIdentities).output[0]).toMatchObject({ type: 'custom_tool_call', namespace: '', name: 'implicit', input: 'text' });
+    }
+    for (const namespace of ['', 'functions']) {
+      expect(() => encodeCodexResponsesLiteRequest(requestBody({
+        tools: [customTool('same'), { type: 'namespace', name: namespace, description: '', tools: [customTool('same')] }],
+      }), 'thread')).toThrow('cannot preserve distinct callable identities');
+    }
+    expect(() => encodeCodexResponsesLiteRequest(requestBody({
+      tools: [functionTool('same'), customTool('same')],
+    }), 'thread')).toThrow('cannot preserve distinct callable identities');
+  });
+
   test.each(['function', 'custom'] as const)('rejects a flat callable colliding with a namespaced %s', type => {
     const child = type === 'function' ? functionTool('foo') : customTool('foo');
     expect(() => encodeCodexResponsesLiteRequest(requestBody({
       tools: [functionTool('foo'), { type: 'namespace', name: 'functions', description: '', tools: [child] }],
     }), 'thread')).toThrow('Codex Responses Lite cannot preserve distinct callable identities for ["functions","foo"]');
+  });
+});
+
+describe('Responses Lite search-loaded identities', () => {
+  test.each([undefined, 'database'])('inventories search tools in namespace %j without changing their load position', async namespace => {
+    const tools: OpenAIResponsesTool[] = namespace === undefined
+      ? [customTool('edit')]
+      : [{ type: 'namespace', name: namespace, description: 'Loaded tools', tools: [customTool('edit')] }];
+    const loaded: OpenAIResponsesInputItem = {
+      type: 'tool_search_output', id: 'search_output', call_id: 'search_call', execution: 'client', status: 'completed', tools,
+    };
+    const body = requestBody({
+      tools: [{ type: 'tool_search', execution: 'client' }],
+      input: [
+        { type: 'message', role: 'user', content: 'Find and run edit.' },
+        { type: 'tool_search_call', id: 'search_item', call_id: 'search_call', execution: 'client', arguments: { query: 'edit' }, status: 'completed' },
+        loaded,
+      ],
+    });
+    const original = structuredClone(body);
+    const encoded = encodeCodexResponsesLiteRequest(body, 'thread');
+    expect(encoded.body.input[0]).toMatchObject({ type: 'additional_tools', tools: body.tools });
+    expect(encoded.body.input.slice(1)).toEqual(body.input);
+    expect(encoded.body.input[3]).toBe(loaded);
+    expect(encoded.callableIdentities.byNamespace.get(namespace ?? 'functions')?.get('edit')).toEqual({
+      name: 'edit', type: 'custom_tool_call', ...(namespace === undefined ? {} : { namespace }),
+    });
+    expect(body).toEqual(original);
+
+    // Both backend event families are intentional fixtures, not a claim about
+    // which family a live search-loaded custom tool will use.
+    for (const functionFamily of [true, false]) {
+      const item: OpenAIResponsesOutputItem = functionFamily
+        ? { type: 'function_call', id: 'edit_item', call_id: 'edit_call', name: 'edit', namespace: namespace ?? 'functions', arguments: 'patch', status: 'completed' }
+        : { type: 'custom_tool_call', id: 'edit_item', call_id: 'edit_call', name: 'edit', ...(namespace === undefined ? {} : { namespace }), input: 'patch' };
+      const expected = functionFamily
+        ? { type: 'custom_tool_call', id: item.id, call_id: item.call_id, name: 'edit', ...(namespace === undefined ? {} : { namespace }), input: 'patch', status: 'completed' }
+        : item;
+      const wire = response({ output: [item] });
+      const restored = restoreCodexResponsesResult(wire, encoded.callableIdentities);
+      expect(restored.output).toEqual([expected]);
+      if (!functionFamily) expect(restored.output[0]).toBe(item);
+      expect(restoreCodexResponsesCompactionResult({
+        id: 'cmp_search', object: 'response.compaction', output: [item],
+      }, encoded.callableIdentities, encoded.generatedPrefix).output).toEqual([expected]);
+      const events: OpenAIResponsesStreamEvent[] = [
+        { type: 'response.output_item.added', output_index: 0, item },
+        { type: functionFamily ? 'response.function_call_arguments.delta' : 'response.custom_tool_call_input.delta', item_id: 'edit_item', output_index: 0, delta: 'patch' },
+        functionFamily
+          ? { type: 'response.function_call_arguments.done', item_id: 'edit_item', output_index: 0, arguments: 'patch' }
+          : { type: 'response.custom_tool_call_input.done', item_id: 'edit_item', output_index: 0, input: 'patch' },
+        { type: 'response.output_item.done', output_index: 0, item },
+        { type: 'response.completed', response: wire },
+      ];
+      const frames = (async function* (): AsyncGenerator<ProtocolFrame<OpenAIResponsesStreamEvent>> {
+        for (const event of events) yield { type: 'event', event };
+      })();
+      const output: ProtocolFrame<OpenAIResponsesStreamEvent>[] = [];
+      for await (const frame of restoreCodexResponsesFrames(frames, encoded.callableIdentities)) output.push(frame);
+      expect(output[0]).toMatchObject({ event: { item: expected } });
+      expect(output[1]).toEqual({ type: 'event', event: { ...events[1], type: 'response.custom_tool_call_input.delta' } });
+      expect(output[2]).toMatchObject({ event: { type: 'response.custom_tool_call_input.done', input: 'patch' } });
+      expect(output[2]).not.toHaveProperty('event.arguments');
+      expect(output[3]).toMatchObject({ event: { item: expected } });
+      expect(output[4]).toMatchObject({ event: { response: { output: [expected] } } });
+      if (!functionFamily) expect(output).toEqual(events.map(event => ({ type: 'event', event })));
+    }
+  });
+
+  test('keeps search-loaded type/identity collision guards without relocating declarations', () => {
+    expect(() => encodeCodexResponsesLiteRequest(requestBody({
+      tools: [functionTool('edit')],
+      input: [{ type: 'tool_search_output', tools: [customTool('edit')] }],
+    }), 'thread')).toThrow('cannot preserve distinct callable identities');
+  });
+});
+
+describe('Responses Lite compact prefix provenance', () => {
+  const compact = (output: readonly OpenAIResponsesInputItem[]) => ({
+    id: 'cmp_resource', object: 'response.compaction', output: output as OpenAIResponsesOutputItem[],
+  });
+  const opaque: OpenAIResponsesInputItem = { type: 'compaction', id: 'cmp_item', encrypted_content: 'opaque+encrypted==' };
+
+  test.each(['top-level', 'input', 'mixed'] as const)('restores only generated %s representations before replay', source => {
+    const callerTools = source === 'top-level' ? [] : [additionalTools('at_caller', [customTool('patch')])];
+    const callerDeveloper = {
+      type: 'message' as const, role: 'developer' as const, id: 'msg_caller', content: [{ type: 'input_text' as const, text: 'Caller history' }],
+      internal_chat_message_metadata_passthrough: { content_item_kinds: ['model.base_instructions'] },
+    };
+    const body = requestBody({
+      ...(source === 'input' ? {} : { tools: [functionTool('lookup')] }),
+      instructions: 'Old instructions',
+      input: [
+        ...callerTools, callerDeveloper, { type: 'message', role: 'user', content: 'Continue' },
+        { type: 'function_call', id: 'past_call', call_id: 'past', name: 'historical', arguments: '{}', status: 'completed' },
+        { type: 'function_call_output', call_id: 'past', output: 'done' },
+      ],
+    });
+    const original = structuredClone(body);
+    const encoded = encodeCodexResponsesLiteRequest(body, 'thread');
+    // Deliberately echoed prefixes model the supported synthetic compact case.
+    const wire = compact(structuredClone([...encoded.body.input, opaque]));
+    const restored = restoreCodexResponsesCompactionResult(wire, encoded.callableIdentities, encoded.generatedPrefix);
+    expect(restored.output).toEqual([...body.input, opaque]);
+    callerTools.forEach((item, index) => expect(restored.output[index]).toBe(item));
+    const replay = encodeCodexResponsesLiteRequest({
+      ...body, instructions: 'New instructions', input: restored.output as OpenAIResponsesInputItem[],
+    }, 'thread');
+    expect(replay.body.input[0]).toEqual(encoded.body.input[0]);
+    expect(replay.body.input[1]).toMatchObject({ content: [{ type: 'input_text', text: 'New instructions' }] });
+    expect(replay.body.input.slice(2)).toEqual([...body.input.filter(item => item.type !== 'additional_tools'), opaque]);
+    expect(body).toEqual(original);
+    expect(wire.output).toEqual([...encoded.body.input, opaque]);
+  });
+
+  test('does not reconstruct source carriers or instructions when no generated prefix is echoed', () => {
+    const user: OpenAIResponsesInputItem = { type: 'message', role: 'user', content: 'Retained' };
+    const encoded = encodeCodexResponsesLiteRequest(requestBody({
+      input: [additionalTools('at_source', [functionTool('lookup')]), user], instructions: 'Base',
+    }), 'thread');
+    const wire = compact([user, opaque]);
+    const restored = restoreCodexResponsesCompactionResult(wire, encoded.callableIdentities, encoded.generatedPrefix);
+    expect(restored).toEqual(wire);
+    expect(restored.output[0]).toBe(user);
+    expect(restored.output[1]).toBe(opaque);
+    expect(() => encodeCodexResponsesLiteRequest({
+      input: restored.output as OpenAIResponsesInputItem[], tools: [functionTool('lookup')],
+    }, 'thread')).not.toThrow();
+  });
+
+  test('preserves caller carriers, developer history and modified or opaque lookalikes', () => {
+    const encoded = encodeCodexResponsesLiteRequest(requestBody({ tools: [functionTool('lookup')], instructions: 'Base' }), 'thread');
+    const generated = encoded.body.input[0] as OpenAIResponsesInputAdditionalToolsItem;
+    const base = encoded.body.input[1]!;
+    const output: OpenAIResponsesInputItem[] = [
+      additionalTools('at_caller', [customTool('caller')]),
+      { ...generated, id: 'at_other' },
+      { ...generated, tools: [customTool('changed')] },
+      { ...generated, extra: 'caller extension' } as OpenAIResponsesInputItem,
+      { ...generated, role: 'user' } as unknown as OpenAIResponsesInputItem,
+      { ...base, id: 'msg_caller' } as OpenAIResponsesInputItem,
+      { ...base, content: [{ type: 'input_text', text: 'Changed' }] } as OpenAIResponsesInputItem,
+      { type: 'future_output', id: generated.id, encrypted_content: 'opaque' } as unknown as OpenAIResponsesInputItem,
+      opaque,
+    ];
+    const wire = compact(output);
+    const restored = restoreCodexResponsesCompactionResult(wire, encoded.callableIdentities, encoded.generatedPrefix);
+    expect(restored).toEqual(wire);
+    output.forEach((item, index) => expect(restored.output[index]).toBe(item));
+  });
+
+  test('matches generated JSON independent of key order, without removing identical caller history', () => {
+    const seed = encodeCodexResponsesLiteRequest(requestBody({ instructions: 'Base' }), 'thread');
+    const callerBase = seed.body.input[1]!;
+    const encoded = encodeCodexResponsesLiteRequest(requestBody({ instructions: 'Base', input: [callerBase] }), 'thread');
+    const reordered = Object.fromEntries(Object.entries(encoded.body.input[1]!).reverse()) as unknown as OpenAIResponsesInputItem;
+    const withEcho = restoreCodexResponsesCompactionResult(compact([reordered, callerBase, opaque]), encoded.callableIdentities, encoded.generatedPrefix);
+    expect(withEcho.output).toEqual([callerBase, opaque]);
+    expect(withEcho.output[0]).toBe(callerBase);
+    const withoutEcho = restoreCodexResponsesCompactionResult(compact([callerBase, opaque]), encoded.callableIdentities, encoded.generatedPrefix);
+    expect(withoutEcho.output).toEqual([callerBase, opaque]);
+    expect(withoutEcho.output[0]).toBe(callerBase);
   });
 });
 
@@ -186,7 +388,8 @@ describe('Responses Lite inverse repair', () => {
       const encoded = encodeCodexResponsesLiteRequest(body, 'thread');
       const wire = {
         ...response({
-          tools: [], instructions: null, parallel_tool_calls: false, reasoning: { context: 'all_turns' }, tool_choice: 'auto',
+          tools: [], instructions: null, parallel_tool_calls: false,
+          reasoning: { effort: 'normalized_effort', summary: 'detailed', context: 'all_turns', mode: 'future_mode' }, tool_choice: 'auto',
           service_tier: 'future_tier',
         }),
         future: { untouched: true },
@@ -194,6 +397,8 @@ describe('Responses Lite inverse repair', () => {
       const restored = restoreCodexResponsesResult(wire, encoded.callableIdentities, encoded.requestEchoes);
       expect(restored).toEqual({ ...wire, ...encoded.requestEchoes });
       expect(restored.tools).toBe(body.tools);
+      expect(restored.reasoning).toBe(wire.reasoning);
+      expect(restored.parallel_tool_calls).toBe(false);
       expect(restored.tool_choice).toBe('auto');
       expect(restoreCodexResponsesEvent({ type, response: wire }, encoded.callableIdentities, encoded.requestEchoes)).toEqual({ type, response: restored });
       expect(wire.parallel_tool_calls).toBe(false);
@@ -205,8 +410,26 @@ describe('Responses Lite inverse repair', () => {
     const restored = restoreCodexResponsesResult(response({
       instructions: null, tools: [], parallel_tool_calls: false, reasoning: { context: 'all_turns' }, tool_choice: 'auto',
     }), encoded.callableIdentities, encoded.requestEchoes);
-    for (const field of ['instructions', 'tools', 'parallel_tool_calls', 'reasoning']) expect(restored).not.toHaveProperty(field);
+    for (const field of ['instructions', 'tools']) expect(restored).not.toHaveProperty(field);
+    expect(restored.parallel_tool_calls).toBe(false);
+    expect(restored.reasoning).toEqual({ context: 'all_turns' });
     expect(restored.tool_choice).toBe('auto');
+  });
+
+  test.each([
+    { reasoning: null, parallel_tool_calls: false },
+    { reasoning: {}, parallel_tool_calls: true },
+    { reasoning: { effort: 'effective', summary: 'future_summary', context: 'future_context', mode: { native: true } }, parallel_tool_calls: false },
+    {},
+  ])('preserves effective reasoning and parallel settings without request substitution: %j', effective => {
+    const encoded = encodeCodexResponsesLiteRequest(requestBody({
+      reasoning: { effort: 'requested', context: 'current_turn' }, parallel_tool_calls: true,
+    }), 'thread');
+    const restored = restoreCodexResponsesResult(response(effective), encoded.callableIdentities, encoded.requestEchoes);
+    expect(restored.reasoning).toBe(effective.reasoning);
+    expect(restored.parallel_tool_calls).toBe(effective.parallel_tool_calls);
+    if (!('reasoning' in effective)) expect(restored).not.toHaveProperty('reasoning');
+    if (!('parallel_tool_calls' in effective)) expect(restored).not.toHaveProperty('parallel_tool_calls');
   });
 
   test.each([undefined, '', 'functions'])('repairs interleaved callable event families with default namespace %j', async namespace => {
