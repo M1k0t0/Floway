@@ -34,6 +34,30 @@ describe('fetchCodexCatalog', () => {
     expect(headers.get('openai-beta')).toBeNull();
   });
 
+  test('keeps the stable CLI catalog operational context and private Lite capability', async () => {
+    // https://github.com/openai/codex/blob/6b9826e3aa83b1a5947db50f4332cb9c65f1b340/codex-rs/models-manager/models.json#L1-L70
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(okJson({
+      models: [{
+        slug: 'gpt-6-astra', display_name: 'GPT-6-Astra', context_window: 272000, max_context_window: 872000,
+        supports_experimental_context: true, minimal_client_version: '0.153.0', use_responses_lite: true,
+        default_reasoning_level: 'low', input_modalities: ['text', 'image'],
+        supported_reasoning_levels: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'].map(effort => ({ effort })),
+      }],
+    }));
+    const [raw] = await fetchCodexCatalog({ accessToken: 'at', accountId: 'acc', fetcher: directFetcher });
+    const model = codexRawToProviderModel(raw, new Set());
+    expect(spy.mock.calls[0][0]).toBe('https://chatgpt.com/backend-api/codex/models?client_version=0.154.0');
+    const headers = new Headers(spy.mock.calls[0][1]?.headers);
+    expect(headers.get('user-agent')).toBe('codex_cli_rs/0.154.0 (Mac OS 26.5.0; arm64) iTerm.app/3.6.10');
+    expect(headers.get('version')).toBe('0.154.0');
+    expect(model.limits.max_context_window_tokens).toBe(272000);
+    expect(codexModelUsesResponsesLite(model)).toBe(true);
+    expect(model.chat).toEqual({
+      modalities: { input: ['text', 'image'], output: ['text'] },
+      reasoning: { effort: { supported: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], default: 'low' } },
+    });
+  });
+
   test('throws when upstream returns non-2xx (caller handles 401 retry)', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{"error":"unauthorized"}', { status: 401 }));
     await expect(fetchCodexCatalog({ accessToken: 'at', accountId: 'acc', fetcher: directFetcher })).rejects.toThrow(/401/);

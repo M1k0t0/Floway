@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { createUpstreamStateRepoStub } from './upstream-state-repo.ts';
-import { CODEX_ORIGINATOR, CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY, CODEX_RESPONSES_LITE_HEADER, CODEX_USER_AGENT } from '../src/constants.ts';
+import { CODEX_CLI_VERSION, CODEX_ORIGINATOR, CODEX_RESPONSES_LITE_CLIENT_METADATA_KEY, CODEX_RESPONSES_LITE_HEADER, CODEX_USER_AGENT } from '../src/constants.ts';
 import { callCodexAlphaSearch, callCodexOpenAIImagesGenerations, callCodexOpenAIResponses, callCodexOpenAIResponsesCompact, type CodexCallEffects } from '../src/fetch.ts';
 import * as responsesLite from '../src/responses-lite.ts';
 import type { CodexAccessTokenEntry, CodexAccountCredential, CodexQuotaSnapshotEntryMap, CodexUpstreamState } from '../src/state.ts';
@@ -206,7 +206,12 @@ describe('Codex private Responses wire selection', () => {
       for (const marker of ['true', 'false', undefined]) {
         const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => action === 'generate' ? sseEventsResponse([]) : compactJsonResponse());
         const body = {
-          input: [{ type: 'message' as const, role: 'user' as const, content: 'hello' }],
+          input: [
+            { type: 'message' as const, role: 'user' as const, content: 'hello' },
+            // The CLI emits this only with its opt-in reasoning_effort_override feature.
+            // https://github.com/openai/codex/blob/6b9826e3aa83b1a5947db50f4332cb9c65f1b340/codex-rs/core/src/session/reasoning_effort.rs#L16-L85
+            { type: 'configuration_update', reasoning: { effort: 'disabled' } } as unknown as OpenAIResponsesInputItem,
+          ],
           instructions: 'Base', tools: [tool], parallel_tool_calls: true,
           reasoning: { effort: 'future_effort', context: 'current_turn' },
           tool_choice: 'auto' as const,
@@ -227,7 +232,10 @@ describe('Codex private Responses wire selection', () => {
         const [url, init] = fetchSpy.mock.lastCall!;
         expect(url).toBe(`https://chatgpt.com/backend-api/codex/responses${action === 'compact' ? '/compact' : ''}`);
         const wire = await readJsonRequest(init as RequestInit) as Record<string, unknown>;
-        expect(new Headers(init?.headers).get(CODEX_RESPONSES_LITE_HEADER)).toBe(useResponsesLite ? 'true' : null);
+        const wireHeaders = new Headers(init?.headers);
+        expect(wireHeaders.get(CODEX_RESPONSES_LITE_HEADER)).toBe(useResponsesLite ? 'true' : null);
+        expect(wireHeaders.get('user-agent')).toBe('codex_cli_rs/0.154.0 (Mac OS 26.5.0; arm64) iTerm.app/3.6.10');
+        expect(wireHeaders.get('version')).toBe('0.154.0');
         expect(headers.get(CODEX_RESPONSES_LITE_HEADER)).toBe(marker ?? null);
         expect(body).toEqual(original);
         expect(wire.text).toEqual(body.text);
@@ -238,7 +246,7 @@ describe('Codex private Responses wire selection', () => {
           expect(wire.input).toEqual([
             { type: 'additional_tools', role: 'developer', id: expect.stringMatching(/^at_/), tools: [{ type: 'namespace', name: 'functions', description: '', tools: [tool] }] },
             { type: 'message', role: 'developer', id: expect.stringMatching(/^msg_/), content: [{ type: 'input_text', text: 'Base' }], internal_chat_message_metadata_passthrough: { content_item_kinds: ['model.base_instructions'] } },
-            body.input[0],
+            ...body.input,
           ]);
           expect(wire.parallel_tool_calls).toBe(false);
           expect(wire.reasoning).toEqual({ effort: 'future_effort', context: 'all_turns' });
@@ -551,6 +559,7 @@ describe('callCodexOpenAIResponses — upstream classification', () => {
     expect(headers.get('chatgpt-account-id')).toBe('acc');
     expect(headers.get('originator')).toBe(CODEX_ORIGINATOR);
     expect(headers.get('user-agent')).toBe(CODEX_USER_AGENT);
+    expect(headers.get('version')).toBe(CODEX_CLI_VERSION);
     expect(headers.get('accept')).toBe('text/event-stream');
     expect(headers.get('content-type')).toBe('application/json');
     expect(headers.get('session-id')).toBe('downstream-session');
@@ -1190,6 +1199,10 @@ describe('callCodexOpenAIImagesGenerations', () => {
     const secondHeaders = new Headers((imageCalls[1][1] as RequestInit).headers);
     expect(firstHeaders.get('originator')).toBe('chatgpt_cca');
     expect(secondHeaders.get('originator')).toBe('chatgpt_cca');
+    for (const headers of [firstHeaders, secondHeaders]) {
+      expect(headers.get('version')).toBe(CODEX_CLI_VERSION);
+      expect(headers.get('user-agent')).toBe(CODEX_USER_AGENT);
+    }
     expect(firstHeaders.get('x-codex-image-turn-id')).toMatch(UUID_V7_RE);
     expect(secondHeaders.get('x-codex-image-turn-id')).toBe(firstHeaders.get('x-codex-image-turn-id'));
   });

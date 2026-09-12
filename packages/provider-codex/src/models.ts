@@ -39,6 +39,7 @@ export const fetchCodexCatalog = async (opts: { accessToken: string; accountId: 
       'chatgpt-account-id': opts.accountId,
       originator: CODEX_ORIGINATOR,
       'user-agent': CODEX_USER_AGENT,
+      version: CODEX_CLI_VERSION,
       accept: 'application/json',
     },
     signal: opts.signal,

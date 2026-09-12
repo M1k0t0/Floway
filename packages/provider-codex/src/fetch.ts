@@ -2,6 +2,7 @@ import { ensureCodexAccessToken, invalidateCodexAccessToken, mintCodexAccessToke
 import { CodexOAuthSessionTerminatedError } from './auth/oauth.ts';
 import {
   CODEX_BACKEND_BASE,
+  CODEX_CLI_VERSION,
   CODEX_ALPHA_SEARCH_PATH,
   CODEX_OPENAI_IMAGES_EDITS_PATH,
   CODEX_OPENAI_IMAGES_GENERATIONS_PATH,
@@ -485,6 +486,7 @@ const dispatchCodexHttpCall = async (
   headers.set('chatgpt-account-id', opts.account.chatgptAccountId);
   headers.set('originator', CODEX_ORIGINATOR);
   headers.set('user-agent', CODEX_USER_AGENT);
+  headers.set('version', CODEX_CLI_VERSION);
   headers.set('accept', accept);
   headers.set('content-type', 'application/json');
   headers.set('session-id', identity.sessionId);
@@ -555,6 +557,7 @@ const dispatchCodexImageCall = async (
     'chatgpt-account-id': opts.account.chatgptAccountId,
     originator: trimHeader(opts.headers, 'originator') ?? CODEX_ORIGINATOR,
     'user-agent': CODEX_USER_AGENT,
+    version: CODEX_CLI_VERSION,
     accept: 'application/json',
     'content-type': 'application/json',
     'x-codex-image-turn-id': turnId,
