@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { CODEX_CLI_VERSION, CODEX_ORIGINATOR, CODEX_USER_AGENT } from '../src/constants.ts';
-import { codexImageProviderModel, codexPlanSupportsImages, codexRawToProviderModel, fetchCodexCatalog } from '../src/models.ts';
+import { codexImageProviderModels, codexPlanSupportsImages, codexRawToProviderModel, fetchCodexCatalog } from '../src/models.ts';
 import { priceRequest } from '@floway-dev/protocols/common';
 import { directFetcher, type FlagId } from '@floway-dev/provider';
 
@@ -262,11 +262,19 @@ describe('Codex image capability', () => {
     expect(codexPlanSupportsImages(planType)).toBe(expected);
   });
 
-  test('projects gpt-image-2 as a separate image model', () => {
-    const flags: ReadonlySet<FlagId> = new Set();
-    expect(codexImageProviderModel(flags)).toEqual({
-      id: 'gpt-image-2',
-      display_name: 'GPT-Image-2',
+  test('projects both built-in image models outside the chat catalog', () => {
+    expect(codexImageProviderModels(new Set()).map(model => model.id)).toEqual(['gpt-image-2', 'gpt-image-2.5']);
+  });
+
+  test.each([
+    ['gpt-image-2', 'GPT-Image-2'],
+    ['gpt-image-2.5', 'GPT-Image-2.5'],
+  ])('projects %s with image endpoints and per-token pricing', (id, displayName) => {
+    const flags: ReadonlySet<FlagId> = new Set(['openai-responses-web-search-shim']);
+    const model = codexImageProviderModels(flags).find(model => model.id === id);
+    expect(model).toEqual({
+      id,
+      display_name: displayName,
       owned_by: 'openai',
       kind: 'image',
       limits: {},
@@ -283,5 +291,15 @@ describe('Codex image capability', () => {
         }],
       },
     });
+    if (!model?.pricing) throw new Error(`expected pricing for ${id}`);
+    expect(model.enabledFlags).toBe(flags);
+    for (const serviceTier of [undefined, 'priority', 'future-tier']) {
+      expect(priceRequest(model.pricing, { serviceTier, inputTokens: 0 }).rates).toEqual({
+        input_tokens: '0.000005',
+        input_cache_read_tokens: '0.00000125',
+        input_image_tokens: '0.000008',
+        output_image_tokens: '0.00003',
+      });
+    }
   });
 });

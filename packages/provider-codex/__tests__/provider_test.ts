@@ -113,9 +113,11 @@ describe('createCodexProvider', () => {
     const models = await instance.instance.getProvidedModels(directFetcher);
     // Provider surfaces both visible and hidden upstream models — operators
     // can dispatch to `codex-auto-review` even though ChatGPT's UI hides it.
-    expect(models.map(m => m.id)).toEqual(['gpt-5.4', 'codex-auto-review', 'gpt-image-2']);
+    expect(models.map(m => m.id)).toEqual(['gpt-5.4', 'codex-auto-review', 'gpt-image-2', 'gpt-image-2.5']);
     expect(models[0].endpoints).toEqual({ openaiResponses: {} });
-    expect(models[2]).toMatchObject({ kind: 'image', endpoints: { openaiImagesGenerations: {}, openaiImagesEdits: {} } });
+    for (const model of models.slice(2)) {
+      expect(model).toMatchObject({ kind: 'image', endpoints: { openaiImagesGenerations: {}, openaiImagesEdits: {} } });
+    }
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(fetchSpy.mock.calls[0][0]).toMatch(/\/codex\/models/);
   });
@@ -130,7 +132,7 @@ describe('createCodexProvider', () => {
     });
     const instance = createCodexProvider(baseRecord);
     const models = await instance.instance.getProvidedModels(directFetcher);
-    expect(models.map(m => m.id)).toEqual(['gpt-5.4', 'codex-auto-review', 'gpt-image-2']);
+    expect(models.map(m => m.id)).toEqual(['gpt-5.4', 'codex-auto-review', 'gpt-image-2', 'gpt-image-2.5']);
     const urls = fetchSpy.mock.calls.map(c => typeof c[0] === 'string' ? c[0] : (c[0] as URL | Request).toString());
     expect(urls.some(u => u.includes('/oauth/token'))).toBe(true);
     expect(urls.some(u => u.includes('/codex/models'))).toBe(true);
@@ -167,14 +169,14 @@ describe('createCodexProvider', () => {
       config: { accounts: [{ email: 'a@b.com', chatgptAccountId: 'acc', chatgptUserId: 'usr', planType: 'future-plan' }] },
     };
     const models = await createCodexProvider(futureRecord).instance.getProvidedModels(directFetcher);
-    expect(models.map(model => model.id)).toContain('gpt-image-2');
+    expect(models.filter(model => model.kind === 'image').map(model => model.id)).toEqual(['gpt-image-2', 'gpt-image-2.5']);
   });
 
   test('getProvidedModels uses the refreshed access-token plan over import-time config', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => modelsResponse());
     current = recordWithAccessToken({ ...freshAccessToken, planType: 'free' });
     const downgraded = await createCodexProvider(baseRecord).instance.getProvidedModels(directFetcher);
-    expect(downgraded.map(model => model.id)).not.toContain('gpt-image-2');
+    expect(downgraded.filter(model => model.kind === 'image')).toEqual([]);
 
     const importedFree: UpstreamRecord = {
       ...baseRecord,
@@ -182,7 +184,7 @@ describe('createCodexProvider', () => {
     };
     current = recordWithAccessToken({ ...freshAccessToken, planType: 'plus' });
     const upgraded = await createCodexProvider(importedFree).instance.getProvidedModels(directFetcher);
-    expect(upgraded.map(model => model.id)).toContain('gpt-image-2');
+    expect(upgraded.filter(model => model.kind === 'image').map(model => model.id)).toEqual(['gpt-image-2', 'gpt-image-2.5']);
   });
 
   test('getProvidedModels propagates OAuth refresh failures', async () => {
@@ -258,47 +260,48 @@ describe('createCodexProvider', () => {
     if (!result.ok) expect(result.response.status).toBe(503);
   });
 
-  test('callOpenAIImagesGenerations posts gpt-image-2 through the ChatGPT Codex endpoint', async () => {
+  test.each(['gpt-image-2', 'gpt-image-2.5'])('callOpenAIImagesGenerations posts %s through the ChatGPT Codex endpoint', async modelId => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       created: 1,
       data: [{ b64_json: 'aW1hZ2U=' }],
     }), { status: 200, headers: { 'content-type': 'application/json' } }));
     const instance = createCodexProvider(baseRecord);
-    const model = stubProviderModel({ id: 'gpt-image-2', display_name: 'GPT-Image-2', kind: 'image', endpoints: { openaiImagesGenerations: {}, openaiImagesEdits: {} } });
+    const model = stubProviderModel({ id: modelId, display_name: modelId, kind: 'image', endpoints: { openaiImagesGenerations: {}, openaiImagesEdits: {} } });
     const options = noopUpstreamCallOptions();
     options.headers.set('x-codex-image-turn-id', 'turn-image');
     const result = await instance.instance.callOpenAIImagesGenerations(model, { prompt: 'an orange circle', quality: 'low' }, undefined, options);
     expect(result.response.status).toBe(200);
-    expect(result.modelKey).toBe('gpt-image-2');
+    expect(result.modelKey).toBe(modelId);
     const [url, init] = fetchSpy.mock.calls[0];
     expect(url).toBe('https://chatgpt.com/backend-api/codex/images/generations');
     const headers = new Headers((init as RequestInit).headers);
     expect(headers.get('authorization')).toBe('Bearer at');
     expect(headers.get('chatgpt-account-id')).toBe('acc');
     expect(headers.get('x-codex-image-turn-id')).toBe('turn-image');
-    expect(await readJsonRequest(init as RequestInit)).toEqual({ prompt: 'an orange circle', quality: 'low', model: 'gpt-image-2' });
+    expect(await readJsonRequest(init as RequestInit)).toEqual({ prompt: 'an orange circle', quality: 'low', model: modelId });
   });
 
-  test('callOpenAIImagesGenerations rejects an explicit Free plan without touching upstream', async () => {
+  test.each(['gpt-image-2', 'gpt-image-2.5'])('callOpenAIImagesGenerations rejects %s for an explicit Free plan without touching upstream', async modelId => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const freeRecord: UpstreamRecord = {
       ...baseRecord,
       config: { accounts: [{ email: 'a@b.com', chatgptAccountId: 'acc', chatgptUserId: 'usr', planType: 'free' }] },
     };
     const instance = createCodexProvider(freeRecord);
-    const model = stubProviderModel({ id: 'gpt-image-2', display_name: 'GPT-Image-2', kind: 'image', endpoints: { openaiImagesGenerations: {}, openaiImagesEdits: {} } });
+    const model = stubProviderModel({ id: modelId, display_name: modelId, kind: 'image', endpoints: { openaiImagesGenerations: {}, openaiImagesEdits: {} } });
     const result = await instance.instance.callOpenAIImagesGenerations(model, { prompt: 'an orange circle' }, undefined, noopUpstreamCallOptions());
     expect(result.response.status).toBe(403);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  test('callOpenAIImagesEdits returns an operation-neutral error for an explicit Free plan', async () => {
+  test.each(['gpt-image-2', 'gpt-image-2.5'])('callOpenAIImagesEdits returns an operation-neutral error for %s on an explicit Free plan', async modelId => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const freeRecord: UpstreamRecord = {
       ...baseRecord,
       config: { accounts: [{ email: 'a@b.com', chatgptAccountId: 'acc', chatgptUserId: 'usr', planType: 'free' }] },
     };
     const instance = createCodexProvider(freeRecord);
-    const model = stubProviderModel({ id: 'gpt-image-2', display_name: 'GPT-Image-2', kind: 'image', endpoints: { openaiImagesGenerations: {}, openaiImagesEdits: {} } });
+    const model = stubProviderModel({ id: modelId, display_name: modelId, kind: 'image', endpoints: { openaiImagesGenerations: {}, openaiImagesEdits: {} } });
     const result = await instance.instance.callOpenAIImagesEdits(model, {
       images: [{ type: 'reference', reference: { image_url: 'https://example.test/image.png' } }],
       parameters: { prompt: 'edit' },
@@ -307,15 +310,16 @@ describe('createCodexProvider', () => {
     expect(await result.response.json()).toEqual({
       error: { type: 'image_tools_unavailable', message: 'ChatGPT Free accounts do not provide Codex image tools.' },
     });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  test('callOpenAIImagesEdits sends uploads as JSON data URLs to the ChatGPT Codex endpoint', async () => {
+  test.each(['gpt-image-2', 'gpt-image-2.5'])('callOpenAIImagesEdits sends %s uploads as JSON data URLs to the ChatGPT Codex endpoint', async modelId => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       created: 1,
       data: [{ b64_json: 'ZWRpdA==' }],
     }), { status: 200, headers: { 'content-type': 'application/json' } }));
     const instance = createCodexProvider(baseRecord);
-    const model = stubProviderModel({ id: 'gpt-image-2', display_name: 'GPT-Image-2', kind: 'image', endpoints: { openaiImagesGenerations: {}, openaiImagesEdits: {} } });
+    const model = stubProviderModel({ id: modelId, display_name: modelId, kind: 'image', endpoints: { openaiImagesGenerations: {}, openaiImagesEdits: {} } });
     const options = noopUpstreamCallOptions();
     options.headers.set('originator', 'chatgpt_cca');
     const result = await instance.instance.callOpenAIImagesEdits(model, {
@@ -323,13 +327,14 @@ describe('createCodexProvider', () => {
       parameters: { prompt: 'make it blue' },
     }, undefined, options);
     expect(result.response.status).toBe(200);
+    expect(result.modelKey).toBe(modelId);
     const [url, init] = fetchSpy.mock.calls[0];
     expect(url).toBe('https://chatgpt.com/backend-api/codex/images/edits');
     expect(new Headers((init as RequestInit).headers).get('originator')).toBe('chatgpt_cca');
     expect(await readJsonRequest(init as RequestInit)).toEqual({
       prompt: 'make it blue',
       images: [{ image_url: 'data:image/png;base64,aW1hZ2U=' }],
-      model: 'gpt-image-2',
+      model: modelId,
     });
   });
 

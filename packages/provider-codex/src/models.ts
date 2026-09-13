@@ -1,12 +1,13 @@
 import {
   CODEX_BACKEND_BASE,
   CODEX_CLI_VERSION,
+  CODEX_IMAGE_2_5_MODEL_ID,
   CODEX_IMAGE_MODEL_ID,
   CODEX_MODELS_PATH,
   CODEX_ORIGINATOR,
   CODEX_USER_AGENT,
 } from './constants.ts';
-import { GPT_IMAGE_2_PRICING, pricingForCodexModelKey } from './pricing.ts';
+import { GPT_IMAGE_2_5_PRICING, GPT_IMAGE_2_PRICING, pricingForCodexModelKey } from './pricing.ts';
 import { type Fetcher, type FlagId, type ProviderModel, type UpstreamChatModelConfig } from '@floway-dev/provider';
 
 export interface CodexRawModel {
@@ -146,13 +147,14 @@ export const codexRawToProviderModel = (raw: CodexRawModel, enabledFlags: Readon
 export const codexPlanSupportsImages = (planType: string | undefined): boolean =>
   planType?.trim().toLowerCase() !== 'free';
 
-export const codexImageProviderModel = (enabledFlags: ReadonlySet<FlagId>): ProviderModel => ({
-  id: CODEX_IMAGE_MODEL_ID,
-  display_name: 'GPT-Image-2',
+export const codexImageProviderModels = (enabledFlags: ReadonlySet<FlagId>): ProviderModel[] => [
+  { id: CODEX_IMAGE_MODEL_ID, display_name: 'GPT-Image-2', pricing: GPT_IMAGE_2_PRICING },
+  { id: CODEX_IMAGE_2_5_MODEL_ID, display_name: 'GPT-Image-2.5', pricing: GPT_IMAGE_2_5_PRICING },
+].map(model => ({
+  ...model,
   owned_by: 'openai',
   kind: 'image',
   limits: {},
   endpoints: { openaiImagesGenerations: {}, openaiImagesEdits: {} },
   enabledFlags,
-  pricing: GPT_IMAGE_2_PRICING,
-});
+}));

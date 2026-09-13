@@ -53,6 +53,8 @@ export const CODEX_MODELS_PATH = '/codex/models';
 // https://github.com/openai/codex/blob/646f7c0a91b8e327d263335da68ae8ef212895ce/codex-rs/ext/image-generation/src/tool.rs#L51-L59
 // https://github.com/openai/codex/blob/646f7c0a91b8e327d263335da68ae8ef212895ce/codex-rs/codex-api/src/endpoint/images.rs#L33-L70
 export const CODEX_IMAGE_MODEL_ID = 'gpt-image-2';
+// https://openai.com/index/introducing-chatgpt-images-2-5/
+export const CODEX_IMAGE_2_5_MODEL_ID = 'gpt-image-2.5';
 export const CODEX_OPENAI_IMAGES_GENERATIONS_PATH = '/codex/images/generations';
 export const CODEX_OPENAI_IMAGES_EDITS_PATH = '/codex/images/edits';
 

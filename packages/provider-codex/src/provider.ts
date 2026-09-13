@@ -5,7 +5,7 @@ import { CODEX_DEFAULT_FLAGS } from './defaults.ts';
 import { callCodexAlphaSearch, callCodexOpenAIImagesEdits, callCodexOpenAIImagesGenerations, callCodexOpenAIResponses, callCodexOpenAIResponsesCompact, type CodexCallEffects } from './fetch.ts';
 import { CODEX_OPENAI_RESPONSES_BOUNDARY } from './interceptors/openai-responses/index.ts';
 import type { OpenAIResponsesBoundaryCtx } from './interceptors/openai-responses/types.ts';
-import { codexImageProviderModel, codexPlanSupportsImages, codexRawToProviderModel, fetchCodexCatalog } from './models.ts';
+import { codexImageProviderModels, codexPlanSupportsImages, codexRawToProviderModel, fetchCodexCatalog } from './models.ts';
 import { assertCodexUpstreamState, findCodexAccountIndex, replaceCodexAccount } from './state.ts';
 import { runInterceptors } from '@floway-dev/interceptor';
 import { toCompactPayloadShape } from '@floway-dev/protocols/openai-responses';
@@ -111,7 +111,7 @@ export const createCodexProvider = (record: UpstreamRecord): Provider => {
       // models even though the ChatGPT UI hides them — and the dashboard
       // toggles them per-upstream when needed.
       const models = raw.map(r => codexRawToProviderModel(r, enabledFlags));
-      if (codexPlanSupportsImages(access.planType ?? accountIdentity.planType)) models.push(codexImageProviderModel(enabledFlags));
+      if (codexPlanSupportsImages(access.planType ?? accountIdentity.planType)) models.push(...codexImageProviderModels(enabledFlags));
       return models;
     },
 

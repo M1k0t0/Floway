@@ -33,6 +33,21 @@ export const GPT_IMAGE_2_PRICING = modelPricing(
   }),
 );
 
+// ChatGPT Images 2.5 uses the shared public Flare/Sunburst token rates as its
+// notional API price. Cached input has the same unsplit-modality limitation as
+// GPT Image 2 above.
+// https://developers.openai.com/api/docs/models/gpt-image-2.5-flare
+// https://developers.openai.com/api/docs/models/gpt-image-2.5-sunburst
+// https://fal.ai/gpt-image-2.5
+export const GPT_IMAGE_2_5_PRICING = modelPricing(
+  tokenPricingEntry({
+    input_tokens: '5',
+    input_cache_read_tokens: '1.25',
+    input_image_tokens: '8',
+    output_image_tokens: '30',
+  }),
+);
+
 const CODEX_MODEL_PRICING: readonly (readonly [key: string | RegExp, pricing: ModelPricing])[] = [
   // Announced on 2026-09-03 and rolling out first to enterprises in OpenAI's
   // Trusted Access Program; broader API and subscription access is coming in

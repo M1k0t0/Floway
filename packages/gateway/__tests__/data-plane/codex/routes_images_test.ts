@@ -113,7 +113,7 @@ test('Codex provider-relative image generation reuses the public image-generatio
   assertEquals(observedBody.quality, 'high');
 });
 
-test('ChatGPT Codex accounts expose and serve the implicit gpt-image-2 model', async () => {
+test.each(['gpt-image-2', 'gpt-image-2.5'])('ChatGPT Codex accounts expose and serve the implicit %s model', async modelId => {
   const { apiKey, repo } = await setupAppTest();
   await saveCodexImages(repo);
   let observedBody: Record<string, unknown> | undefined;
@@ -138,26 +138,26 @@ test('ChatGPT Codex accounts expose and serve the implicit gpt-image-2 model', a
       });
       assertEquals(publicModels.status, 200);
       const publicCatalog = await publicModels.json() as { data: { id: string }[] };
-      assertEquals(publicCatalog.data.some(model => model.id === 'gpt-image-2'), true);
+      assertEquals(publicCatalog.data.some(model => model.id === modelId), true);
 
       const codexModels = await requestApp('/azure-api.codex/models?client_version=0.147.0', {
         headers: { authorization: `Bearer ${apiKey.key}`, 'user-agent': CODEX_USER_AGENT },
       });
       assertEquals(codexModels.status, 200);
       const codexCatalog = await codexModels.json() as { models: { slug: string }[] };
-      assertEquals(codexCatalog.models.some(model => model.slug === 'gpt-image-2'), false);
+      assertEquals(codexCatalog.models.some(model => model.slug === modelId), false);
 
       const response = await requestApp('/azure-api.codex/images/generations', {
         method: 'POST',
         headers: { authorization: `Bearer ${apiKey.key}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ model: 'gpt-image-2', prompt: 'an orange circle', quality: 'low' }),
+        body: JSON.stringify({ model: modelId, prompt: 'an orange circle', quality: 'low' }),
       });
       assertEquals(response.status, 200);
       assertEquals(await response.json(), { created: 1, data: [{ b64_json: 'aGk=' }], background: 'opaque', quality: 'low', size: '1254x1254' });
     },
   );
 
-  assertEquals(observedBody, { model: 'gpt-image-2', prompt: 'an orange circle', quality: 'low' });
+  assertEquals(observedBody, { model: modelId, prompt: 'an orange circle', quality: 'low' });
 });
 
 test('Codex provider-relative image edits reuse the public JSON handler', async () => {
