@@ -748,7 +748,10 @@ test('buildTargetRequest maps incomplete function output to an Anthropic tool er
 
   assertEquals(result.target.messages[1], {
     role: 'user',
-    content: [{ type: 'tool_result', tool_use_id: 'call_exec', content: 'failed', is_error: true }],
+    content: [{
+      type: 'tool_result', tool_use_id: 'call_exec', content: 'failed', is_error: true,
+      cache_control: { type: 'ephemeral' },
+    }],
   });
 });
 
