@@ -1,9 +1,11 @@
 import { TranslatorInputError } from '../../translator-input-error.ts';
 import type { OpenAIResponsesTool, OpenAIResponsesToolChoice } from '@floway-dev/protocols/openai-responses';
 
-// These targets can express an allowed callable subset by limiting declarations
-// and carrying the mode separately. Run after gateway namespace/hosted rewrites;
-// never silently drop a selector the target cannot represent.
+// OpenAI Chat Completions and Anthropic Messages preserve flat function/custom
+// subsets by filtering declarations and translating the mode separately.
+// Namespace and hosted selectors must arrive already rewritten as flat
+// callables; otherwise translation rejects them so the permitted set cannot
+// silently widen.
 // https://github.com/openai/openai-node/blob/61539248cbe04665de68a71e6fd878127ae4db87/src/resources/responses/responses.ts#L8246-L8279
 export const restrictAllowedTools = (
   tools: OpenAIResponsesTool[] | null | undefined,
