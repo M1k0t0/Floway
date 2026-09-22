@@ -5,6 +5,7 @@ import { PreviousResponseNotFoundError } from './serve-prep.ts';
 import { openaiResponsesServe } from './serve.ts';
 import type { AuthedContext } from '../../../middleware/auth.ts';
 import { backgroundSchedulerFromContext } from '../../../runtime/background.ts';
+import { normalizeResponsesIngress, responsesLiteSuccessHeaders, restoreResponsesLiteEchoes } from '../../codex/responses-lite.ts';
 import { createGatewayCtxFromHono, finalizeGatewayResponse, type GatewayCtx } from '../../shared/gateway-ctx.ts';
 import { inboundHeaders } from '../../shared/inbound-headers.ts';
 import { readRequestBody, takeRequestBody, type RequestBody } from '../../shared/request-body.ts';
@@ -75,11 +76,11 @@ export const openaiResponsesHttp = {
     const requestBody = await readRequestBody(c);
     let ctx: ChatGatewayCtx | undefined;
     try {
-      const payload = parsePayload(requestBody);
+      const { payload, headers, clientView } = normalizeResponsesIngress(parsePayload(requestBody), inboundHeaders(c));
       const wantsStream = payload.stream === true;
       ctx = createChatGatewayCtxFromHono(c, { wantsStream, requestBody: takeRequestBody(requestBody), model: payload.model, backgroundScheduler: backgroundSchedulerFromContext(c) }, (apiKey, requestStartedAt) => createOpenAIResponsesHttpStore(apiKey, requestStartedAt, payload.store ?? undefined));
-      const result = await openaiResponsesServe.generate({ payload, ctx, headers: inboundHeaders(c) });
-      const response = await respondOpenAIResponses(c, result, wantsStream, ctx, payload);
+      const result = await openaiResponsesServe.generate({ payload, ctx, headers });
+      const response = await respondOpenAIResponses(c, result, wantsStream, ctx, payload, clientView);
       return finalizeGatewayResponse(ctx, response);
     } catch (error) {
       return await respondToThrow(c, error, requestBody, ctx);
@@ -90,9 +91,9 @@ export const openaiResponsesHttp = {
     const requestBody = await readRequestBody(c);
     let ctx: ChatGatewayCtx | undefined;
     try {
-      const payload = parsePayload(requestBody);
+      const { payload, headers, clientView } = normalizeResponsesIngress(parsePayload(requestBody), inboundHeaders(c));
       ctx = createChatGatewayCtxFromHono(c, { wantsStream: false, requestBody: takeRequestBody(requestBody), model: payload.model, backgroundScheduler: backgroundSchedulerFromContext(c) }, (apiKey, requestStartedAt) => createOpenAIResponsesHttpStore(apiKey, requestStartedAt, payload.store ?? undefined));
-      const result = await openaiResponsesServe.compact({ payload, ctx, headers: inboundHeaders(c) });
+      const result = await openaiResponsesServe.compact({ payload, ctx, headers });
       if (result.type === 'result') {
         // Compact drains the upstream stream into a single compaction
         // resource with no per-token stamps; recordPerformance therefore
@@ -115,10 +116,11 @@ export const openaiResponsesHttp = {
           result.usage,
           failed,
         );
-        const compactResponse = Response.json(result.result);
+        const body = clientView === undefined ? result.result : restoreResponsesLiteEchoes(result.result, clientView);
+        const compactResponse = Response.json(body, { headers: responsesLiteSuccessHeaders(undefined, failed ? undefined : clientView) });
         return finalizeGatewayResponse(ctx, compactResponse);
       }
-      const response = await respondOpenAIResponses(c, result, false, ctx, payload);
+      const response = await respondOpenAIResponses(c, result, false, ctx, payload, clientView);
       return finalizeGatewayResponse(ctx, response);
     } catch (error) {
       return await respondToThrow(c, error, requestBody, ctx);
