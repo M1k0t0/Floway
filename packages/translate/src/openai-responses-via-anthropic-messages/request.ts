@@ -266,7 +266,7 @@ const translateOpenAIResponsesInput = async (
         type: 'tool_result',
         tool_use_id: item.call_id,
         content: await translateToolOutput(item.output, loadRemoteImage),
-        is_error: item.status === 'incomplete' ? true : undefined,
+        is_error: item.type === 'function_call_output' && item.status === 'incomplete' ? true : undefined,
       });
       break;
     case 'custom_tool_call':

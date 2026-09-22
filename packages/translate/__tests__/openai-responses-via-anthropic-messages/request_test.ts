@@ -737,7 +737,7 @@ test.each(['function_call_output', 'custom_tool_call_output'] as const)('buildTa
   ]);
 });
 
-test('buildTargetRequest loads custom tool result images and preserves incomplete status', async () => {
+test('buildTargetRequest loads custom tool result images without interpreting its open status', async () => {
   const loaded: string[] = [];
   const result = await buildTargetRequest({
     ...minimalPayload,
@@ -763,7 +763,7 @@ test('buildTargetRequest loads custom tool result images and preserves incomplet
   assertEquals(result.target.messages[1], {
     role: 'user',
     content: [{
-      type: 'tool_result', tool_use_id: 'call_exec', is_error: true,
+      type: 'tool_result', tool_use_id: 'call_exec',
       content: [
         { type: 'text', text: 'partial capture' },
         { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AQID' } },
