@@ -83,16 +83,12 @@ const projectFunctionCallOutput = (item: OpenAIResponsesFunctionCallOutputItem):
 };
 
 const translateOpenAIResponsesTools = (tools: OpenAIResponsesTool[] | null | undefined, customToolNames: Set<string>): OpenAIChatCompletionsTool[] | undefined => {
-  // Translated OpenAI Chat Completions targets do not currently have a faithful
-  // bridge for hosted/deferred OpenAI Responses tools (`web_search`,
-  // `tool_search`, `namespace`, `image_generation`, and future builtin
-  // names). Native OpenAI Responses targets receive those entries unchanged; this
-  // translator narrows to function and Freeform `custom` tools, recording
-  // the latter in `customToolNames` so the events translator can recover
-  // the freeform shape on the way back. The shim's web_search
-  // function tool is in `payload.tools` under its resolved name (the shim
-  // injects it on every request that uses hosted web_search) and reaches
-  // here as an ordinary function tool — no special carve-out needed.
+  // After allowed_tools selection, Chat Completions can represent only flat
+  // function and custom declarations. Custom tools are wrapped as functions
+  // and recorded so response events can restore their freeform shape. The
+  // server-tool shim rewrites hosted web_search declarations to ordinary
+  // function tools before this translation, so retained shim tools need no
+  // special handling here.
   const out: OpenAIChatCompletionsTool[] = [];
 
   for (const tool of tools ?? []) {
