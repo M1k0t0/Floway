@@ -37,16 +37,21 @@ const baseInstructionsText = (value: unknown): string | undefined => {
 };
 
 export interface ResponsesLiteClientView {
-  // Captured before lifting. Only the final client edge may read this view;
-  // routing, hydration, shims, and persistence all receive the Standard payload.
+  // Captured before lifting and read only by the final client edge.
   readonly request: CanonicalOpenAIResponsesPayload;
   readonly toolChoiceChanged: boolean;
+}
+
+export interface ResponsesLiteInputContext {
+  readonly type: 'responses_lite';
+  readonly source: CanonicalOpenAIResponsesPayload;
 }
 
 interface ResponsesIngress {
   readonly payload: CanonicalOpenAIResponsesPayload;
   readonly headers: Headers;
   readonly clientView?: ResponsesLiteClientView;
+  readonly inputContext?: ResponsesLiteInputContext;
 }
 
 // Resolve Lite's implicit identities without flattening semantic namespaces.
@@ -105,6 +110,38 @@ const qualifyLiteCallables = (payload: CanonicalOpenAIResponsesPayload): Canonic
   return { ...payload, input, ...(toolChoice === undefined ? {} : { tool_choice: toolChoice }) };
 };
 
+const liftResponsesLiteInput = (request: CanonicalOpenAIResponsesPayload): {
+  payload: CanonicalOpenAIResponsesPayload;
+  consumedIndices: readonly number[];
+} => {
+  const tools: OpenAIResponsesTool[] = [...(request.tools ?? [])];
+  const instructions = isAdditionalToolsItem(request.input[0]) ? baseInstructionsText(request.input[1]) : undefined;
+  const promote = (request.instructions == null || request.instructions === '') && instructions !== undefined && instructions.length > 0;
+  const consumedIndices: number[] = [];
+  let hasAdditionalTools = false;
+  const input = request.input.filter((item, index) => {
+    if (isAdditionalToolsItem(item)) {
+      hasAdditionalTools = true;
+      for (const tool of item.tools) tools.push(tool);
+      consumedIndices.push(index);
+      return false;
+    }
+    if (promote && index === 1) {
+      consumedIndices.push(index);
+      return false;
+    }
+    return true;
+  });
+  return {
+    payload: {
+      ...request, input,
+      ...(hasAdditionalTools || Array.isArray(request.tools) ? { tools } : {}),
+      ...(promote ? { instructions } : {}),
+    },
+    consumedIndices,
+  };
+};
+
 export const normalizeResponsesIngress = (request: CanonicalOpenAIResponsesPayload, sourceHeaders: Headers, transport: 'http' | 'websocket' = 'http'): ResponsesIngress => {
   const metadata = (request as unknown as Record<string, unknown>).client_metadata;
   // A WebSocket handshake outlives this operation. Only its per-operation
@@ -122,27 +159,86 @@ export const normalizeResponsesIngress = (request: CanonicalOpenAIResponsesPaylo
   }
   if (!usesLite) return { payload, headers };
 
-  const tools: OpenAIResponsesTool[] = [...(request.tools ?? [])];
-  const leadingTools = isAdditionalToolsItem(request.input[0]);
-  const instructions = leadingTools ? baseInstructionsText(request.input[1]) : undefined;
-  const promote = (request.instructions === undefined || request.instructions === null || request.instructions === '')
-    && instructions !== undefined && instructions.length > 0;
-  let hasAdditionalTools = false;
-  const input = request.input.filter((item, index) => {
-    if (isAdditionalToolsItem(item)) {
-      hasAdditionalTools = true;
-      for (const tool of item.tools) tools.push(tool);
-      return false;
+  const source = payload;
+  payload = liftResponsesLiteInput(source).payload;
+  const hasReferences = request.input.some(item => isRecord(item) && typeof item.id === 'string');
+  // Stored identities are authoritative, including when the caller supplies a body.
+  if (request.previous_response_id == null && !hasReferences) payload = qualifyLiteCallables(payload);
+  return {
+    payload,
+    headers,
+    inputContext: { type: 'responses_lite', source },
+    clientView: {
+      request,
+      // Referenced declarations are available only after history hydration.
+      toolChoiceChanged: payload.tool_choice !== request.tool_choice
+        || ((request.previous_response_id != null || hasReferences) && isRecord(request.tool_choice)),
+    },
+  };
+};
+
+// Codex's incremental WebSocket request omits its unchanged tools/base prefix.
+// Restore the referenced source items independently of create-only request fields.
+// https://github.com/openai/codex/blob/6b9826e3aa83b1a5947db50f4332cb9c65f1b340/codex-rs/core/tests/suite/client_websockets.rs#L1887-L1953
+export const restoreResponsesLiteInputContext = (
+  payload: CanonicalOpenAIResponsesPayload,
+  options: {
+    readonly sourceInput: readonly OpenAIResponsesInputItem[];
+    readonly currentInputStart: number;
+    readonly sourceItemIds?: readonly string[];
+    readonly getItem: (id: string) => unknown;
+  },
+): { payload: CanonicalOpenAIResponsesPayload; sourceItems: readonly OpenAIResponsesInputItem[] } => {
+  const sourceItems: OpenAIResponsesInputItem[] = [];
+  const inheritedItems: OpenAIResponsesInputItem[] = [];
+  const remaining = new Map<string, number>();
+  for (const id of options.sourceItemIds ?? []) {
+    const item = options.getItem(id);
+    if (!isAdditionalToolsItem(item) && baseInstructionsText(item) === undefined) {
+      throw new TypeError(`Invalid stored Responses Lite source item '${id}'`);
     }
-    return !promote || index !== 1;
-  });
-  payload = qualifyLiteCallables({
+    inheritedItems.push(item as OpenAIResponsesInputItem);
+    sourceItems.push({ type: 'item_reference', id });
+    remaining.set(id, (remaining.get(id) ?? 0) + 1);
+  }
+
+  const tools = [...(payload.tools ?? [])];
+  let hasCarrier = false;
+  let inheritedInstructions: string | undefined;
+  for (const item of inheritedItems) {
+    if (isAdditionalToolsItem(item)) {
+      hasCarrier = true;
+      for (const tool of item.tools) tools.push(tool);
+    } else inheritedInstructions = baseInstructionsText(item);
+  }
+  const history: OpenAIResponsesInputItem[] = [];
+  for (let index = 0; index < options.currentInputStart; index++) {
+    const source = options.sourceInput[index]!;
+    const id = source.type === 'item_reference' ? source.id : undefined;
+    const count = id === undefined ? 0 : remaining.get(id) ?? 0;
+    if (id !== undefined && count > 0) {
+      remaining.set(id, count - 1);
+      continue;
+    }
+    const item = payload.input[index]!;
+    if (isAdditionalToolsItem(item)) {
+      hasCarrier = true;
+      for (const tool of item.tools) tools.push(tool);
+      sourceItems.push(source);
+    } else history.push(item);
+  }
+  const current = liftResponsesLiteInput({
     ...payload,
-    input,
-    ...(hasAdditionalTools || Array.isArray(request.tools) ? { tools } : {}),
-    ...(promote ? { instructions } : {}),
+    input: payload.input.slice(options.currentInputStart),
+    ...(hasCarrier || Array.isArray(payload.tools) ? { tools } : {}),
   });
-  return { payload, headers, clientView: { request, toolChoiceChanged: payload.tool_choice !== request.tool_choice } };
+  for (const index of current.consumedIndices) sourceItems.push(options.sourceInput[options.currentInputStart + index]!);
+  const restored = {
+    ...current.payload,
+    input: [...history, ...current.payload.input],
+    ...((current.payload.instructions == null || current.payload.instructions === '') && inheritedInstructions !== undefined ? { instructions: inheritedInstructions } : {}),
+  };
+  return { payload: qualifyLiteCallables(restored), sourceItems };
 };
 
 // Restore representation-dependent echoes before resource completion. Undefined

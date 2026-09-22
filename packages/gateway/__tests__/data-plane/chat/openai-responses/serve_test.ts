@@ -391,23 +391,31 @@ test('compact renders model-unsupported as a 400 when the only candidate\'s endp
 test('expandPreviousResponseId prepends snapshot items and strips the previous_response_id field', async () => {
   const repo = installRepo();
   const previousMessageId = 'msg_previous';
+  const previousSourceId = 'at_previous';
   await repo.openaiResponsesItems.insertMany([{
     id: previousMessageId,
     apiKeyId: API_KEY_ID,
     itemHash: 'previous-message-hash',
     payload: { item: { type: 'message', id: previousMessageId, role: 'user', content: 'first turn' } },
     refreshedAt: Date.now(),
+  }, {
+    id: previousSourceId,
+    apiKeyId: API_KEY_ID,
+    itemHash: 'previous-source-hash',
+    payload: { item: { type: 'additional_tools', id: previousSourceId, role: 'developer', tools: [{ type: 'function', name: 'read' }] } },
+    refreshedAt: Date.now(),
   }], 0);
   const snapshot: StoredOpenAIResponsesSnapshot = {
     id: 'resp_prev',
     apiKeyId: API_KEY_ID,
     itemIds: [previousMessageId],
+    sourceItemIds: [previousSourceId],
     refreshedAt: Date.now(),
   };
   await repo.openaiResponsesSnapshots.insert(snapshot);
 
   const store = createOpenAIResponsesHttpStore(testOpenAIResponsesStatePolicy(API_KEY_ID), Date.now(), true);
-  const expanded = await expandPreviousResponseId(
+  const { payload: expanded, sourceItemIds } = await expandPreviousResponseId(
     makePayload({
       previous_response_id: 'resp_prev',
       input: [{ type: 'message', role: 'user', content: 'second turn' }],
@@ -419,6 +427,10 @@ test('expandPreviousResponseId prepends snapshot items and strips the previous_r
   assertEquals(expanded.input.length, 2);
   assertEquals(expanded.input[0], { type: 'item_reference', id: previousMessageId });
   assertEquals(expanded.input[1], { type: 'message', role: 'user', content: 'second turn' });
+  assertEquals(sourceItemIds, [previousSourceId]);
+  assertEquals(store.getItemById(previousSourceId)?.payload.item, {
+    type: 'additional_tools', id: previousSourceId, role: 'developer', tools: [{ type: 'function', name: 'read' }],
+  });
 });
 
 // In-memory store backed by the layered implementation but with no repo
@@ -453,7 +465,7 @@ test('expandPreviousResponseId resolves snapshots from a non-repo-backed store',
   };
   const store = await memoryStore([snapshot], [item]);
 
-  const expanded = await expandPreviousResponseId(
+  const { payload: expanded } = await expandPreviousResponseId(
     makePayload({ previous_response_id: 'resp_mem', input: [{ type: 'message', role: 'user', content: 'new turn' }] }),
     store,
   );

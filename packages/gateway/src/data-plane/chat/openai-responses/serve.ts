@@ -4,6 +4,7 @@ import { completeOpenAIResponsesCompaction } from './compaction-resource.ts';
 import type { OpenAIResponsesAttemptResult } from './interceptors/types.ts';
 import { syntheticEventsFromCompaction } from './items/output.ts';
 import { prepareOpenAIResponsesServePlan } from './serve-prep.ts';
+import type { ResponsesLiteInputContext } from '../../codex/responses-lite.ts';
 import { iterateCandidates } from '../../shared/iterate-candidates.ts';
 import type { ChatGatewayCtx } from '../shared/gateway-ctx.ts';
 import type { ProtocolFrame } from '@floway-dev/protocols/common';
@@ -14,12 +15,13 @@ interface OpenAIResponsesServeArgs {
   readonly payload: CanonicalOpenAIResponsesPayload;
   readonly ctx: ChatGatewayCtx;
   readonly headers: Headers;
+  readonly inputContext?: ResponsesLiteInputContext;
 }
 
 export const openaiResponsesServe = {
   generate: async (args: OpenAIResponsesServeArgs): Promise<ExecuteResult<ProtocolFrame<OpenAIResponsesStreamEvent>>> => {
     const { payload, ctx, headers } = args;
-    const plan = await prepareOpenAIResponsesServePlan({ payload, ctx });
+    const plan = await prepareOpenAIResponsesServePlan({ payload, ctx, inputContext: args.inputContext });
     if (plan.kind === 'failure') return plan.result;
     // Iterate the affinity-selected candidates: success (SSE stream opened) is the
     // final answer; per-candidate failures fall through so a transient
@@ -59,7 +61,7 @@ export const openaiResponsesServe = {
     // request inside the interceptor chain, flips action='compact' to
     // 'generate', runs a SUMMARIZATION_PROMPT turn through translation, and
     // re-tags the result as compact on the way out.
-    const plan = await prepareOpenAIResponsesServePlan({ payload, ctx });
+    const plan = await prepareOpenAIResponsesServePlan({ payload, ctx, inputContext: args.inputContext });
     if (plan.kind === 'failure') return plan.result;
     const result = await iterateCandidates(
       plan.candidates,

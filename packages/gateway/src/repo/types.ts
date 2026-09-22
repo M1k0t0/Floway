@@ -495,6 +495,9 @@ export interface StoredOpenAIResponsesSnapshot {
   id: string;
   apiKeyId: string;
   itemIds: string[];
+  // Ordered source dependencies survive independently of public history.
+  // Preserve an explicit empty list separately from an absent source set.
+  sourceItemIds?: readonly string[];
   refreshedAt: number;
 }
 
