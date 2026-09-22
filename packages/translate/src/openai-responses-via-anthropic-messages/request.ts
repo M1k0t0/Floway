@@ -96,9 +96,12 @@ const translateUserMessage = async (message: OpenAIResponsesInputMessage, loadRe
   return { role: 'user', content: content.length > 0 ? content : '' };
 };
 
-// Function and custom tool outputs carry the same content parts as a
-// user message; map them to Anthropic Messages tool_result blocks (which natively carry
-// image blocks) rather than flattening images away.
+// Function and custom tool outputs both admit text, image, and file parts.
+// Anthropic tool_result content natively carries images, so preserve them
+// rather than flattening the output.
+// https://github.com/openai/openai-node/blob/cf1b7e1cf7981ef79695c496caf14b6bb492f18e/src/resources/responses/responses.ts#L3610-L3621
+// https://github.com/openai/openai-node/blob/cf1b7e1cf7981ef79695c496caf14b6bb492f18e/src/resources/responses/responses.ts#L4380-L4383
+// https://github.com/anthropics/anthropic-sdk-typescript/blob/3c5d9c0c15bb847a628f3f2876ac09719abe3012/src/resources/messages/messages.ts#L3457-L3475
 const translateToolOutput = async (output: string | OpenAIResponsesInputContent[], loadRemoteImage: RemoteImageLoader): Promise<string | AnthropicMessagesToolResultContentBlock[]> => {
   if (typeof output === 'string') return output;
 
