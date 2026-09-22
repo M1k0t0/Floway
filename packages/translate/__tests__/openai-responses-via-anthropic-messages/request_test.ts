@@ -195,6 +195,21 @@ test.each(['function_call_output', 'custom_tool_call_output'] as const)('buildTa
   );
 });
 
+test.each(['function_call_output', 'custom_tool_call_output'] as const)('buildTargetRequest rejects unavailable images in %s', async type => {
+  await assertRejects(
+    () => buildTargetRequest({
+      ...minimalPayload,
+      input: [{
+        type,
+        call_id: 'call_1',
+        output: [{ type: 'input_image', image_url: 'https://example.com/unavailable.png' }],
+      }],
+    }, { loadRemoteImage: stubRemoteImageLoader(null) }),
+    Error,
+    'unavailable or unsupported image tool output',
+  );
+});
+
 // ── service_tier → speed mapping ──
 
 test('buildTargetRequest maps service_tier:fast to speed:fast (no service_tier on target)', async () => {

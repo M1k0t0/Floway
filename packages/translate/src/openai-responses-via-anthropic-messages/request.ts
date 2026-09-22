@@ -112,7 +112,10 @@ const translateToolOutput = async (output: string | OpenAIResponsesInputContent[
         throw new TranslatorInputError('Cannot translate file_id-only image tool output to Anthropic Messages.');
       }
       const image = await resolveImageUrlToAnthropicMessagesImage(part.image_url, loadRemoteImage);
-      if (image) blocks.push(image);
+      if (image === null) {
+        throw new TranslatorInputError('Cannot translate unavailable or unsupported image tool output to Anthropic Messages.');
+      }
+      blocks.push(image);
     } else if (part.type === 'input_file') {
       throw new TranslatorInputError('Cannot translate input_file tool output to Anthropic Messages.');
     } else if (part.type === 'refusal') {
