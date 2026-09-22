@@ -7,6 +7,7 @@ const en = {
       documentTitle: '{{title}} | Floway',
     },
     common: {
+      language: 'Language',
       loading: shellLoadingLabel,
       on: 'On',
       off: 'Off',
@@ -284,7 +285,7 @@ const en = {
       },
       upstreamAccess: {
         title: 'Limit available upstreams',
-        description: 'When off, access inherits every upstream from its parent scope',
+        description: 'When off, all selectable upstreams are available',
         tableLabel: 'Available upstreams',
         enabled: 'Enabled',
         order: 'Order',
@@ -294,7 +295,7 @@ const en = {
         modelCount_other: '{{count, number}} models',
         modelCountUnknown: 'Count unavailable',
         upstreamDisabled: 'Upstream disabled',
-        validation: 'Select at least one upstream, or turn off the limit.',
+        emptyWarning: 'No upstreams are selected. No upstreams will be available while this limit is on.',
       },
       apiKeys: {
         empty: 'No API keys yet. Create one to call Floway.',
@@ -425,6 +426,7 @@ const en = {
           refresh: 'Refresh upstreams',
           delete: 'Delete upstream',
           editNamed: 'Edit upstream {{name}}',
+          copyNamed: 'Copy upstream {{name}}',
           deleteNamed: 'Delete upstream {{name}}',
           toggle: 'Toggle upstream {{name}}',
           moveUp: 'Move upstream {{name}} up',
@@ -486,6 +488,9 @@ const en = {
           copilot: 'GitHub Copilot account',
           noAccount: 'No account connected',
         },
+        copy: {
+          nameSuffix: '{{name}} copy',
+        },
         errors: {
           missing: 'That upstream no longer exists.',
           models: 'Model counts are unavailable: {{message}}',
@@ -512,6 +517,7 @@ const en = {
         },
         documentTitleNew: 'New upstream',
         documentTitleEdit: 'Upstream details',
+        documentTitleCopy: 'Copy upstream',
         optional: 'optional',
         unsaved: 'Unsaved changes',
         secretKeep: 'Leave blank to keep unchanged.',
@@ -1174,8 +1180,9 @@ const en = {
         description: 'Create virtual model IDs that route to one or more target models with optional locked request rules',
         listTitle: 'Aliases', empty: 'No aliases configured. Create one to expose a virtual model ID.',
         columns: { alias: 'Alias', kind: 'Kind', targets: 'Targets', selection: 'Selection', visibility: 'Models list', actions: 'Actions' },
-        actions: { create: 'New alias', refresh: 'Refresh aliases', save: 'Save', delete: 'Delete', addTarget: 'Add target', editNamed: 'Edit alias {{name}}', deleteNamed: 'Delete alias {{name}}' },
-        dialog: { createTitle: 'Create alias', editTitle: 'Edit alias: {{name}}' },
+        actions: { create: 'New alias', refresh: 'Refresh aliases', save: 'Save', delete: 'Delete', addTarget: 'Add target', editNamed: 'Edit alias {{name}}', copyNamed: 'Copy alias {{name}}', deleteNamed: 'Delete alias {{name}}' },
+        dialog: { createTitle: 'Create alias', editTitle: 'Edit alias: {{name}}', copyTitle: 'Copy alias: {{name}}' },
+        copy: { nameSuffix: '{{name}} copy' },
         form: { name: 'Alias ID', namePlaceholder: 'my-alias-id', displayName: 'Display name', displayPlaceholder: 'Optional display name', kind: 'Kind', selection: 'Selection', visible: 'Visible in /v1/models', visibleHint: 'A hidden alias stays out of the listing but can still be requested by name' },
         kind: { chat: 'Chat', embedding: 'Embedding', image: 'Image', rerank: 'Rerank', transcription: 'Transcription' },
         selection: { first: 'First available', random: 'Random' },
