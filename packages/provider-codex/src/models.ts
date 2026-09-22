@@ -27,16 +27,19 @@ export interface CodexRawModel {
   // Codex selects the wire representation from catalog metadata, not the slug.
   // https://github.com/openai/codex/blob/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/protocol/src/openai_models.rs#L458-L463
   use_responses_lite?: boolean;
+  image_detail_original?: boolean;
 }
 
 // `fetcher` is required so the catalog refresh traverses the same proxy/
-// dial chain configured for request-time traffic.
-export const fetchCodexCatalog = async (opts: { accessToken: string; accountId: string; signal?: AbortSignal; fetcher: Fetcher }): Promise<CodexRawModel[]> => {
+// dial chain configured for request-time traffic. A null account id omits the
+// header entirely — the upstream reads an absent header as "whichever account
+// this bearer belongs to", where an empty one is a malformed value.
+export const fetchCodexCatalog = async (opts: { accessToken: string; accountId: string | null; signal?: AbortSignal; fetcher: Fetcher }): Promise<CodexRawModel[]> => {
   const response = await opts.fetcher(`${CODEX_BACKEND_BASE}${CODEX_MODELS_PATH}?client_version=${CODEX_CLI_VERSION}`, {
     method: 'GET',
     headers: {
       authorization: `Bearer ${opts.accessToken}`,
-      'chatgpt-account-id': opts.accountId,
+      ...(opts.accountId === null ? {} : { 'chatgpt-account-id': opts.accountId }),
       originator: CODEX_ORIGINATOR,
       'user-agent': CODEX_USER_AGENT,
       version: CODEX_CLI_VERSION,
@@ -59,8 +62,9 @@ const isPlainRecord = (v: unknown): v is Record<string, unknown> =>
 // Fail loud on malformed upstream catalog responses: a missing field
 // signals an upstream contract change we need to notice. New optional
 // fields (`input_modalities`, `supported_reasoning_levels`,
-// `default_reasoning_level`) are tolerated when absent for backwards
-// compatibility with older catalog snapshots, but throw on type drift.
+// `default_reasoning_level`, `supports_image_detail_original`) are tolerated
+// when absent for backwards compatibility with older catalog snapshots, but
+// throw on type drift.
 const assertRawModel = (value: unknown): CodexRawModel => {
   if (!isPlainRecord(value)) throw new TypeError('Codex model entry is not an object');
   const slug = value.slug;
@@ -92,6 +96,13 @@ const assertRawModel = (value: unknown): CodexRawModel => {
       if (!efforts.includes(entry.effort)) efforts.push(entry.effort);
     }
     raw.reasoning_efforts = efforts;
+  }
+
+  if (value.supports_image_detail_original !== undefined) {
+    if (typeof value.supports_image_detail_original !== 'boolean') {
+      throw new TypeError(`Codex model entry ${slug} supports_image_detail_original not a boolean`);
+    }
+    raw.image_detail_original = value.supports_image_detail_original;
   }
 
   if (value.default_reasoning_level !== undefined) {
@@ -143,6 +154,13 @@ export const codexRawToProviderModel = (raw: CodexRawModel, enabledFlags: Readon
   if (raw.input_modalities && raw.input_modalities.length > 0) {
     chat.modalities = { input: raw.input_modalities, output: ['text'] };
   }
+  // Resolve the capability to a stated boolean for every entry. The Codex
+  // provider catalog owns this fact, so we treat an omitted field as unsupported
+  // rather than inherit from a same-named client-catalog entry. `ModelInfo`
+  // declares the field under `#[serde(default)]`
+  // (https://github.com/openai/codex/blob/f66d793a2d78287c8c28a5f41f39c58ac49bcc25/codex-rs/protocol/src/openai_models.rs#L383-L385),
+  // so a catalog that predates the field carries none and is treated as false.
+  chat.image_detail_original = raw.image_detail_original ?? false;
   if (raw.reasoning_efforts && raw.reasoning_efforts.length > 0) {
     let effortDefault: string;
     if (raw.default_reasoning_effort !== undefined) {
