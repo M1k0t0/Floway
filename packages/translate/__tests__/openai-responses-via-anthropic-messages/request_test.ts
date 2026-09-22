@@ -737,6 +737,21 @@ test.each(['function_call_output', 'custom_tool_call_output'] as const)('buildTa
   ]);
 });
 
+test('buildTargetRequest maps incomplete function output to an Anthropic tool error', async () => {
+  const result = await buildTargetRequest({
+    ...minimalPayload,
+    input: [
+      { type: 'function_call', call_id: 'call_exec', name: 'exec', arguments: '{}', status: 'completed' },
+      { type: 'function_call_output', call_id: 'call_exec', status: 'incomplete', output: 'failed' },
+    ],
+  });
+
+  assertEquals(result.target.messages[1], {
+    role: 'user',
+    content: [{ type: 'tool_result', tool_use_id: 'call_exec', content: 'failed', is_error: true }],
+  });
+});
+
 test('buildTargetRequest loads custom tool result images without interpreting its open status', async () => {
   const loaded: string[] = [];
   const result = await buildTargetRequest({
