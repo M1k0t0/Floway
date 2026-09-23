@@ -5,12 +5,14 @@ import { FormProvider, useForm } from 'react-hook-form';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { UpstreamRecord } from '../../../src/api/types';
 import type { ModelListingFailure, UpstreamEditorValues } from '../../../src/components/upstream-editor/data';
 import { valuesFromRecord } from '../../../src/components/upstream-editor/data';
 import { UpstreamWorkspace, type ModelsYamlDraft } from '../../../src/components/upstream-editor/workspace';
 import { i18n } from '../../../src/i18n';
 import { upstreamRecord } from '../../api/upstream-fixture';
 import { renderInApp } from '../../render';
+import type { UpstreamChatModelConfig, UpstreamModelConfig } from '@floway-dev/provider/model-config';
 
 vi.mock('../../../src/components/upstream-editor/models-yaml-editor', () => ({
   default: ({ onChange, value }: { onChange: (value: string) => void; value: string }) => (
@@ -22,12 +24,13 @@ vi.mock('../../../src/components/ui/scroll-area', () => ({
   ScrollArea: forwardRef<HTMLDivElement, PropsWithChildren>(({ children }, ref) => <div ref={ref}>{children}</div>),
 }));
 
-const model = (id: string) => ({
+const model = (id: string, chat?: UpstreamChatModelConfig) => ({
   upstreamModelId: id,
   publicModelId: id,
   display_name: id,
   kind: 'chat' as const,
   endpoints: { openaiResponses: {} },
+  ...(chat ? { chat } : {}),
 });
 
 const record = upstreamRecord('up_test', {
@@ -44,9 +47,10 @@ const record = upstreamRecord('up_test', {
   },
   state: null,
 });
+if (record.kind !== 'custom') throw new Error('test fixture must be a custom upstream');
 
-function Harness({ modelsError = null }: { modelsError?: ModelListingFailure | null }) {
-  const form = useForm<UpstreamEditorValues>({ defaultValues: valuesFromRecord(record) });
+function Harness({ discovered = [], modelsError = null, source = record }: { discovered?: UpstreamModelConfig[]; modelsError?: ModelListingFailure | null; source?: UpstreamRecord }) {
+  const form = useForm<UpstreamEditorValues>({ defaultValues: valuesFromRecord(source) });
   const [modelsYamlDraft, setModelsYamlDraft] = useState<ModelsYamlDraft | null>(null);
   return (
     // The workspace reads which tab and which model it is on out of the search,
@@ -54,13 +58,13 @@ function Harness({ modelsError = null }: { modelsError?: ModelListingFailure | n
     <MemoryRouter>
       <FormProvider {...form}>
         <UpstreamWorkspace
-          discovered={[]}
+          discovered={discovered}
           modelsYamlDraft={modelsYamlDraft}
           modelsLoading={false}
           modelsError={modelsError}
           onModelsYamlDraftChange={setModelsYamlDraft}
           onRefreshModels={vi.fn()}
-          record={record}
+          record={source}
         />
       </FormProvider>
     </MemoryRouter>
@@ -79,6 +83,8 @@ const deleteCommandStem = i18n.t('dashboard.upstreamEditor.models.deleteNamed', 
 const deleteCommands = () => screen.getAllByLabelText(new RegExp(`^${deleteCommandStem}`));
 
 describe('upstream model workspace field-array transitions', () => {
+  const detailLabel = models('imageDetailOriginal');
+
   it('opens a newly added model in the detail editor', async () => {
     renderInApp(<Harness />);
     const table = screen.getByRole('table', { name: models('title') });
@@ -138,7 +144,7 @@ describe('upstream model workspace field-array transitions', () => {
     expect((screen.getByRole('textbox', { name: models('upstreamId') }) as HTMLInputElement).value).toBe('model-a');
   });
 
-  it('reports a missing model ID only after it prevents returning to the list', () => {
+  it('reports a missing model ID only after it prevents returning to the list', async () => {
     renderInApp(<Harness />);
 
     fireEvent.click(screen.getByRole('button', { name: models('add') }));
@@ -152,6 +158,10 @@ describe('upstream model workspace field-array transitions', () => {
     expect(screen.queryByText(models('upstreamIdRequired'))).toBe(null);
     fireEvent.click(screen.getByRole('button', { name: models('back') }));
     expect(screen.getByRole('table', { name: models('title') })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: models('editAsYaml') }));
+    const yaml = (await screen.findByLabelText('YAML models') as HTMLTextAreaElement).value;
+    expect(yaml).toContain('upstreamModelId: model-new');
+    expect(yaml).toContain('opaqueBlobCompatibilityScope:\n    bindToUpstream: true');
   });
 
   it('reports a missing endpoint at its section after a blocked return', () => {
@@ -176,6 +186,82 @@ describe('upstream model workspace field-array transitions', () => {
 
     fireEvent.click(screen.getByRole('button', { name: models('back') }));
     expect(await screen.findByRole('table', { name: models('title') })).toBeTruthy();
+  });
+
+  it('edits and serializes a manual model opaque blob compatibility scope', async () => {
+    renderInApp(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('dashboard.upstreamEditor.models.editNamed', { name: 'model-a' }) }));
+
+    const bindToUpstream = screen.getByRole<HTMLInputElement>('switch', { name: models('bindOpaqueBlobsToUpstream') });
+    const key = screen.getByRole<HTMLInputElement>('textbox', { name: models('opaqueBlobCompatibilityKey') });
+    expect(bindToUpstream.checked).toBe(true);
+    expect(key.placeholder).toBe('model-a');
+
+    const sectionHeading = screen.getByRole('heading', { name: models('opaqueBlobCompatibility') });
+    const compatibilityInfo = sectionHeading.parentElement?.querySelector('button');
+    expect(compatibilityInfo).toBeTruthy();
+    fireEvent.click(compatibilityInfo!);
+    expect(screen.getByText(/When routing history context across models/)).toBeTruthy();
+    expect(screen.getByText(/Incompatible optional blobs are discarded/)).toBeTruthy();
+
+    fireEvent.click(bindToUpstream);
+    fireEvent.change(key, { target: { value: 'openai' } });
+    expect(bindToUpstream.checked).toBe(false);
+    expect(key.value).toBe('openai');
+
+    fireEvent.click(screen.getByRole('button', { name: models('back') }));
+    fireEvent.click(await screen.findByRole('button', { name: models('editAsYaml') }));
+    const yaml = (await screen.findByLabelText('YAML models') as HTMLTextAreaElement).value;
+    expect(yaml).toContain('opaqueBlobCompatibilityScope:\n    bindToUpstream: false\n    key: openai');
+  });
+
+  it('shows an auto model opaque blob compatibility scope read-only', () => {
+    const source: UpstreamRecord = {
+      ...record,
+      config: { ...record.config, modelsFetch: { enabled: true } },
+    };
+    renderInApp(<Harness
+      source={source}
+      discovered={[{
+        ...model('auto-model'),
+        opaqueBlobCompatibilityScope: { bindToUpstream: false, key: 'claude-opus' },
+      }]}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('dashboard.upstreamEditor.models.editNamed', { name: 'auto-model' }) }));
+    const bindToUpstream = screen.getByRole<HTMLInputElement>('switch', { name: models('bindOpaqueBlobsToUpstream') });
+    const key = screen.getByRole<HTMLInputElement>('textbox', { name: models('opaqueBlobCompatibilityKey') });
+    expect(bindToUpstream.checked).toBe(false);
+    expect(bindToUpstream.getAttribute('aria-readonly')).toBe('true');
+    expect(key.value).toBe('claude-opus');
+    expect(key.readOnly).toBe(true);
+  });
+
+  it('initializes, preserves, and clears original-detail support with image input', () => {
+    const withChat = (chat: UpstreamChatModelConfig): UpstreamRecord => ({
+      ...record,
+      config: { ...record.config, models: [model('model-a', chat)] },
+    });
+
+    const first = renderInApp(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('dashboard.upstreamEditor.models.editNamed', { name: 'model-a' }) }));
+    fireEvent.click(screen.getByRole('switch', { name: models('imageInput') }));
+    expect(screen.getByRole<HTMLInputElement>('switch', { name: detailLabel }).checked).toBe(false);
+    first.unmount();
+
+    const second = renderInApp(<Harness source={withChat({ image_detail_original: true })} />);
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('dashboard.upstreamEditor.models.editNamed', { name: 'model-a' }) }));
+    expect(screen.queryByRole('switch', { name: detailLabel })).toBeNull();
+    fireEvent.click(screen.getByRole('switch', { name: models('imageInput') }));
+    expect(screen.getByRole<HTMLInputElement>('switch', { name: detailLabel }).checked).toBe(true);
+    second.unmount();
+
+    renderInApp(<Harness source={withChat({ modalities: { input: ['text', 'image'], output: ['text'] }, image_detail_original: true })} />);
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('dashboard.upstreamEditor.models.editNamed', { name: 'model-a' }) }));
+    fireEvent.click(screen.getByRole('switch', { name: models('imageInput') }));
+    expect(screen.queryByRole('switch', { name: detailLabel })).toBeNull();
+    fireEvent.click(screen.getByRole('switch', { name: models('imageInput') }));
+    expect(screen.getByRole<HTMLInputElement>('switch', { name: detailLabel }).checked).toBe(false);
   });
 
   it('deletes a newly appended model and applies a shorter YAML catalog', async () => {

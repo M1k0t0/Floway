@@ -792,3 +792,64 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
     });
   }
 }
+
+for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
+  test(`POST /v1/responses continues a custom exec call through ${target} with text-array output`, async () => {
+    installRepo();
+    const bodies: Record<string, unknown>[] = [];
+    const observe = (body: Record<string, unknown>) => { bodies.push(structuredClone(body)); };
+    const headers = { 'content-type': 'application/json' };
+    const tools = [{ type: 'custom', name: 'exec' }];
+    queueResolution([translatedNamespaceCandidate(target, observe, 'exec')]);
+    const first = await makeApp().request('/v1/responses', {
+      method: 'POST', headers,
+      body: JSON.stringify({ model: 'test-model', store: true, tools, input: [{ role: 'user', content: 'inspect the request' }] }),
+    });
+    assertEquals(first.status, 200);
+    const previous = await first.json() as OpenAIResponsesResult;
+    const call = previous.output.find(item => item.type === 'custom_tool_call');
+    assert(call?.type === 'custom_tool_call');
+    assertEquals([call.name, call.namespace, call.input], ['exec', undefined, 'patch']);
+    assertEquals(bodies.length, 1);
+
+    queueResolution([translatedNamespaceCandidate(target, observe)]);
+    const second = await makeApp().request('/v1/responses', {
+      method: 'POST', headers,
+      body: JSON.stringify({
+        model: 'test-model', store: true, tools, previous_response_id: previous.id,
+        input: [{
+          type: 'custom_tool_call_output', call_id: call.call_id,
+          output: [{ type: 'input_text', text: 'first\n' }, { type: 'input_text', text: 'second' }],
+        }],
+      }),
+    });
+    assertEquals(second.status, 200);
+    const completed = await second.json() as OpenAIResponsesResult;
+    assertEquals(completed.status, 'completed');
+    assertEquals(completed.output_text, 'done');
+    assertEquals(bodies.length, 2);
+    if (target === 'openaiChatCompletions') {
+      assertEquals(bodies[1]!.messages, [
+        { role: 'user', content: 'inspect the request' },
+        {
+          role: 'assistant', content: null,
+          tool_calls: [{ id: call.call_id, type: 'function', function: { name: 'exec', arguments: '{"input":"patch"}' } }],
+        },
+        { role: 'tool', tool_call_id: call.call_id, content: 'first\nsecond' },
+      ]);
+    } else {
+      assertEquals(bodies[1]!.messages, [
+        { role: 'user', content: 'inspect the request' },
+        { role: 'assistant', content: [{ type: 'tool_use', id: call.call_id, name: 'exec', input: { input: 'patch' } }] },
+        {
+          role: 'user',
+          content: [{
+            type: 'tool_result', tool_use_id: call.call_id,
+            content: [{ type: 'text', text: 'first\n' }, { type: 'text', text: 'second' }],
+            cache_control: { type: 'ephemeral' },
+          }],
+        },
+      ]);
+    }
+  });
+}

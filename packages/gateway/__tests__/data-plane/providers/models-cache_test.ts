@@ -305,6 +305,26 @@ describe('fetchUpstreamModelsCached', () => {
     expect((await storedCache(repo))?.revision).toBe(MODEL_CATALOG_REVISION);
   });
 
+  test('previous-revision catalog rows are refetched for current model metadata', async () => {
+    const repo = await setupRepo();
+    const cache = await seedCache(repo, {
+      revision: MODEL_CATALOG_REVISION - 1,
+      fetchedAt: Date.now() - 1000,
+      models: [aModel('old-catalog')],
+    });
+    const current = stubProviderModel({ id: 'current-catalog', chat: { image_detail_original: false } });
+    const fetchFn = vi.fn(async () => [current]);
+
+    const result = await fetchUpstreamModelsCached(
+      stubInstance(fetchFn, cache),
+      { scheduler: () => {}, fetcher: directFetcher },
+    );
+
+    expect(result).toEqual([current]);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect((await storedCache(repo))?.revision).toBe(MODEL_CATALOG_REVISION);
+  });
+
   test('an old-shape stale SQL cache hydrates cold and is replaced by a current fetch', async () => {
     const db = await createSqliteTestDb();
     const repo = new SqlRepo(db);

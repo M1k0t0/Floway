@@ -3,7 +3,7 @@ import { test } from 'vitest';
 import { buildTargetRequest as buildMessages } from '../../../src/openai-responses-via-anthropic-messages/request.ts';
 import { buildTargetRequest as buildChat } from '../../../src/openai-responses-via-openai-chat-completions/request.ts';
 import { TranslatorInputError } from '../../../src/translator-input-error.ts';
-import type { OpenAIResponsesRequestPayload, OpenAIResponsesToolChoice } from '@floway-dev/protocols/openai-responses';
+import type { OpenAIResponsesRequestPayload, OpenAIResponsesTool, OpenAIResponsesToolChoice } from '@floway-dev/protocols/openai-responses';
 import { assertEquals, assertRejects } from '@floway-dev/test-utils';
 
 const source = (tool_choice: OpenAIResponsesToolChoice): OpenAIResponsesRequestPayload => ({
@@ -43,6 +43,12 @@ for (const target of ['chat', 'messages'] as const) {
     const result = await build(source({ type: 'allowed_tools', mode: 'auto', tools: [] }));
     assertEquals(result.target.tools, undefined);
     assertEquals(result.target.tool_choice, target === 'chat' ? 'none' : { type: 'none' });
+  });
+
+  test(`${target} request rejects a flat selector that would erase a declaration namespace`, async () => {
+    const payload = source({ type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: 'read' }] });
+    payload.tools![0] = { ...payload.tools![0], namespace: 'files' } as unknown as OpenAIResponsesTool;
+    await assertRejects(() => build(payload), TranslatorInputError, 'allowed_tools');
   });
 
   for (const [label, choice] of [

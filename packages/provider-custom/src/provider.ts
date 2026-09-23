@@ -15,7 +15,9 @@ const rawModelIdOf = (model: ProviderModel): string => model.providerData as str
 const customRawToProviderModel = (model: CustomRawModel): Omit<ProviderModel, 'kind' | 'endpoints' | 'providerData' | 'enabledFlags'> => {
   const partial: Omit<ProviderModel, 'kind' | 'endpoints' | 'providerData' | 'enabledFlags'> = {
     id: model.id,
+    upstreamModelId: model.id,
     limits: model.limits ? { ...model.limits } : {},
+    opaqueBlobCompatibilityScope: model.opaqueBlobCompatibilityScope ?? { bindToUpstream: true },
   };
   if (model.owned_by !== undefined) partial.owned_by = model.owned_by;
   // OpenAI carries unix `created`; Anthropic carries ISO `created_at`; our
@@ -60,12 +62,14 @@ const finalizeCustomModels = (
     // only a manual row with rerankTarget enters the routable provider catalog.
     if (rawModel.kind === 'rerank') continue;
     const endpoints = autoModelEndpoints(rawModel, configuredEndpoints);
+    const kind = kindForEndpoints(endpoints);
     models.push({
       ...customRawToProviderModel(rawModel),
-      kind: kindForEndpoints(endpoints),
+      kind,
       endpoints,
       providerData: rawModel.id,
       enabledFlags,
+      ...(kind === 'chat' && rawModel.chat ? { chat: rawModel.chat } : {}),
     });
   }
   return models;
@@ -86,18 +90,21 @@ export const projectCustomModels = (
   const manualModels: ProviderModel[] = config.models.map(model => {
     const enabledFlags = resolveEffectiveFlags([CUSTOM_DEFAULT_FLAGS, record.flagOverrides, model.flagOverrides]);
     const endpoints = model.endpoints;
+    const kind = kindForEndpoints(endpoints);
     const internal: ProviderModel = {
       id: publicModelId(model),
+      upstreamModelId: model.upstreamModelId,
       limits: { ...(model.limits ?? {}) },
-      kind: kindForEndpoints(endpoints),
+      kind,
       endpoints,
       providerData: model.upstreamModelId,
       enabledFlags,
+      opaqueBlobCompatibilityScope: model.opaqueBlobCompatibilityScope ?? { bindToUpstream: true },
       ...(model.rerankTarget ? { rerankTarget: model.rerankTarget } : {}),
     };
     if (model.display_name !== undefined) internal.display_name = model.display_name;
     if (model.pricing) internal.pricing = model.pricing;
-    if (model.chat) internal.chat = model.chat;
+    if (kind === 'chat' && model.chat) internal.chat = model.chat;
     return internal;
   });
   if (!config.modelsFetch.enabled || response === undefined) return manualModels;

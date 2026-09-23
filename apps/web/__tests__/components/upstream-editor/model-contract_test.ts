@@ -41,6 +41,25 @@ describe('custom discovered model projection', () => {
     expect(embeddingModel[0]?.chat).toBeUndefined();
   });
 
+  it('preserves opaque blob compatibility metadata from a downstream Floway catalog', () => {
+    const scope = { bindToUpstream: false, key: 'openai' } as const;
+    const models = discoveredModelsFromResponse({
+      kind: 'custom',
+      data: [{ id: 'gpt-5', opaqueBlobCompatibilityScope: scope }],
+    }, { openaiResponses: {} });
+
+    expect(models[0]?.opaqueBlobCompatibilityScope).toEqual(scope);
+  });
+
+  it('defaults discovered models without compatibility metadata to an upstream-bound omitted key', () => {
+    const models = discoveredModelsFromResponse({
+      kind: 'custom',
+      data: [{ id: 'gpt-5' }],
+    }, { openaiResponses: {} });
+
+    expect(models[0]?.opaqueBlobCompatibilityScope).toEqual({ bindToUpstream: true });
+  });
+
   it('projects every discovered row into a shape the gateway accepts', () => {
     const models = discoveredModelsFromResponse({
       kind: 'custom',
