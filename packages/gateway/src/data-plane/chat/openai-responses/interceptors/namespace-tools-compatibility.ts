@@ -104,17 +104,23 @@ const flattenNamespaces = (request: CanonicalOpenAIResponsesPayload): {
     return name;
   };
   const tools: OpenAIResponsesTool[] = [];
+  const namespaceSelectors = choices.some(selector => selector?.type === 'namespace')
+    ? new Map<string, Array<{ type: 'function' | 'custom'; name: string }>>() : undefined;
   for (const tool of declared) {
     if (tool.type !== 'namespace') {
       tools.push(isCallableTool(tool) ? { ...tool, name: allocate(toolIdentity(tool)) } : tool);
       continue;
     }
     if (typeof tool.name !== 'string' || !Array.isArray(tool.tools)) throw new TranslatorInputError('Cannot flatten a malformed OpenAI Responses namespace');
+    const selectors = namespaceSelectors?.get(tool.name) ?? [];
+    namespaceSelectors?.set(tool.name, selectors);
     for (const child of tool.tools) {
       if (!isCallableTool(child)) throw new TranslatorInputError(`Cannot flatten a non-callable tool in namespace ${tool.name}`);
+      const name = allocate(toolIdentity(child, tool.name));
+      if (namespaceSelectors !== undefined) selectors.push({ type: child.type, name });
       tools.push({
         ...child,
-        name: allocate(toolIdentity(child, tool.name)),
+        name,
         ...(tool.description ? { description: child.description ? `${tool.description}\n\n${child.description}` : tool.description } : {}),
       });
     }
@@ -132,9 +138,10 @@ const flattenNamespaces = (request: CanonicalOpenAIResponsesPayload): {
     // explicit scopes from replay-only history. Scanning every dot would
     // repeatedly hash growing, undeclared prefixes of long names.
     for (const length of namespaceLengths) {
-      if (source.name[length] !== '.') continue;
+      const separatorLength = source.name[length] === '.' ? 1 : source.name.startsWith('__', length) ? 2 : 0;
+      if (separatorLength === 0) continue;
       const namespace = source.name.slice(0, length);
-      const name = source.name.slice(length + 1);
+      const name = source.name.slice(length + separatorLength);
       if (!scopes.get(namespace)?.has(name)) continue;
       if (qualified !== undefined) throw new TranslatorInputError(`Ambiguous qualified OpenAI Responses callable name '${source.name}'`);
       qualified = { ...source, namespace, name };
@@ -159,8 +166,18 @@ const flattenNamespaces = (request: CanonicalOpenAIResponsesPayload): {
     if (toolChoice.type === 'function' || toolChoice.type === 'custom') toolChoice = renameChoice(toolChoice);
     else if (toolChoice.type === 'allowed_tools') {
       const originalTools = toolChoice.tools;
-      const mapped = originalTools.map(renameChoice);
-      if (mapped.some((tool, index) => tool !== originalTools[index])) toolChoice = { ...toolChoice, tools: mapped };
+      const mapped = originalTools.flatMap(tool => {
+        if (tool?.type !== 'namespace') return [renameChoice(tool)];
+        const selectors = typeof tool.name === 'string' ? namespaceSelectors?.get(tool.name) : undefined;
+        // Search-loaded namespaces still belong to the translator; only expand
+        // the declarations this bridge flattened, while their identity is known.
+        if (selectors === undefined) return [tool];
+        if (Object.keys(tool).some(key => key !== 'type' && key !== 'name')) {
+          throw new TranslatorInputError('Cannot translate namespace selector extensions.');
+        }
+        return selectors;
+      });
+      if (mapped.length !== originalTools.length || mapped.some((tool, index) => tool !== originalTools[index])) toolChoice = { ...toolChoice, tools: mapped };
     }
   }
   return {

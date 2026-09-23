@@ -66,18 +66,19 @@ test('namespace compatibility allocates replay-only identities against the curre
   assertEquals(call.payload.tools, [functionTool('files_read'), functionTool('files_read_2')]);
 });
 
-test('namespace compatibility preserves qualified Standard names and gives explicit flat declarations priority', async () => {
+test.each(['.', '__'])('namespace compatibility preserves qualified Standard names with %s and gives explicit flat declarations priority', async separator => {
   const namespace: OpenAIResponsesTool = { type: 'namespace', name: 'files', description: '', tools: [functionTool('read')] };
+  const name = `files${separator}read`;
   const payload: CanonicalOpenAIResponsesPayload = {
     model: 'm', tools: [namespace],
-    input: [{ type: 'function_call', name: 'files.read', call_id: 'past', arguments: '{}', status: 'completed' }],
-    tool_choice: { type: 'function', name: 'files.read' },
+    input: [{ type: 'function_call', name, call_id: 'past', arguments: '{}', status: 'completed' }],
+    tool_choice: { type: 'function', name },
   };
   const call = invocation(payload);
   await run(call);
   assertEquals(call.payload.tool_choice, { type: 'function', name: 'files_read' });
   assertEquals(call.payload.input, [{ type: 'function_call', name: 'files_read', call_id: 'past', arguments: '{}', status: 'completed' }]);
-  const flat = invocation({ ...payload, tools: [functionTool('files.read'), namespace] });
+  const flat = invocation({ ...payload, tools: [functionTool(name), namespace] });
   await run(flat);
   assertEquals(flat.payload.tool_choice, payload.tool_choice);
   assertEquals(flat.payload.input, payload.input);
