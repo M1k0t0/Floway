@@ -50,7 +50,7 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
         const { apiKey } = await setup(target);
         const selector = selection === 'namespace' ? { type: 'namespace', name: 'payments' }
           : selection === 'qualified' ? { type: 'function', name: 'payments__read' }
-          : { type: 'function', namespace: 'payments', name: 'read' };
+            : { type: 'function', namespace: 'payments', name: 'read' };
         const choice = { type: 'allowed_tools', mode, tools: [selector] };
         const input = [{ type: 'message', role: 'user', content: 'Read my account.' }];
         const payload = { model: 'model', stream: false, store: false, tool_choice: choice, ...(representation !== 'Standard' ? { input: [{ type: 'additional_tools', role: 'developer', tools: [namespace] }, ...input] } : { input, tools: [namespace] }) };
