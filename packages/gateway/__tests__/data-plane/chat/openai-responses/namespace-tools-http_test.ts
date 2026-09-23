@@ -46,9 +46,12 @@ const toolCallResponse = (target: TargetApi, name: string): Response => {
 for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
   for (const representation of ['Standard', 'Standard carrier'] as const) {
     for (const mode of ['auto', 'required'] as const) {
-      test(`HTTP ${representation} preserves namespace allowed_tools and descriptions on final ${target} wire (${mode})`, async () => {
+      test.each(['callable', 'namespace', 'qualified'] as const)(`HTTP ${representation} preserves namespace allowed_tools and descriptions on final ${target} wire (${mode}, %s selector)`, async selection => {
         const { apiKey } = await setup(target);
-        const choice = { type: 'allowed_tools', mode, tools: [{ type: 'function', namespace: 'payments', name: 'read' }] };
+        const selector = selection === 'namespace' ? { type: 'namespace', name: 'payments' }
+          : selection === 'qualified' ? { type: 'function', name: 'payments__read' }
+          : { type: 'function', namespace: 'payments', name: 'read' };
+        const choice = { type: 'allowed_tools', mode, tools: [selector] };
         const input = [{ type: 'message', role: 'user', content: 'Read my account.' }];
         const payload = { model: 'model', stream: false, store: false, tool_choice: choice, ...(representation !== 'Standard' ? { input: [{ type: 'additional_tools', role: 'developer', tools: [namespace] }, ...input] } : { input, tools: [namespace] }) };
         const wire: WireRequest[] = [];
@@ -70,8 +73,9 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
           await flushBackground();
         });
         assertEquals(wire.length, 1, 'the final provider serializer must actually run once');
-        assertEquals(wire[0].tools?.map(tool => tool.function?.name ?? tool.name), ['payments_read']);
-        assertEquals(wire[0].tools?.map(tool => tool.function?.description ?? tool.description), ['Read-only access. Never charge the account.\n\nRead account details.']);
+        const selected = selection === 'namespace' ? namespace.tools : namespace.tools.slice(0, 1);
+        assertEquals(wire[0].tools?.map(tool => tool.function?.name ?? tool.name), selected.map(tool => `payments_${tool.name}`));
+        assertEquals(wire[0].tools?.map(tool => tool.function?.description ?? tool.description), selected.map(tool => `${namespace.description}\n\n${tool.description}`));
         assertEquals(wire[0].tool_choice, target === 'openaiChatCompletions' ? mode : { type: mode === 'required' ? 'any' : 'auto' });
       });
     }
@@ -103,6 +107,7 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
           { tool_choice: { type: 'allowed_tools', mode: 'auto', tools: null } },
           { tool_choice: { type: 'allowed_tools', mode: 'future', tools: [{ type: 'function', namespace: 'payments', name: 'read' }] } },
           { tool_choice: { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', namespace: 'payments', name: 'missing' }] } },
+          { tool_choice: { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'namespace', name: 'payments', extension: true }] } },
         ]) {
           const response = await requestApp('/v1/responses', { method: 'POST', headers, body: JSON.stringify({ ...base, ...extra }) });
           const body = await response.json() as { error: { type: string; code: string | null; message: string } };
