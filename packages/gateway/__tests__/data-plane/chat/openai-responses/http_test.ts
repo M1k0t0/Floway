@@ -764,7 +764,7 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
       const bodies: Record<string, unknown>[] = [];
       const tools = (type: 'function' | 'custom') => scope === 'namespace'
         ? [{ type: 'namespace', name: 'fs', description: '', tools: [{ type, name: 'read' }] }]
-        : [{ type, name: 'read' }, { type: 'namespace', name: 'unused', description: '', tools: [{ type: 'function', name: 'other' }] }];
+        : [{ type, name: 'read' }];
       const currentName = scope === 'namespace' ? 'fs_read' : 'read';
       queueResolution([translatedNamespaceCandidate(target, body => bodies.push(structuredClone(body)), currentName)]);
       const first = await makeApp().request('/v1/responses', {

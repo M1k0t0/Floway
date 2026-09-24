@@ -1,6 +1,5 @@
 import { beforeEach, test, vi } from 'vitest';
 
-import { withOpenAIResponsesNamespaceToolsCompatibility } from '../../../../../src/data-plane/chat/openai-responses/interceptors/namespace-tools-compatibility.ts';
 import { withOpenAIResponsesServerToolShim } from '../../../../../src/data-plane/chat/openai-responses/interceptors/server-tool-shim.ts';
 import {
   consumeTurnStreaming,
@@ -33,8 +32,10 @@ import type {
 import { getRepo, initRepo } from '../../../../../src/repo/index.ts';
 import { InMemoryRepo } from '../../../../repo/memory.ts';
 import { mockChatGatewayCtx } from '../../../../test-utils/gateway-ctx.ts';
+import type { AnthropicMessagesStreamEvent } from '@floway-dev/protocols/anthropic-messages';
 import { eventFrame } from '@floway-dev/protocols/common';
 import type { BillableUsage, ProtocolFrame } from '@floway-dev/protocols/common';
+import type { OpenAIChatCompletionsStreamEvent } from '@floway-dev/protocols/openai-chat-completions';
 import type {
   CanonicalOpenAIResponsesPayload,
   OpenAIResponsesOutputItem,
@@ -48,8 +49,9 @@ import type {
   OpenAIResponsesToolChoice,
   OpenAIResponsesWebSearchAction,
 } from '@floway-dev/protocols/openai-responses';
-import { type EventResult, type ExecuteResult, type FlagId } from '@floway-dev/provider';
-import { assert, assertEquals, assertFalse, assertRejects, stubModelCandidate } from '@floway-dev/test-utils';
+import { eventResult, type EventResult, type ExecuteResult, type FlagId } from '@floway-dev/provider';
+import { assert, assertEquals, assertFalse, assertRejects, stubModelCandidate, testTelemetryModelIdentity } from '@floway-dev/test-utils';
+import { translateOpenAIResponsesViaAnthropicMessages, translateOpenAIResponsesViaOpenAIChatCompletions } from '@floway-dev/translate';
 
 const withOpenAIResponsesWebSearchShim = withOpenAIResponsesServerToolShim([webSearchServerTool]);
 
@@ -6339,20 +6341,37 @@ for (const targetApi of ['openaiChatCompletions', 'anthropicMessages', 'openaiRe
     const { frames } = await runShimAndDrain(withOpenAIResponsesWebSearchShim, inv, ctx, async () => {
       turns++;
       assertEquals(inv.payload.tools?.[0], { ...inv.payload.tools?.[0], name: `${SHIM_TOOL_NAME}_2` });
-      const privateInvocation = { ...inv, payload: structuredClone(inv.payload) };
-      return await withOpenAIResponsesNamespaceToolsCompatibility(privateInvocation, ctx, async () => {
-        const client = privateInvocation.payload.tools?.[1];
-        assert(client !== undefined);
-        const name = client.type === 'namespace' ? client.tools[0].name : 'name' in client ? client.name : undefined;
-        assert(typeof name === 'string');
-        const item = { type: 'function_call' as const, name, ...(targetApi === 'openaiResponses' ? { namespace: 'functions' } : {}), call_id: 'client', arguments: '{"search_query":[{"q":"client-owned"}]}', status: 'completed' as const };
+      if (targetApi === 'openaiResponses') {
+        const item = { type: 'function_call' as const, name: SHIM_TOOL_NAME, namespace: 'functions', call_id: 'client', arguments: '{}', status: 'completed' as const };
         return await scriptedRun([[
           mkResponseCreated(),
           eventFrame({ type: 'response.output_item.added', output_index: 0, item: { ...item, status: 'in_progress' } }),
           eventFrame({ type: 'response.output_item.done', output_index: 0, item }),
           mkResponseCompleted(),
         ]]).run();
-      });
+      }
+      if (targetApi === 'openaiChatCompletions') {
+        const trip = await translateOpenAIResponsesViaOpenAIChatCompletions(inv.payload, { model: 'm' });
+        const client = trip.target.tools?.[1];
+        assert(client?.type === 'function');
+        const events = (async function* (): AsyncGenerator<ProtocolFrame<OpenAIChatCompletionsStreamEvent>> {
+          yield eventFrame({ id: 'chat', object: 'chat.completion.chunk', created: 0, model: 'm', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'client', type: 'function', function: { name: client.function.name, arguments: '{}' } }] }, finish_reason: null }] });
+          yield eventFrame({ id: 'chat', object: 'chat.completion.chunk', created: 0, model: 'm', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] });
+        })();
+        return eventResult(trip.events(events), testTelemetryModelIdentity);
+      }
+      const trip = await translateOpenAIResponsesViaAnthropicMessages(inv.payload, { model: 'm', loadRemoteImage: async () => { throw new Error('Unexpected image'); } });
+      const client = trip.target.tools?.[1];
+      assert(client !== undefined);
+      const events = (async function* (): AsyncGenerator<ProtocolFrame<AnthropicMessagesStreamEvent>> {
+        yield eventFrame({ type: 'message_start', message: { id: 'msg', type: 'message', role: 'assistant', model: 'm', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 0 } } });
+        yield eventFrame({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'client', name: client.name, input: {} } });
+        yield eventFrame({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{}' } });
+        yield eventFrame({ type: 'content_block_stop', index: 0 });
+        yield eventFrame({ type: 'message_delta', delta: { stop_reason: 'tool_use', stop_sequence: null }, usage: { output_tokens: 1 } });
+        yield eventFrame({ type: 'message_stop' });
+      })();
+      return eventResult(trip.events(events), testTelemetryModelIdentity);
     });
     assertEquals(turns, 1);
     assertEquals(backend.calls, []);
@@ -6390,65 +6409,83 @@ test('namespaced forced choices survive helper iterations without demotion', asy
   assertEquals(choices, [choice, choice]);
 });
 
-test('bare forced helper choice follows a namespace-induced helper alias and restores its original echo', async () => {
-  const { backend } = makeStubDeps();
-  const choice = { type: 'function' as const, name: SHIM_TOOL_NAME };
-  const inv = makeInvocation({
-    payload: {
-      tools: [{ type: 'web_search' }, { type: 'namespace', name: 'client', description: '', tools: [{ type: 'function', name: SHIM_TOOL_NAME }] }],
-      tool_choice: choice,
-    },
-  });
-  const alias = `${SHIM_TOOL_NAME}_2`;
-  const script = scriptedRun([fcTurn(0, 'hosted', alias, '{"search_query":[{"q":"hosted"}]}'), messageTurn('done')]);
-  const choices: unknown[] = [];
-  const { frames } = await runShimAndDrain(withOpenAIResponsesWebSearchShim, inv, makeGatewayCtx(), async () => {
-    const selected = inv.payload.tool_choice;
-    if (typeof selected === 'object' && selected?.type === 'function') {
-      assert(inv.payload.tools?.some(tool => tool.type === 'function' && tool.name === selected.name), 'forced choice must name the declared helper');
-    }
-    choices.push(selected);
-    return await script.run();
-  });
-  assertEquals(choices, [{ type: 'function', name: alias }, 'auto']);
-  assertEquals(choice, { type: 'function', name: SHIM_TOOL_NAME });
-  assertEquals(script.callCount(), 2);
-  assertEquals(backend.calls.length, 1);
-  assertEquals(findResponseCompleted(frames).response.tool_choice, choice);
-});
+for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
+  for (const mode of ['forced', 'auto', 'required'] as const) {
+    test(`${target} ${mode} helper choice follows a namespace-induced alias and restores its original echo`, async () => {
+      const { backend } = makeStubDeps();
+      const selector = { type: 'function' as const, name: SHIM_TOOL_NAME };
+      const choice: OpenAIResponsesToolChoice = mode === 'forced' ? selector : { type: 'allowed_tools', mode, tools: [selector] };
+      const original = structuredClone(choice);
+      const inv = makeInvocation({
+        targetApi: target,
+        payload: {
+          tools: [{ type: 'web_search' }, { type: 'namespace', name: 'client', description: '', tools: [{ type: 'function', name: SHIM_TOOL_NAME }] }],
+          tool_choice: choice,
+        },
+      });
+      const alias = `${SHIM_TOOL_NAME}_2`;
+      const script = scriptedRun([fcTurn(0, 'hosted', alias, '{"search_query":[{"q":"hosted"}]}'), messageTurn('done')]);
+      const choices: unknown[] = [];
+      const { frames } = await runShimAndDrain(withOpenAIResponsesWebSearchShim, inv, makeGatewayCtx(), async () => {
+        choices.push(structuredClone(inv.payload.tool_choice));
+        const before = structuredClone(inv.payload);
+        const trip = target === 'openaiChatCompletions'
+          ? await translateOpenAIResponsesViaOpenAIChatCompletions(inv.payload, { model: 'm' })
+          : await translateOpenAIResponsesViaAnthropicMessages(inv.payload, { model: 'm', loadRemoteImage: async () => { throw new Error('Unexpected image'); } });
+        const wire = JSON.parse(JSON.stringify(trip.target)) as { tools: Array<{ name?: string; function?: { name: string } }> };
+        assert(wire.tools.some(tool => (tool.function?.name ?? tool.name) === alias), 'the translated subset must declare the helper alias');
+        assertEquals(inv.payload, before, 'repeated translation must preserve the outer loop payload');
+        return await script.run();
+      });
+      const renamed = { type: 'function', name: alias };
+      assertEquals(choices, mode === 'forced' ? [renamed, 'auto'] : [
+        { type: 'allowed_tools', mode, tools: [renamed] },
+        { type: 'allowed_tools', mode: 'auto', tools: [renamed] },
+      ]);
+      assertEquals(choice, original);
+      assertEquals(script.callCount(), 2);
+      assertEquals(backend.calls.length, 1);
+      assertEquals(findResponseCompleted(frames).response.tool_choice, original);
+    });
+  }
+}
 
 for (const owner of ['function declaration', 'custom declaration', 'function history', 'custom history', 'additional_tools', 'tool_search_output'] as const) {
-  test(`bare forced helper alias never captures an unqualified client ${owner}`, async () => {
-    const { backend } = makeStubDeps();
-    const tools: OpenAIResponsesTool[] = [
-      { type: 'web_search' },
-      { type: 'namespace', name: 'client', description: '', tools: [{ type: 'function', name: SHIM_TOOL_NAME }] },
-    ];
-    const input: OpenAIResponsesInputItem[] = [{ type: 'message', role: 'user', content: 'Continue.' }];
-    if (owner === 'function declaration' || owner === 'custom declaration') {
-      tools.push({ type: owner === 'function declaration' ? 'function' : 'custom', name: SHIM_TOOL_NAME });
-    } else if (owner === 'function history') {
-      input.push({ type: 'function_call', name: SHIM_TOOL_NAME, call_id: 'past', arguments: '{}', status: 'completed' });
-    } else if (owner === 'custom history') {
-      input.push({ type: 'custom_tool_call', name: SHIM_TOOL_NAME, call_id: 'past', input: 'client input' });
-    } else if (owner === 'additional_tools') {
-      input.push({ type: 'additional_tools', role: 'developer', tools: [{ type: 'function', name: SHIM_TOOL_NAME }] });
-    } else {
-      input.push({ type: 'tool_search_output', tools: [{ type: 'custom', name: SHIM_TOOL_NAME }] });
-    }
-    const inv = makeInvocation({ payload: { tools, input, tool_choice: { type: 'function', name: SHIM_TOOL_NAME } } });
-    const script = scriptedRun([fcTurn(0, 'client', SHIM_TOOL_NAME, '{}')]);
-    const { frames } = await runShimAndDrain(withOpenAIResponsesWebSearchShim, inv, makeGatewayCtx(), async () => {
-      assertEquals(inv.payload.tool_choice, { type: 'function', name: SHIM_TOOL_NAME });
-      const helper = inv.payload.tools?.[0];
-      assert(helper?.type === 'function');
-      assertEquals(helper.name, `${SHIM_TOOL_NAME}_2`);
-      return await script.run();
+  for (const selection of ['forced', 'allowed_tools'] as const) {
+    test(`${selection} helper alias never captures an unqualified client ${owner}`, async () => {
+      const { backend } = makeStubDeps();
+      const tools: OpenAIResponsesTool[] = [
+        { type: 'web_search' },
+        { type: 'namespace', name: 'client', description: '', tools: [{ type: 'function', name: SHIM_TOOL_NAME }] },
+      ];
+      const input: OpenAIResponsesInputItem[] = [{ type: 'message', role: 'user', content: 'Continue.' }];
+      if (owner === 'function declaration' || owner === 'custom declaration') {
+        tools.push({ type: owner === 'function declaration' ? 'function' : 'custom', name: SHIM_TOOL_NAME });
+      } else if (owner === 'function history') {
+        input.push({ type: 'function_call', name: SHIM_TOOL_NAME, call_id: 'past', arguments: '{}', status: 'completed' });
+      } else if (owner === 'custom history') {
+        input.push({ type: 'custom_tool_call', name: SHIM_TOOL_NAME, call_id: 'past', input: 'client input' });
+      } else if (owner === 'additional_tools') {
+        input.push({ type: 'additional_tools', role: 'developer', tools: [{ type: 'function', name: SHIM_TOOL_NAME }] });
+      } else {
+        input.push({ type: 'tool_search_output', tools: [{ type: 'custom', name: SHIM_TOOL_NAME }] });
+      }
+      const selector = { type: 'function' as const, name: SHIM_TOOL_NAME };
+      const choice: OpenAIResponsesToolChoice = selection === 'forced' ? selector : { type: 'allowed_tools', mode: 'auto', tools: [selector] };
+      const inv = makeInvocation({ payload: { tools, input, tool_choice: choice } });
+      const script = scriptedRun([fcTurn(0, 'client', SHIM_TOOL_NAME, '{}')]);
+      const { frames } = await runShimAndDrain(withOpenAIResponsesWebSearchShim, inv, makeGatewayCtx(), async () => {
+        assertEquals(inv.payload.tool_choice, choice);
+        const helper = inv.payload.tools?.[0];
+        assert(helper?.type === 'function');
+        assertEquals(helper.name, `${SHIM_TOOL_NAME}_2`);
+        return await script.run();
+      });
+      assertEquals(script.callCount(), 1);
+      assertEquals(backend.calls, []);
+      assertEquals(findResponseCompleted(frames).response.status, 'completed');
     });
-    assertEquals(script.callCount(), 1);
-    assertEquals(backend.calls, []);
-    assertEquals(findResponseCompleted(frames).response.status, 'completed');
-  });
+  }
 }
 
 for (const selectorType of ['web_search', 'function'] as const) {

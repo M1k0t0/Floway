@@ -1043,19 +1043,31 @@ export const withOpenAIResponsesServerToolShim = (
     const toolName = resolveServerToolName(prepared.baseToolName, currentTools, ctx.payload.input, ctx.payload.tool_choice);
     const { hosted } = prepared;
     const choice = ctx.payload.tool_choice;
-    let helperFunctionChoice: Extract<OpenAIResponsesToolChoice, { type: 'function' }> | undefined;
+    let helperFunctionChoice: Exclude<OpenAIResponsesToolChoice, string> | undefined;
+    let rewrittenHelperChoice = choice;
     if (hosted !== undefined && toolName !== prepared.baseToolName
-      && typeof choice === 'object' && choice?.type === 'function'
-      && choice.name === prepared.baseToolName && (!('namespace' in choice) || choice.namespace === undefined)) {
-      // A bare helper selector predates collision-driven helper aliases. Rebase
-      // it only when no unqualified client callable owns that spelling.
+      && typeof choice === 'object' && choice !== null) {
+      // Forced and allowed-tools selectors share the same ownership rule. A
+      // bare helper spelling may be rebased only when no client owns it.
       const hasClientDeclaration = (tools: readonly OpenAIResponsesTool[]) => tools.some(tool =>
-        (tool.type === 'function' || tool.type === 'custom') && tool.name === choice.name
+        (tool.type === 'function' || tool.type === 'custom') && tool.name === prepared.baseToolName
         && (!('namespace' in tool) || tool.namespace === undefined));
       const clientOwnsName = hasClientDeclaration(currentTools) || ctx.payload.input.some(item =>
-        ((item.type === 'function_call' || item.type === 'custom_tool_call') && item.namespace === undefined && item.name === choice.name)
+        ((item.type === 'function_call' || item.type === 'custom_tool_call') && item.namespace === undefined && item.name === prepared.baseToolName)
         || ((item.type === 'additional_tools' || item.type === 'tool_search_output') && Array.isArray(item.tools) && hasClientDeclaration(item.tools)));
-      if (!clientOwnsName) helperFunctionChoice = choice;
+      if (!clientOwnsName) {
+        const rebaseSelector = <T>(selector: T): T => {
+          if (typeof selector !== 'object' || selector === null || !('type' in selector) || selector.type !== 'function'
+            || !('name' in selector) || selector.name !== prepared.baseToolName
+            || ('namespace' in selector && selector.namespace !== undefined)) return selector;
+          return { ...selector, name: toolName };
+        };
+        if (choice.type === 'allowed_tools' && Array.isArray(choice.tools)) {
+          const tools = choice.tools.map(rebaseSelector);
+          if (tools.some((tool, index) => tool !== choice.tools[index])) rewrittenHelperChoice = { ...choice, tools };
+        } else rewrittenHelperChoice = rebaseSelector(choice);
+        if (rewrittenHelperChoice !== choice) helperFunctionChoice = choice;
+      }
     }
     let canonicalHostedTool: OpenAIResponsesHostedTool | undefined = undefined;
     if (hosted !== undefined) {
@@ -1074,7 +1086,7 @@ export const withOpenAIResponsesServerToolShim = (
       ? choice
       : undefined);
     if (helperFunctionChoice !== undefined) {
-      ctx.payload = { ...ctx.payload, tool_choice: { ...helperFunctionChoice, name: toolName } };
+      ctx.payload = { ...ctx.payload, tool_choice: rewrittenHelperChoice };
     }
     active.push({ ...prepared, toolName, canonicalHostedTool, originalToolChoice });
   }
