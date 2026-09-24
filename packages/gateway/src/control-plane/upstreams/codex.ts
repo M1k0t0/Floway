@@ -4,7 +4,7 @@ import type { CtxWithJson } from '../../middleware/zod-validator.ts';
 import { getRepo } from '../../repo/index.ts';
 import { getRuntimeLocation } from '../../runtime/runtime-info.ts';
 import type { codexImportExchangeBody, codexImportPreviewBody, codexOAuthAuthorizeUrlBody, codexOAuthRefreshBody } from '../schemas.ts';
-import { warmModelsCache } from '../shared/warm-models-cache.ts';
+import { saveUpstream } from '../shared/save-upstreams.ts';
 import type { Fetcher, UpstreamRecord } from '@floway-dev/provider';
 import {
   buildCodexAuthorizeUrl,
@@ -83,8 +83,7 @@ export const codexImportExchange = async (c: CtxWithJson<typeof codexImportExcha
       state: ingestion.state,
       updatedAt: new Date().toISOString(),
     };
-    await getRepo().upstreams.save(next);
-    await warmModelsCache(next, c);
+    await saveUpstream({ previous: dbRecord, next });
   }
 
   return c.json({

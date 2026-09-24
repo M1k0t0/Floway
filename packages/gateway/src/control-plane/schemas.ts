@@ -11,9 +11,9 @@
 //
 // Deep upstream-config validation (e.g. Azure URL hostname rules, custom
 // pathOverrides and modelsFetch.endpoint URL parsing, per-model endpoint path
-// checks) intentionally stays in the handler functions — they own the
-// canonical error messages and downstream cache invalidation. The schemas
-// here describe the shape the dashboard sends.
+// checks) stays with provider validators and handlers, which own the canonical
+// error messages. Repository model-aware writes own catalog versions and
+// invalidation. The schemas here describe the shape the dashboard sends.
 
 import { z } from 'zod';
 
@@ -404,7 +404,7 @@ export const updateUpstreamBody = z.object({
 });
 
 // Shared envelope for the record-body action contract used by every
-// action endpoint (OAuth exchange/refresh, quota, probe, list-models,
+// action endpoint (OAuth exchange/refresh, quota, probe, draft preview,
 // etc.). The client posts its full draft record; the server reads only
 // fields relevant to the specific action (credentials in config/state,
 // proxy_fallback_list for routing) and produces a targeted patch. Kind
@@ -418,8 +418,6 @@ export const upstreamRecordEnvelope = z.object({
   proxy_fallback_list: proxyFallbackListSchema.optional(),
 }).passthrough();
 
-// The bare envelope contract — every action endpoint that takes no extras
-// beyond `record` (refresh, probe, quota, list-models) shares this shape.
 const recordOnlyBody = z.object({ record: upstreamRecordEnvelope });
 
 // Shared authorize-url contract for the codex and claude-code authorize-url
@@ -511,15 +509,25 @@ export const claudeCodeSetupTokenExchangeBody = z.object({
 
 export const claudeCodeProbeBody = recordOnlyBody;
 
+// The editor sends every discovery input, including model projection policy,
+// while direct preview callers can omit unrelated display metadata.
+export const previewModelsBody = z.object({
+  record: upstreamRecordEnvelope.extend({
+    proxy_fallback_list: proxyFallbackListSchema,
+    name: z.string().optional(),
+    enabled: z.boolean().optional(),
+    sort_order: z.number().int().optional(),
+    created_at: z.string().optional(),
+    updated_at: z.string().optional(),
+    hue: upstreamHueSchema.optional(),
+    flag_overrides: flagOverridesSchema.optional(),
+    disabled_public_model_ids: disabledPublicModelIdsSchema.optional(),
+    model_prefix: modelPrefixSchema.optional(),
+  }),
+});
 // --- ollama ---
 
 export const ollamaUsageBody = recordOnlyBody;
-
-// Unified live-model listing for both create-time preview and edit-time
-// refresh. Custom returns the raw upstream row (dashboard translates
-// through the draft's endpoints); every other kind returns the fully
-// projected UpstreamModelConfig catalog.
-export const listModelsBody = recordOnlyBody;
 
 // --- agent setup ---
 //
