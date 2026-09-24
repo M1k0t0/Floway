@@ -50,7 +50,7 @@ import type {
   OpenAIResponsesWebSearchAction,
 } from '@floway-dev/protocols/openai-responses';
 import { eventResult, type EventResult, type ExecuteResult, type FlagId } from '@floway-dev/provider';
-import { assert, assertEquals, assertFalse, assertRejects, stubModelCandidate, testTelemetryModelIdentity } from '@floway-dev/test-utils';
+import { assert, assertEquals, assertFalse, assertRejects, stubModelCandidate } from '@floway-dev/test-utils';
 import { translateOpenAIResponsesViaAnthropicMessages, translateOpenAIResponsesViaOpenAIChatCompletions } from '@floway-dev/translate';
 
 const withOpenAIResponsesWebSearchShim = withOpenAIResponsesServerToolShim([webSearchServerTool]);
@@ -6361,11 +6361,11 @@ for (const targetApi of ['openaiChatCompletions', 'anthropicMessages', 'openaiRe
         return eventResult(trip.events(events), testTelemetryModelIdentity);
       }
       const trip = await translateOpenAIResponsesViaAnthropicMessages(inv.payload, { model: 'm', loadRemoteImage: async () => { throw new Error('Unexpected image'); } });
-      const client = trip.target.tools?.[1];
-      assert(client !== undefined);
+      const name = trip.target.tools?.[1].name;
+      assert(typeof name === 'string');
       const events = (async function* (): AsyncGenerator<ProtocolFrame<AnthropicMessagesStreamEvent>> {
         yield eventFrame({ type: 'message_start', message: { id: 'msg', type: 'message', role: 'assistant', model: 'm', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 0 } } });
-        yield eventFrame({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'client', name: client.name, input: {} } });
+        yield eventFrame({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'client', name, input: {} } });
         yield eventFrame({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{}' } });
         yield eventFrame({ type: 'content_block_stop', index: 0 });
         yield eventFrame({ type: 'message_delta', delta: { stop_reason: 'tool_use', stop_sequence: null }, usage: { output_tokens: 1 } });
