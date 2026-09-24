@@ -4,11 +4,38 @@ import {
   aliasFromApiId,
   buildClaudeCodeCatalog,
   chatFromCapabilities,
+  fetchClaudeCodeModelsList,
   type ClaudeCodeApiModel,
   type ClaudeCodeProviderData,
 } from '../src/models.ts';
 import { pricingForClaudeCodeModelKey } from '../src/pricing.ts';
-import type { FlagId } from '@floway-dev/provider';
+import { ProviderModelsUnavailableError, type FlagId } from '@floway-dev/provider';
+
+test('catalog fetch exposes the upstream HTTP failure', async () => {
+  try {
+    await fetchClaudeCodeModelsList('at', async () => new Response('{"error":"denied"}', { status: 401, headers: { 'retry-after': '30' } }));
+    throw new Error('catalog fetch unexpectedly succeeded');
+  } catch (error) {
+    expect(error).toBeInstanceOf(ProviderModelsUnavailableError);
+    expect((error as ProviderModelsUnavailableError).displayResponse).toMatchObject({
+      status: 401,
+      body: '{\n  "error": "denied"\n}',
+      headers: expect.arrayContaining([['retry-after', '30']]),
+    });
+  }
+});
+
+test('malformed catalog entry errors do not echo upstream data', async () => {
+  const token = 'secret-token-'.repeat(30);
+  try {
+    await fetchClaudeCodeModelsList(token, async () => Response.json({ data: [{ id: null, echo: token }] }));
+    throw new Error('catalog fetch unexpectedly succeeded');
+  } catch (error) {
+    expect(error).toBeInstanceOf(TypeError);
+    expect((error as Error).message).toBe('Claude Code /v1/models entry missing id');
+    expect((error as Error).message).not.toContain(token.slice(0, 100));
+  }
+});
 
 const SAMPLE_API_MODELS: ClaudeCodeApiModel[] = [
   { id: 'claude-opus-5-5', display_name: 'Claude Opus 5.5', max_input_tokens: 1_000_000 },

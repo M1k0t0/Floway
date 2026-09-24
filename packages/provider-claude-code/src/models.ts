@@ -15,7 +15,7 @@
 
 import { CLAUDE_CODE_HEADERS_SONNET_OPUS } from './headers.ts';
 import { pricingForClaudeCodeModelKey } from './pricing.ts';
-import type { Fetcher, FlagId, ProviderModel, UpstreamChatModelConfig } from '@floway-dev/provider';
+import { ProviderModelsUnavailableError, type Fetcher, type FlagId, type ProviderModel, type UpstreamChatModelConfig } from '@floway-dev/provider';
 
 export interface ClaudeCodeProviderData {
   readonly upstreamModelId: string;
@@ -67,8 +67,7 @@ export const fetchClaudeCodeModelsList = async (
   };
   const response = await fetcher(ANTHROPIC_MODELS_ENDPOINT, { method: 'GET', headers });
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Claude Code /v1/models fetch failed: ${response.status} ${body.slice(0, 200)}`);
+    throw new ProviderModelsUnavailableError({ status: response.status, headers: new Headers(response.headers), body: await response.text() });
   }
   const parsed = await response.json() as { data?: unknown };
   if (!Array.isArray(parsed.data)) throw new Error('Claude Code /v1/models response missing data array');
@@ -78,7 +77,7 @@ export const fetchClaudeCodeModelsList = async (
 const assertApiModel = (value: unknown): ClaudeCodeApiModel => {
   if (typeof value !== 'object' || value === null) throw new TypeError('Claude Code /v1/models entry is not an object');
   const { id, display_name, max_input_tokens, capabilities } = value as Record<string, unknown>;
-  if (typeof id !== 'string') throw new TypeError(`Claude Code /v1/models entry missing id: ${JSON.stringify(value).slice(0, 200)}`);
+  if (typeof id !== 'string') throw new TypeError('Claude Code /v1/models entry missing id');
   if (typeof display_name !== 'string') throw new TypeError(`Claude Code /v1/models entry ${id} missing display_name`);
   if (typeof max_input_tokens !== 'number') throw new TypeError(`Claude Code /v1/models entry ${id} missing max_input_tokens`);
   return {

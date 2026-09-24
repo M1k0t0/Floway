@@ -1,13 +1,22 @@
-import { describe, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
 import { toPublicModel } from '../../../src/data-plane/models/load.ts';
 import { compareModelIds, getModelsFromProviders } from '../../../src/data-plane/providers/catalog.ts';
-import { clearInFlightForTesting } from '../../../src/data-plane/providers/models-cache.ts';
 import { listModelProviders } from '../../../src/data-plane/providers/registry.ts';
 import { enumerateModelCandidates } from '../../../src/data-plane/providers/resolution.ts';
-import { buildCustomUpstreamRecord, copilotModels, setupAppTest } from '../../test-utils/app.ts';
-import { directFetcher, type InternalModel, type ProviderModel } from '@floway-dev/provider';
-import { assertEquals, jsonResponse, withMockedFetch } from '@floway-dev/test-utils';
+import { createModelsRefreshScheduler } from '../../../src/execution/models-refresh.ts';
+import { saveUpstreamForTest } from '../../repo/upstreams.ts';
+import { buildCustomUpstreamRecord, copilotModels, setupAppTest, warmModelsForTest } from '../../test-utils/app.ts';
+import type { InternalModel, ProviderModel } from '@floway-dev/provider';
+import { assertEquals, jsonResponse, withMockedFetch as withMockedFetchRaw } from '@floway-dev/test-utils';
+
+const withMockedFetch = <T>(
+  handler: Parameters<typeof withMockedFetchRaw>[0],
+  fn: () => Promise<T>,
+): Promise<T> => withMockedFetchRaw(handler, async () => {
+  await warmModelsForTest();
+  return await fn();
+});
 
 const realProviderModels = (model: InternalModel | undefined): Record<string, ProviderModel> => {
   if (model?.providerModels === undefined) throw new Error(`expected real InternalModel with providerModels, got ${JSON.stringify(model)}`);
@@ -19,6 +28,7 @@ const sortedIds = (ids: readonly string[]): string[] => [...ids].sort(compareMod
 const testScheduler = (promise: Promise<unknown>): void => {
   promise.catch(err => console.error('[background]', err));
 };
+const scheduleRefresh = createModelsRefreshScheduler('TEST', testScheduler);
 
 test('compareModelIds pushes ids containing "/" to the tail', () => {
   assertEquals(sortedIds(['accounts/msft/x', 'gpt-4o', 'accounts/msft/y', 'claude-opus-4-7']), [
@@ -95,8 +105,8 @@ test('compareModelIds keeps case-only differences adjacent via lowercase tie-bre
 test('catalog assembly returns the merged catalog plus the per-id upstream index', async () => {
   const { repo } = await setupAppTest();
 
-  await repo.upstreams.save(buildCustomUpstreamRecord());
-  await repo.upstreams.save(buildCustomUpstreamRecord({ id: 'up_disabled', enabled: false, sortOrder: 50 }));
+  await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord());
+  await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({ id: 'up_disabled', enabled: false, sortOrder: 50 }));
 
   await withMockedFetch(
     request => {
@@ -140,7 +150,7 @@ test('catalog assembly returns the merged catalog plus the per-id upstream index
       throw new Error(`Unhandled fetch ${request.url}`);
     },
     async () => {
-      const { models, upstreamsByPublicId } = await getModelsFromProviders(await listModelProviders(null), () => directFetcher, testScheduler);
+      const { models, upstreamsByPublicId } = getModelsFromProviders(await listModelProviders(null), scheduleRefresh);
       const model = models.find(candidate => candidate.id === 'shared-model');
 
       assertEquals(model?.display_name, 'Shared Model');
@@ -189,12 +199,12 @@ test('catalog assembly returns the merged catalog plus the per-id upstream index
 test('catalog merge exposes a shared scope only when every contributor agrees', async () => {
   const { repo } = await setupAppTest();
   await repo.upstreams.deleteAll();
-  await repo.upstreams.save(buildCustomUpstreamRecord({
+  await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
     id: 'up_first',
     sortOrder: 1,
     config: { baseUrl: 'https://first.example.com', authStyle: 'bearer', apiKey: 'sk-first', endpoints: { openaiResponses: {} }, ingressHeadersRules: [] },
   }));
-  await repo.upstreams.save(buildCustomUpstreamRecord({
+  await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
     id: 'up_second',
     sortOrder: 2,
     config: { baseUrl: 'https://second.example.com', authStyle: 'bearer', apiKey: 'sk-second', endpoints: { openaiResponses: {} }, ingressHeadersRules: [] },
@@ -212,7 +222,7 @@ test('catalog merge exposes a shared scope only when every contributor agrees', 
       }],
     }),
     async () => {
-      const { models } = await getModelsFromProviders(await listModelProviders(null), () => directFetcher, testScheduler);
+      const { models } = getModelsFromProviders(await listModelProviders(null), scheduleRefresh);
       const model = models.find(candidate => candidate.id === 'shared-model');
       assertEquals(model?.opaqueBlobCompatibilityScope, { bindToUpstream: true });
       assertEquals(model && toPublicModel(model).opaqueBlobCompatibilityScope, { bindToUpstream: true });
@@ -223,12 +233,12 @@ test('catalog merge exposes a shared scope only when every contributor agrees', 
 test('catalog merge preserves unanimous image-detail support on the public row', async () => {
   const { repo } = await setupAppTest();
   await repo.upstreams.deleteAll();
-  await repo.upstreams.save(buildCustomUpstreamRecord({
+  await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
     id: 'up_first',
     sortOrder: 1,
     config: { baseUrl: 'https://first.example.com', authStyle: 'bearer', apiKey: 'sk-first', endpoints: { openaiResponses: {} }, ingressHeadersRules: [] },
   }));
-  await repo.upstreams.save(buildCustomUpstreamRecord({
+  await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
     id: 'up_second',
     sortOrder: 2,
     config: { baseUrl: 'https://second.example.com', authStyle: 'bearer', apiKey: 'sk-second', endpoints: { openaiResponses: {} }, ingressHeadersRules: [] },
@@ -237,7 +247,7 @@ test('catalog merge preserves unanimous image-detail support on the public row',
   await withMockedFetch(
     () => jsonResponse({ object: 'list', data: [{ id: 'shared-model', chat: { image_detail_original: true } }] }),
     async () => {
-      const { models } = await getModelsFromProviders(await listModelProviders(null), () => directFetcher, testScheduler);
+      const { models } = getModelsFromProviders(await listModelProviders(null), scheduleRefresh);
       const model = models.find(candidate => candidate.id === 'shared-model');
 
       assertEquals(model?.chat?.image_detail_original, true);
@@ -274,7 +284,7 @@ test('disabledPublicModelIds hides models from the catalog and routing, per upst
 
   // up_a disables a solo model and a shared one (by public id, including a
   // publicModelId override); up_b still serves the shared id, enabled.
-  await repo.upstreams.save(azureUpstream({
+  await saveUpstreamForTest(repo.upstreams, azureUpstream({
     id: 'up_a',
     sortOrder: 1,
     models: [
@@ -285,14 +295,15 @@ test('disabledPublicModelIds hides models from the catalog and routing, per upst
     ],
     disabledPublicModelIds: ['gpt-solo', 'gpt-shared', 'gpt-override'],
   }));
-  await repo.upstreams.save(azureUpstream({
+  await saveUpstreamForTest(repo.upstreams, azureUpstream({
     id: 'up_b',
     sortOrder: 2,
     models: [{ upstreamModelId: 'gpt-shared' }],
     disabledPublicModelIds: [],
   }));
 
-  const catalog = (await getModelsFromProviders(await listModelProviders(null), () => directFetcher, testScheduler)).models;
+  await warmModelsForTest();
+  const catalog = getModelsFromProviders(await listModelProviders(null), scheduleRefresh).models;
   assertEquals([...catalog.map(m => m.id)].sort(), ['gpt-keep', 'gpt-shared']);
 
   // The solo and override ids resolve to nothing (hidden + unroutable).
@@ -308,23 +319,20 @@ test('disabledPublicModelIds hides models from the catalog and routing, per upst
   assertEquals(keep.candidates.map(m => m.provider.upstreamId), ['up_a']);
 });
 
-// Per-upstream catalog fetches fan out in parallel: total wall-clock time
-// tracks the slowest upstream, not the sum. The bound is loose because CI
-// timer noise eats into a tight `< sum` comparison; what matters is the
-// ratio.
-test('catalog assembly fans out per-upstream catalog fetches in parallel', async () => {
-  clearInFlightForTesting();
+// Every upstream request must start before any sibling is released. This
+// directly observes concurrency without a wall-clock threshold that load can
+// satisfy or violate independently of execution order.
+test('catalog refresh triggers fan out per upstream in parallel', async () => {
   const { repo } = await setupAppTest();
   await repo.upstreams.deleteAll();
 
-  const FETCH_DELAY_MS = 60;
   const upstreams = [
     { id: 'up_p1', host: 'p1.example.com', model: 'p1-model' },
     { id: 'up_p2', host: 'p2.example.com', model: 'p2-model' },
     { id: 'up_p3', host: 'p3.example.com', model: 'p3-model' },
   ];
   for (const [index, u] of upstreams.entries()) {
-    await repo.upstreams.save(buildCustomUpstreamRecord({
+    await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
       id: u.id,
       name: u.id,
       sortOrder: index,
@@ -332,54 +340,49 @@ test('catalog assembly fans out per-upstream catalog fetches in parallel', async
     }));
   }
 
-  await withMockedFetch(
-    async request => {
+  const started: string[] = [];
+  const releases = new Map<string, () => void>();
+  await withMockedFetchRaw(
+    request => {
       const url = new URL(request.url);
       const match = upstreams.find(u => url.hostname === u.host);
       if (match && url.pathname === '/v1/models') {
-        await new Promise(resolve => setTimeout(resolve, FETCH_DELAY_MS));
-        return jsonResponse({ object: 'list', data: [{ id: match.model, supported_endpoints: ['/chat/completions'] }] });
+        started.push(match.host);
+        return new Promise<Response>(resolve => {
+          releases.set(match.host, () => resolve(jsonResponse({ object: 'list', data: [{ id: match.model, supported_endpoints: ['/chat/completions'] }] })));
+        });
       }
       throw new Error(`Unhandled fetch ${request.url}`);
     },
     async () => {
-      const start = Date.now();
-      const catalog = (await getModelsFromProviders(await listModelProviders(null), () => directFetcher, testScheduler)).models;
-      const elapsed = Date.now() - start;
+      const warming = warmModelsForTest();
+      await vi.waitFor(() => expect(started.toSorted()).toEqual(upstreams.map(upstream => upstream.host).toSorted()));
+      for (const release of releases.values()) release();
+      await warming;
+      const catalog = getModelsFromProviders(await listModelProviders(null), scheduleRefresh).models;
 
       assertEquals([...catalog.map(m => m.id)].sort(), ['p1-model', 'p2-model', 'p3-model']);
-      // A serial walk would take >= 3 * FETCH_DELAY_MS; parallel is bounded by
-      // ~FETCH_DELAY_MS plus per-test overhead. Half the serial budget is the
-      // loosest threshold that still excludes any serial regression.
-      const serialBudget = upstreams.length * FETCH_DELAY_MS;
-      if (elapsed >= serialBudget / 2) {
-        throw new Error(`expected parallel walk (~${FETCH_DELAY_MS}ms) but took ${elapsed}ms (serial would be ${serialBudget}ms)`);
-      }
     },
   );
 });
 
-// A single upstream's catalog fetch failure is surfaced as `lastError` and
-// recorded against `sawSuccess === true`; the public catalog still includes
-// every successful upstream's models.
 test('catalog assembly: a rejected provider does not block other providers', async () => {
-  clearInFlightForTesting();
   const { repo } = await setupAppTest();
   await repo.upstreams.deleteAll();
 
-  await repo.upstreams.save(buildCustomUpstreamRecord({
+  await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
     id: 'up_ok_1',
     name: 'OK 1',
     sortOrder: 1,
     config: { baseUrl: 'https://ok1.example.com', authStyle: 'bearer', apiKey: 'sk-x', endpoints: { openaiChatCompletions: {} }, ingressHeadersRules: [] },
   }));
-  await repo.upstreams.save(buildCustomUpstreamRecord({
+  await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
     id: 'up_broken',
     name: 'Broken',
     sortOrder: 2,
     config: { baseUrl: 'https://broken.example.com', authStyle: 'bearer', apiKey: 'sk-x', endpoints: { openaiChatCompletions: {} }, ingressHeadersRules: [] },
   }));
-  await repo.upstreams.save(buildCustomUpstreamRecord({
+  await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
     id: 'up_ok_2',
     name: 'OK 2',
     sortOrder: 3,
@@ -401,7 +404,7 @@ test('catalog assembly: a rejected provider does not block other providers', asy
       throw new Error(`Unhandled fetch ${request.url}`);
     },
     async () => {
-      const catalog = (await getModelsFromProviders(await listModelProviders(null), () => directFetcher, testScheduler)).models;
+      const catalog = getModelsFromProviders(await listModelProviders(null), scheduleRefresh).models;
       assertEquals([...catalog.map(m => m.id)].sort(), ['ok-1-model', 'ok-2-model']);
     },
   );
@@ -409,12 +412,12 @@ test('catalog assembly: a rejected provider does not block other providers', asy
 
 // End-to-end listing checks for the prefix policy. The catalog walk goes
 // through getModelsFromProviders, which threads custom upstreams' /v1/models
-// responses through fetchUpstreamModelsCached just like production does.
+// responses through readUpstreamModelsSnapshotAndScheduleRefresh just like production does.
 describe('catalog listing under modelPrefix', () => {
   test('null prefix lists bare ids only (today\'s behavior)', async () => {
     const { repo } = await setupAppTest();
     await repo.upstreams.deleteAll();
-    await repo.upstreams.save(buildCustomUpstreamRecord({
+    await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
       id: 'up_plain',
       sortOrder: 1,
       config: { baseUrl: 'https://plain.example.com', authStyle: 'bearer', apiKey: 'sk-x', endpoints: { openaiChatCompletions: {} }, ingressHeadersRules: [] },
@@ -429,7 +432,7 @@ describe('catalog listing under modelPrefix', () => {
         throw new Error(`Unhandled fetch ${request.url}`);
       },
       async () => {
-        const catalog = (await getModelsFromProviders(await listModelProviders(null), () => directFetcher, testScheduler)).models;
+        const catalog = getModelsFromProviders(await listModelProviders(null), scheduleRefresh).models;
         assertEquals(catalog.map(m => m.id), ['gpt-4o']);
       },
     );
@@ -438,7 +441,7 @@ describe('catalog listing under modelPrefix', () => {
   test('listed=[prefixed] lists only the prefixed surface and routes the prefixed request to the upstream', async () => {
     const { repo } = await setupAppTest();
     await repo.upstreams.deleteAll();
-    await repo.upstreams.save(buildCustomUpstreamRecord({
+    await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
       id: 'up_prefixed',
       sortOrder: 1,
       config: { baseUrl: 'https://prefixed.example.com', authStyle: 'bearer', apiKey: 'sk-x', endpoints: { openaiChatCompletions: {} }, ingressHeadersRules: [] },
@@ -454,7 +457,7 @@ describe('catalog listing under modelPrefix', () => {
         throw new Error(`Unhandled fetch ${request.url}`);
       },
       async () => {
-        const catalog = (await getModelsFromProviders(await listModelProviders(null), () => directFetcher, testScheduler)).models;
+        const catalog = getModelsFromProviders(await listModelProviders(null), scheduleRefresh).models;
         assertEquals(catalog.map(m => m.id), ['or/gpt-4o']);
         // Prefixed surface gets a synthesized display_name prepending the
         // upstream's display name so the dashboard tells the operator at a
@@ -485,7 +488,7 @@ describe('catalog listing under modelPrefix', () => {
     // per-provider catalog lookup.
     const { repo } = await setupAppTest();
     await repo.upstreams.deleteAll();
-    await repo.upstreams.save(buildCustomUpstreamRecord({
+    await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
       id: 'up_dual_addressable',
       sortOrder: 1,
       config: { baseUrl: 'https://dual.example.com', authStyle: 'bearer', apiKey: 'sk-x', endpoints: { openaiChatCompletions: {} }, ingressHeadersRules: [] },
@@ -501,7 +504,7 @@ describe('catalog listing under modelPrefix', () => {
         throw new Error(`Unhandled fetch ${request.url}`);
       },
       async () => {
-        const catalog = (await getModelsFromProviders(await listModelProviders(null), () => directFetcher, testScheduler)).models;
+        const catalog = getModelsFromProviders(await listModelProviders(null), scheduleRefresh).models;
         assertEquals(catalog.map(m => m.id), ['or/gpt-4o']);
 
         const bare = await enumerateModelCandidates({ upstreamIds: null, model: 'gpt-4o', kind: 'chat', scheduler: testScheduler, runtimeLocation: 'TEST' });
@@ -525,12 +528,12 @@ describe('catalog listing under modelPrefix', () => {
     // to up_dual because up_plain's catalog does not contain `or/gpt-4o`.
     const { repo } = await setupAppTest();
     await repo.upstreams.deleteAll();
-    await repo.upstreams.save(buildCustomUpstreamRecord({
+    await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
       id: 'up_plain',
       sortOrder: 1,
       config: { baseUrl: 'https://plain.example.com', authStyle: 'bearer', apiKey: 'sk-x', endpoints: { openaiChatCompletions: {} }, ingressHeadersRules: [] },
     }));
-    await repo.upstreams.save(buildCustomUpstreamRecord({
+    await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
       id: 'up_dual',
       sortOrder: 2,
       config: { baseUrl: 'https://dual.example.com', authStyle: 'bearer', apiKey: 'sk-x', endpoints: { openaiChatCompletions: {} }, ingressHeadersRules: [] },
@@ -549,7 +552,7 @@ describe('catalog listing under modelPrefix', () => {
         throw new Error(`Unhandled fetch ${request.url}`);
       },
       async () => {
-        const catalog = (await getModelsFromProviders(await listModelProviders(null), () => directFetcher, testScheduler)).models;
+        const catalog = getModelsFromProviders(await listModelProviders(null), scheduleRefresh).models;
         assertEquals([...catalog.map(m => m.id)].sort(), ['gpt-4o', 'or/gpt-4o']);
 
         // Both upstreams enumerate against the bare id: up_plain via its only
@@ -580,7 +583,7 @@ describe('catalog listing under modelPrefix', () => {
     // `prefixed` iteration order (see `FORM_ORDER` in `model-prefix.ts`).
     const { repo } = await setupAppTest();
     await repo.upstreams.deleteAll();
-    await repo.upstreams.save(buildCustomUpstreamRecord({
+    await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
       id: 'up_dual',
       sortOrder: 1,
       config: { baseUrl: 'https://dual.example.com', authStyle: 'bearer', apiKey: 'sk-x', endpoints: { openaiChatCompletions: {} }, ingressHeadersRules: [] },
@@ -618,7 +621,7 @@ describe('catalog listing under modelPrefix', () => {
     // `or/gpt-4o` survives from up_dual; `gpt-mini` and `or/gpt-mini` stay.
     const { repo } = await setupAppTest();
     await repo.upstreams.deleteAll();
-    await repo.upstreams.save(buildCustomUpstreamRecord({
+    await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
       id: 'up_dual',
       sortOrder: 1,
       config: { baseUrl: 'https://dual.example.com', authStyle: 'bearer', apiKey: 'sk-x', endpoints: { openaiChatCompletions: {} }, ingressHeadersRules: [] },
@@ -641,7 +644,7 @@ describe('catalog listing under modelPrefix', () => {
         throw new Error(`Unhandled fetch ${request.url}`);
       },
       async () => {
-        const catalog = (await getModelsFromProviders(await listModelProviders(null), () => directFetcher, testScheduler)).models;
+        const catalog = getModelsFromProviders(await listModelProviders(null), scheduleRefresh).models;
         assertEquals([...catalog.map(m => m.id)].sort(), ['gpt-mini', 'or/gpt-mini']);
       },
     );
@@ -658,19 +661,19 @@ describe('catalog listing under modelPrefix', () => {
   test('three upstreams advertising the same public id via different paths all enumerate as matches', async () => {
     const { repo } = await setupAppTest();
     await repo.upstreams.deleteAll();
-    await repo.upstreams.save(buildCustomUpstreamRecord({
+    await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
       id: 'up_short_prefix',
       sortOrder: 1,
       config: { baseUrl: 'https://short.example.com', authStyle: 'bearer', apiKey: 'sk-x', endpoints: { openaiChatCompletions: {} }, ingressHeadersRules: [] },
       modelPrefix: { prefix: 'aa/', addressable: ['prefixed'], listed: ['prefixed'] },
     }));
-    await repo.upstreams.save(buildCustomUpstreamRecord({
+    await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
       id: 'up_long_prefix',
       sortOrder: 2,
       config: { baseUrl: 'https://long.example.com', authStyle: 'bearer', apiKey: 'sk-x', endpoints: { openaiChatCompletions: {} }, ingressHeadersRules: [] },
       modelPrefix: { prefix: 'aa/bb/', addressable: ['prefixed'], listed: ['prefixed'] },
     }));
-    await repo.upstreams.save(buildCustomUpstreamRecord({
+    await saveUpstreamForTest(repo.upstreams, buildCustomUpstreamRecord({
       id: 'up_bare',
       sortOrder: 3,
       config: { baseUrl: 'https://bare.example.com', authStyle: 'bearer', apiKey: 'sk-x', endpoints: { openaiChatCompletions: {} }, ingressHeadersRules: [] },

@@ -1,6 +1,10 @@
 import { test } from 'vitest';
 
+import { MODEL_CATALOG_REVISION } from '../../../src/repo/models-cache-contract.ts';
+import { modelsRefreshIdentity, seedModelsCache } from '../../repo/models-cache-fixture.ts';
+import { saveUpstreamForTest } from '../../repo/upstreams.ts';
 import { buildCustomUpstreamRecord, requestApp, setupAppTest, sseOpenAIChatCompletionsResponse } from '../../test-utils/app.ts';
+import { projectCustomModels } from '@floway-dev/provider-custom';
 import { assertEquals, withMockedFetch } from '@floway-dev/test-utils';
 
 const cases: Array<{ name: string; userCap: string[] | null; keyCap: string[] | null; models: string[] }> = [
@@ -18,7 +22,7 @@ test.each(cases)('$name controls model visibility and upstream dispatch', async 
   const { repo, apiKey, adminSession } = await setupAppTest();
   await repo.upstreams.deleteAll();
   for (const suffix of ['a', 'b']) {
-    await repo.upstreams.save(buildCustomUpstreamRecord({
+    const upstream = buildCustomUpstreamRecord({
       id: `up_${suffix}`,
       name: `Upstream ${suffix}`,
       config: {
@@ -30,7 +34,15 @@ test.each(cases)('$name controls model visibility and upstream dispatch', async 
         modelsFetch: { enabled: false },
         models: [{ upstreamModelId: `model_${suffix}`, kind: 'chat', endpoints: { openaiChatCompletions: {} } }],
       },
-    }));
+    });
+    await saveUpstreamForTest(repo.upstreams, upstream);
+    const stored = await repo.upstreams.getById(upstream.id);
+    if (stored === null) throw new Error(`Upstream ${upstream.id} was not saved`);
+    assertEquals(await seedModelsCache(repo.upstreams, upstream.id, modelsRefreshIdentity(stored), {
+      revision: MODEL_CATALOG_REVISION,
+      fetchedAt: Date.now(),
+      models: projectCustomModels(stored),
+    }), true);
   }
 
   const keyUpdate = await requestApp(`/api/keys/${apiKey.id}`, {

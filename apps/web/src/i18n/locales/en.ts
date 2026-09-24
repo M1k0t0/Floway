@@ -731,6 +731,7 @@ const en = {
           cacheFetched: 'Fetched {{time}}',
           cacheFailed: 'Last fetch failed',
           cacheErrorDetail: '{{time}} - {{message}}',
+          copyError: 'Copy full error',
           listingFailed: 'Could not fetch the model list from the upstream.',
           listingFailedWithDetail:
               'Could not fetch the model list from the upstream: {{message}}',
@@ -1001,6 +1002,12 @@ const en = {
           message: 'This upstream has changes that have not been saved.',
           stay: 'Keep editing',
           leave: 'Discard and leave',
+        },
+        fetchDirty: {
+          title: 'Save changes before fetching models?',
+          message: 'Model discovery uses the saved upstream configuration. Save these changes to fetch its models.',
+          saveAndFetch: 'Save and fetch models',
+          unsavedCredential: 'Apply credential changes using the provider controls before saving.',
         },
       },
       requests: {

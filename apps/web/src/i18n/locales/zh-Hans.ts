@@ -701,6 +701,7 @@ const zhHansCN = {
           cacheFetched: '获取于{{time}}',
           cacheFailed: '上次获取失败',
           cacheErrorDetail: '{{time}}：{{message}}',
+          copyError: '复制完整错误',
           listingFailed: '无法从上游获取模型列表。',
           listingFailedWithDetail: '无法从上游获取模型列表：{{message}}',
           search: '搜索模型名称或 ID',
@@ -953,6 +954,12 @@ const zhHansCN = {
           message: '该上游仍有尚未保存的修改。',
           stay: '继续编辑',
           leave: '放弃并离开',
+        },
+        fetchDirty: {
+          title: '保存修改后获取模型？',
+          message: '模型发现使用已保存的上游配置。保存这些修改后即可获取模型。',
+          saveAndFetch: '保存并获取模型',
+          unsavedCredential: '请先通过对应的提供方控件应用凭据修改，再保存。',
         },
       },
       requests: {
