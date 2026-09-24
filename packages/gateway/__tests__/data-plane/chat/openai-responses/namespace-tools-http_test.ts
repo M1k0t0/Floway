@@ -1,13 +1,13 @@
 import { test } from 'vitest';
 
-import { buildCustomUpstreamRecord, requestApp, setupAppTest, sseResponse } from '../../../test-utils/app.ts';
+import { buildCustomUpstreamRecord, requestAppWithWarmModels as requestApp, setupAppTest, sseResponse } from '../../../test-utils/app.ts';
 import { flushBackground } from '../../../test-utils/background-tracker.ts';
 import type { OpenAIResponsesResult } from '@floway-dev/protocols/openai-responses';
 import { assert, assertEquals, withMockedFetch } from '@floway-dev/test-utils';
 
 type TargetApi = 'openaiChatCompletions' | 'anthropicMessages';
 interface WireTool { name?: string; description?: string; function?: { name: string; description?: string } }
-interface WireRequest { tools?: WireTool[]; tool_choice?: unknown }
+interface WireRequest { tools?: WireTool[]; tool_choice?: unknown; messages?: unknown[] }
 
 const namespace = {
   type: 'namespace', name: 'payments', description: 'Read-only access. Never charge the account.',
@@ -103,6 +103,9 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
           { tools: [{ ...namespace, name: 123 }] },
           { tools: [{ ...namespace, name: 'a', tools: [{ type: 'function', name: 'b.c' }] }, { ...namespace, name: 'a.b', tools: [{ type: 'function', name: 'c' }] }], tool_choice: { type: 'function', name: 'a.b.c' } },
           { tool_choice: { type: 'allowed_tools', mode: 'required', tools: [{ type: 'mcp', server_label: 'remote' }] } },
+          { tool_choice: { type: 'function', namespace: 'payments', name: 'missing' } },
+          { tool_choice: { type: 'custom', namespace: 'payments', name: 'read' } },
+          { input: [{ type: 'function_call', namespace: 'payments', name: 'missing', call_id: 'past', arguments: '{}', status: 'completed' }], tool_choice: { type: 'function', namespace: 'payments', name: 'missing' } },
           { tool_choice: { type: 'allowed_tools', mode: 'required', tools: [] } },
           { tool_choice: { type: 'allowed_tools', mode: 'auto', tools: null } },
           { tool_choice: { type: 'allowed_tools', mode: 'future', tools: [{ type: 'function', namespace: 'payments', name: 'read' }] } },
@@ -118,6 +121,43 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
         }
         await flushBackground();
       });
+    });
+  }
+}
+
+for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
+  for (const topLevel of [false, true]) {
+    test(`HTTP ${target} maps search-loaded history and namespace subsets once (top-level declarations ${topLevel})`, async () => {
+      const { apiKey } = await setup(target);
+      const tool = (name: string) => ({ type: 'namespace', name: 'files', description: 'File policy.', tools: [{ type: 'function', name, parameters: { type: 'object' } }] });
+      const wire: WireRequest[] = [];
+      await withMockedFetch(async request => {
+        if (new URL(request.url).pathname === '/v1/models') return Response.json({ data: [{ id: 'model' }] });
+        assertEquals(new URL(request.url).pathname, target === 'openaiChatCompletions' ? '/v1/chat/completions' : '/v1/messages');
+        wire.push(await request.json() as WireRequest);
+        return toolCallResponse(target, 'files_write');
+      }, async () => {
+        const response = await requestApp('/v1/responses', {
+          method: 'POST', headers: { authorization: `Bearer ${apiKey.key}`, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            model: 'model', stream: false, store: false,
+            ...(topLevel ? { tools: [tool('read')] } : {}),
+            input: [
+              { type: 'tool_search_output', tools: [tool('write')] },
+              { type: 'function_call', namespace: 'files', name: 'write', call_id: 'past', arguments: '{}', status: 'completed' },
+              { type: 'function_call_output', call_id: 'past', output: 'done' },
+            ],
+            tool_choice: { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'namespace', name: 'files' }] },
+          }),
+        });
+        const body = await response.json() as OpenAIResponsesResult;
+        assertEquals(response.status, 200, JSON.stringify(body));
+        assertEquals(body.output.filter(item => item.type === 'function_call').map(item => [item.name, item.namespace]), [['write', 'files']]);
+        await flushBackground();
+      });
+      assertEquals(wire.length, 1, 'the final provider serializer must run');
+      assertEquals(wire[0].tools?.map(tool => tool.function?.name ?? tool.name), [...(topLevel ? ['files_read'] : []), 'files_write']);
+      assert(JSON.stringify(wire[0].messages).includes('"name":"files_write"'), 'replay must reference the same declaration alias');
     });
   }
 }

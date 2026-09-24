@@ -686,6 +686,9 @@ test('namespace wire mapping follows compact expansion and is isolated from oute
   candidate.provider.instance.callOpenAIChatCompletions = async (_model, body) => {
     providerBodies.push(structuredClone(body));
     assert(JSON.stringify(body.messages).includes('files_read_2'), 'compact-expanded history must be mapped at dispatch');
+    const tool = body.tools?.[1];
+    assert(tool?.type === 'function' && tool.function.parameters !== undefined);
+    tool.function.parameters.providerOnly = true;
     return {
       ok: true, modelKey: 'test-model-key', events: (async function* () {
         yield eventFrame<OpenAIChatCompletionsStreamEvent>({ id: 'chat_isolation', object: 'chat.completion.chunk', created: 0, model: 'test-model', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'next', type: 'function', function: { name: 'files_read_2', arguments: '{}' } }] }, finish_reason: null }] });
@@ -697,8 +700,14 @@ test('namespace wire mapping follows compact expansion and is isolated from oute
   let observed = 0;
   const observer: OpenAIResponsesInterceptor = async (invocation, _ctx, run) => {
     assertEquals(invocation.payload.input[0], history, 'outer reader must observe expanded canonical history');
+    const freeze = (value: unknown): void => {
+      if (typeof value !== 'object' || value === null) return;
+      Object.freeze(value);
+      for (const child of Object.values(value)) freeze(child);
+    };
+    freeze(invocation.payload);
     const first = await run();
-    assertEquals(invocation.payload.tools?.[1], namespace, 'wire names must not escape the private invocation');
+    assertEquals(invocation.payload.tools?.[1], namespace, 'translation must leave outer declarations canonical');
     assertEquals(invocation.payload.input[0], history);
     assert(first.type === 'events');
     const events = await collectEvents(first.events);
