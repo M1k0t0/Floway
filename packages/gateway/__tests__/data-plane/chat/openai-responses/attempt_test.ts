@@ -668,6 +668,32 @@ test('generate propagates upstream response headers onto the EventResult so resp
   await collectEvents(result.events);
 });
 
+test('native Responses retains namespaces, declaration carriers and selectors at the provider boundary', async () => {
+  installRepo();
+  const namespace = { type: 'namespace' as const, name: 'files', description: 'File policy.', tools: [{ type: 'function' as const, name: 'read' }] };
+  const payload = makePayload({
+    tools: [namespace],
+    input: [
+      { type: 'additional_tools', role: 'developer', tools: [namespace] },
+      { type: 'tool_search_output', tools: [namespace] },
+      { type: 'function_call', namespace: 'files', name: 'read', call_id: 'old', arguments: '{}', status: 'completed' },
+    ],
+    tool_choice: { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'namespace', name: 'files' }] },
+  });
+  const original = structuredClone(payload);
+  const call = vi.fn(async (_model, body): Promise<ProviderOpenAIResponsesResult> => {
+    assertEquals(body.tools, payload.tools);
+    assertEquals(body.input, payload.input);
+    assertEquals(body.tool_choice, payload.tool_choice);
+    return { action: 'generate', ok: true, modelKey: 'test-model-key', events: makeProviderEvents([]) };
+  });
+  const result = await openaiResponsesAttempt.generate({ payload, ctx: makeGatewayCtx(), candidate: makeCandidate(call), headers: new Headers() });
+  assert(result.type === 'events');
+  await collectEvents(result.events);
+  assertEquals(call.mock.calls.length, 1);
+  assertEquals(payload, original);
+});
+
 test('namespace wire mapping follows compact expansion and is isolated from outer shims across repeated dispatches', async () => {
   installRepo();
   const namespace = { type: 'namespace' as const, name: 'files', description: '', tools: [{ type: 'function' as const, name: 'read', parameters: { type: 'object' } }] };
