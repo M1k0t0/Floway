@@ -1,6 +1,5 @@
 import { beforeEach, test, vi } from 'vitest';
 
-import { dispatchWithCallableProjection } from '../../../../../src/data-plane/chat/openai-responses/interceptors/callable-projection.ts';
 import { withOpenAIResponsesServerToolShim } from '../../../../../src/data-plane/chat/openai-responses/interceptors/server-tool-shim.ts';
 import {
   consumeTurnStreaming,
@@ -6359,7 +6358,7 @@ for (const targetApi of ['openaiChatCompletions', 'anthropicMessages', 'openaiRe
     });
     const ctx = makeGatewayCtx();
     let turns = 0;
-    const { frames } = await runShimAndDrain(withOpenAIResponsesWebSearchShim, inv, ctx, () => dispatchWithCallableProjection(inv, async dispatch => {
+    const { frames } = await runShimAndDrain(withOpenAIResponsesWebSearchShim, inv, ctx, async () => {
       turns++;
       assertEquals(inv.payload.tools?.[0], { ...inv.payload.tools?.[0], name: `${SHIM_TOOL_NAME}_2` });
       if (targetApi === 'openaiResponses') {
@@ -6372,7 +6371,7 @@ for (const targetApi of ['openaiChatCompletions', 'anthropicMessages', 'openaiRe
         ]]).run();
       }
       if (targetApi === 'openaiChatCompletions') {
-        const trip = await translateOpenAIResponsesViaOpenAIChatCompletions(dispatch.payload, { model: 'm' });
+        const trip = await translateOpenAIResponsesViaOpenAIChatCompletions(inv.payload, { model: 'm' });
         const client = trip.target.tools?.[1];
         assert(client?.type === 'function');
         const events = (async function* (): AsyncGenerator<ProtocolFrame<OpenAIChatCompletionsStreamEvent>> {
@@ -6381,7 +6380,7 @@ for (const targetApi of ['openaiChatCompletions', 'anthropicMessages', 'openaiRe
         })();
         return eventResult(trip.events(events), testTelemetryModelIdentity);
       }
-      const trip = await translateOpenAIResponsesViaAnthropicMessages(dispatch.payload, { model: 'm', loadRemoteImage: async () => { throw new Error('Unexpected image'); } });
+      const trip = await translateOpenAIResponsesViaAnthropicMessages(inv.payload, { model: 'm', loadRemoteImage: async () => { throw new Error('Unexpected image'); } });
       const name = trip.target.tools?.[1].name;
       assert(typeof name === 'string');
       const events = (async function* (): AsyncGenerator<ProtocolFrame<AnthropicMessagesStreamEvent>> {
@@ -6393,7 +6392,7 @@ for (const targetApi of ['openaiChatCompletions', 'anthropicMessages', 'openaiRe
         yield eventFrame({ type: 'message_stop' });
       })();
       return eventResult(trip.events(events), testTelemetryModelIdentity);
-    }));
+    });
     assertEquals(turns, 1);
     assertEquals(backend.calls, []);
     assertEquals(findResponseCompleted(frames).response.output.map(item => item.type === 'function_call' ? [item.type, item.name, item.namespace] : [item.type]), [['function_call', SHIM_TOOL_NAME, 'functions']]);
@@ -6447,17 +6446,17 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
       const alias = `${SHIM_TOOL_NAME}_2`;
       const script = scriptedRun([fcTurn(0, 'hosted', alias, '{"search_query":[{"q":"hosted"}]}'), messageTurn('done')]);
       const choices: unknown[] = [];
-      const { frames } = await runShimAndDrain(withOpenAIResponsesWebSearchShim, inv, makeGatewayCtx(), () => dispatchWithCallableProjection(inv, async dispatch => {
+      const { frames } = await runShimAndDrain(withOpenAIResponsesWebSearchShim, inv, makeGatewayCtx(), async () => {
         choices.push(structuredClone(inv.payload.tool_choice));
         const before = structuredClone(inv.payload);
         const trip = target === 'openaiChatCompletions'
-          ? await translateOpenAIResponsesViaOpenAIChatCompletions(dispatch.payload, { model: 'm' })
-          : await translateOpenAIResponsesViaAnthropicMessages(dispatch.payload, { model: 'm', loadRemoteImage: async () => { throw new Error('Unexpected image'); } });
+          ? await translateOpenAIResponsesViaOpenAIChatCompletions(inv.payload, { model: 'm' })
+          : await translateOpenAIResponsesViaAnthropicMessages(inv.payload, { model: 'm', loadRemoteImage: async () => { throw new Error('Unexpected image'); } });
         const wire = JSON.parse(JSON.stringify(trip.target)) as { tools: Array<{ name?: string; function?: { name: string } }> };
         assert(wire.tools.some(tool => (tool.function?.name ?? tool.name) === alias), 'the translated subset must declare the helper alias');
         assertEquals(inv.payload, before, 'repeated translation must preserve the outer loop payload');
         return await script.run();
-      }));
+      });
       const renamed = { type: 'function', name: alias };
       assertEquals(choices, mode === 'forced' ? [renamed, 'auto'] : [
         { type: 'allowed_tools', mode, tools: [renamed] },

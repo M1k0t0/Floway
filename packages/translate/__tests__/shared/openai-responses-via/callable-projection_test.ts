@@ -1,10 +1,10 @@
 import { expect, test, vi } from 'vitest';
 
-import { projectCallables, restoreCallableEvents } from '../../../../../src/data-plane/chat/openai-responses/interceptors/callable-projection.ts';
+import { flattenNamespaceTools, restoreNamespaceEvents } from '../../../src/shared/openai-responses-via/namespace-tools.ts';
+import { TranslatorInputError } from '../../../src/translator-input-error.ts';
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { CanonicalOpenAIResponsesPayload, OpenAIResponsesResult, OpenAIResponsesStreamEvent, OpenAIResponsesTool } from '@floway-dev/protocols/openai-responses';
 import { assert, assertEquals, assertRejects } from '@floway-dev/test-utils';
-import { TranslatorInputError } from '@floway-dev/translate';
 
 const invocation = (payload: CanonicalOpenAIResponsesPayload) => ({ payload });
 const functionTool = (name: string): Extract<OpenAIResponsesTool, { type: 'function' }> => ({ type: 'function', name, parameters: { type: 'object' } });
@@ -16,10 +16,10 @@ const result = (events: OpenAIResponsesStreamEvent[] = []) => ({
   })(),
 });
 const project = async (call: { payload: CanonicalOpenAIResponsesPayload }, dispatch: () => Promise<ReturnType<typeof result>>) => {
-  const projected = projectCallables(call.payload);
+  const projected = flattenNamespaceTools(call.payload);
   call.payload = projected.payload;
   const response = await dispatch();
-  return { ...response, events: restoreCallableEvents(response.events, projected.names) };
+  return { ...response, events: restoreNamespaceEvents(response.events, projected.names) };
 };
 const run = async (call: { payload: CanonicalOpenAIResponsesPayload }) => await project(call, async () => result());
 
@@ -70,7 +70,7 @@ for (const kind of ['function', 'custom'] as const) {
       const tools: OpenAIResponsesTool[] = declared ? [namespace, { type: kind, name }] : [namespace];
       for (const tool_choice of [selector, { type: 'allowed_tools' as const, mode: 'auto' as const, tools: [selector] }]) {
         const request: CanonicalOpenAIResponsesPayload = { model: 'm', input: [item], tools, tool_choice };
-        const { payload, names } = projectCallables(request);
+        const { payload, names } = flattenNamespaceTools(request);
         assertEquals(payload.input, [item]);
         assertEquals(payload.tool_choice, tool_choice);
         expect(names.targetToSource.get(name)).toMatchObject({ name, type: item.type });
@@ -78,7 +78,7 @@ for (const kind of ['function', 'custom'] as const) {
         assertEquals(payload.tools?.map(tool => 'name' in tool ? tool.name : null), declared ? ['files_read', name] : ['files_read']);
         const frame = eventFrame<OpenAIResponsesStreamEvent>({ type: 'response.output_item.done', output_index: 0, item });
         const restored = [];
-        for await (const event of restoreCallableEvents((async function* () { yield frame; })(), names)) restored.push(event);
+        for await (const event of restoreNamespaceEvents((async function* () { yield frame; })(), names)) restored.push(event);
         expect(restored).toHaveLength(1);
         expect(restored[0]).toBe(frame);
       }
@@ -370,7 +370,7 @@ test('callable projection preserves long dotted flat names without inferring a n
     input: [{ type: 'function_call', call_id: 'old', name, arguments: '{}', status: 'completed' }],
     tool_choice: { type: 'function', name },
   };
-  const { payload } = projectCallables(request);
+  const { payload } = flattenNamespaceTools(request);
   expect(payload.input).toEqual(request.input);
   expect(payload.tool_choice).toBe(request.tool_choice);
 });
@@ -379,7 +379,7 @@ test.each(['.', '__', '_'])('flat and explicit namespace replay remain distinct 
   const explicit = { type: 'function_call' as const, namespace: 'files', name: 'read', call_id: 'explicit', arguments: '{}', status: 'completed' as const };
   const flat = { ...explicit, namespace: undefined, name: `files${separator}read`, call_id: 'flat' };
   for (const input of [[explicit, flat], [flat, explicit]]) {
-    const { payload, names } = projectCallables({ model: 'm', input });
+    const { payload, names } = flattenNamespaceTools({ model: 'm', input });
     const explicitName = separator === '_' ? 'files_read_2' : 'files_read';
     expect(payload.input.map(item => item.type === 'function_call' ? [item.call_id, item.name, item.namespace] : [])).toEqual(input.map(item => [item.call_id, item.call_id === 'flat' ? flat.name : explicitName, undefined]));
     expect(names.targetToSource.get(explicitName)).toEqual({ namespace: 'files', name: 'read', type: 'function_call' });
@@ -391,14 +391,14 @@ test('dotted flat replay stays literal when multiple namespace splits would matc
   const call = { type: 'function_call' as const, call_id: 'past', arguments: '{}', status: 'completed' as const };
   const input = [{ ...call, name: 'a.b.c' }, { ...call, namespace: 'a.b', name: 'c' }, { ...call, namespace: 'a', name: 'b.c' }];
   for (const history of [input, [...input].reverse()]) {
-    const { payload } = projectCallables({ model: 'm', input: history });
+    const { payload } = flattenNamespaceTools({ model: 'm', input: history });
     expect(payload.input.find(item => item.type === 'function_call' && item.name === 'a.b.c')).toEqual(input[0]);
   }
 });
 
 test('callable restoration retains only echo fields, not the source request or input', () => {
   const request: CanonicalOpenAIResponsesPayload = { model: 'm', input: [{ type: 'message', role: 'user', content: 'Long conversation' }], tools: [{ type: 'namespace', name: 'files', description: '', tools: [functionTool('read')] }] };
-  const { names } = projectCallables(request);
+  const { names } = flattenNamespaceTools(request);
   const reachable = new Set<unknown>();
   const visit = (value: unknown) => {
     if (typeof value !== 'object' || value === null || reachable.has(value)) return;
@@ -414,7 +414,7 @@ test('callable restoration retains only echo fields, not the source request or i
 test.each(['forced', 'allowed_tools'] as const)('unchanged flat %s choices and response frames keep their references', async mode => {
   const selector = { type: 'function' as const, name: 'read' };
   const request: CanonicalOpenAIResponsesPayload = { model: 'm', input: [], tools: [functionTool('read')], tool_choice: mode === 'forced' ? selector : { type: 'allowed_tools', mode: 'auto', tools: [selector] } };
-  const { payload, names } = projectCallables(request);
+  const { payload, names } = flattenNamespaceTools(request);
   expect(payload.tool_choice).toBe(request.tool_choice);
   expect(names.toolChoiceChanged).toBe(false);
   const item = { type: 'function_call' as const, id: 'item', call_id: 'call', name: 'read', arguments: '{}', status: 'completed' as const };
@@ -426,7 +426,7 @@ test.each(['forced', 'allowed_tools'] as const)('unchanged flat %s choices and r
     doneFrame(),
   ];
   const restored = [];
-  for await (const frame of restoreCallableEvents((async function* () { yield* source; })(), names)) restored.push(frame);
+  for await (const frame of restoreNamespaceEvents((async function* () { yield* source; })(), names)) restored.push(frame);
   expect(restored).toHaveLength(source.length);
   restored.forEach((frame, index) => expect(frame).toBe(source[index]));
 });
