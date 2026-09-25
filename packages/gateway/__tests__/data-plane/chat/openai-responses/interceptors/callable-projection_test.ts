@@ -76,7 +76,7 @@ for (const kind of ['function', 'custom'] as const) {
         expect(names.targetToSource.get(name)).toMatchObject({ name, type: item.type });
         expect(names.targetToSource.get(name)?.namespace).toBeUndefined();
         assertEquals(payload.tools?.map(tool => 'name' in tool ? tool.name : null), declared ? ['files_read', name] : ['files_read']);
-        const frame = eventFrame({ type: 'response.output_item.done', output_index: 0, item });
+        const frame = eventFrame<OpenAIResponsesStreamEvent>({ type: 'response.output_item.done', output_index: 0, item });
         const restored = [];
         for await (const event of restoreCallableEvents((async function* () { yield frame; })(), names)) restored.push(event);
         expect(restored).toHaveLength(1);
