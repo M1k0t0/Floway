@@ -514,7 +514,7 @@ export const consumeTurnStreaming = async function* (
   // until the closing `.done` parses them into `intercepted.arguments`.
   // Kept on the entry (not on `InterceptedFunctionCall`) because it's
   // streaming state, not part of the dispatcher's input.
-  const interceptedByUpstreamIndex = new Map<number, { intercepted: InterceptedFunctionCall; dispatcher: ServerToolDispatcher; reservedOutputIndex: number; argumentsJson: string }>();
+  const interceptedByUpstreamIndex = new Map<number, { intercepted: InterceptedFunctionCall; itemId: string | undefined; dispatcher: ServerToolDispatcher; reservedOutputIndex: number; argumentsJson: string }>();
 
   const ensureModel = (): string => {
     if (merge.lastSeenModel === null) {
@@ -607,6 +607,7 @@ export const consumeTurnStreaming = async function* (
           // dispatch below.
           interceptedByUpstreamIndex.set(upstreamIndex, {
             dispatcher,
+            itemId: item.id,
             reservedOutputIndex: merge.outputIndex++,
             argumentsJson: '',
             intercepted: {
@@ -642,7 +643,8 @@ export const consumeTurnStreaming = async function* (
       const upstreamIndex = event.output_index;
       const intercepted = interceptedByUpstreamIndex.get(upstreamIndex);
       if (intercepted !== undefined) {
-        if (event.item.type !== 'function_call' || event.item.namespace !== undefined || event.item.name !== intercepted.intercepted.name) {
+        if (event.item.type !== 'function_call' || event.item.namespace !== undefined || event.item.name !== intercepted.intercepted.name
+          || event.item.call_id !== intercepted.intercepted.callId || event.item.id !== intercepted.itemId) {
           throw new Error('Upstream changed a server-tool function identity before closing its call.');
         }
         intercepted.argumentsJson = event.item.arguments;

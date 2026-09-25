@@ -15,6 +15,6 @@ export const translateOpenAIResponsesViaOpenAIChatCompletions: TranslateTrip<
 
   return {
     target,
-    events: frames => restoreNamespaceEvents(translateToSourceEvents(frames, customToolNames), namespaceToolNames),
+    events: frames => restoreNamespaceEvents(translateToSourceEvents(frames, customToolNames), namespaceToolNames.targetToSource),
   };
 };

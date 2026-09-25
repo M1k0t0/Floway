@@ -36,19 +36,7 @@ for (const target of ['chat', 'messages'] as const) {
     payload.tools!.push({ type: 'custom', name: 'read' });
     const result = await build(payload);
     assertEquals(result.target.tools?.length, 1);
-    assertEquals(result.customToolNames, new Set(['read_2']));
-    assertEquals(result.namespaceToolNames.targetToSource.get('read_2'), { type: 'custom_tool_call', name: 'read' });
-  });
-
-  test(`${target} request selects same-name callable kinds without widening the subset`, async () => {
-    const payload = source({ type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: 'read' }, { type: 'custom', name: 'read' }] });
-    payload.tools!.push({ type: 'custom', name: 'read' });
-    const result = await build(payload);
-    const wire = JSON.parse(JSON.stringify(result.target)) as { tools: Array<{ name?: string; function?: { name: string } }> };
-    assertEquals(wire.tools.map(tool => tool.function?.name ?? tool.name), ['read', 'read_2']);
-    assertEquals(result.customToolNames, new Set(['read_2']));
-    assertEquals(result.namespaceToolNames.targetToSource.get('read'), { type: 'function_call', name: 'read' });
-    assertEquals(result.namespaceToolNames.targetToSource.get('read_2'), { type: 'custom_tool_call', name: 'read' });
+    assertEquals(result.customToolNames, new Set(['read']));
   });
 
   test(`${target} request represents an empty auto subset as no tools`, async () => {
@@ -73,6 +61,7 @@ for (const target of ['chat', 'messages'] as const) {
     ['unknown mode', { type: 'allowed_tools', mode: 'future', tools: [{ type: 'function', name: 'read' }] }],
     ['malformed tools array', { type: 'allowed_tools', mode: 'auto', tools: null }],
     ['malformed selector', { type: 'allowed_tools', mode: 'auto', tools: [null] }],
+    ['colliding callable kinds', { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: 'read' }, { type: 'custom', name: 'read' }] }],
   ] as const) {
     test(`${target} request typed-rejects ${label} instead of widening allowed_tools`, async () => {
       const payload = source(choice as unknown as OpenAIResponsesToolChoice);

@@ -1,10 +1,10 @@
-import { test, vi } from 'vitest';
+import { expect, test, vi } from 'vitest';
 
-import { flattenNamespaceTools, restoreNamespaceEvents } from '../../../src/shared/openai-responses-via/namespace-tools.ts';
-import { TranslatorInputError } from '../../../src/translator-input-error.ts';
+import { projectCallables, restoreCallableEvents } from '../../../../../src/data-plane/chat/openai-responses/interceptors/callable-projection.ts';
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { CanonicalOpenAIResponsesPayload, OpenAIResponsesResult, OpenAIResponsesStreamEvent, OpenAIResponsesTool } from '@floway-dev/protocols/openai-responses';
 import { assert, assertEquals, assertRejects } from '@floway-dev/test-utils';
+import { TranslatorInputError } from '@floway-dev/translate';
 
 const invocation = (payload: CanonicalOpenAIResponsesPayload) => ({ payload });
 const functionTool = (name: string): Extract<OpenAIResponsesTool, { type: 'function' }> => ({ type: 'function', name, parameters: { type: 'object' } });
@@ -16,10 +16,10 @@ const result = (events: OpenAIResponsesStreamEvent[] = []) => ({
   })(),
 });
 const project = async (call: { payload: CanonicalOpenAIResponsesPayload }, dispatch: () => Promise<ReturnType<typeof result>>) => {
-  const projected = flattenNamespaceTools(call.payload);
+  const projected = projectCallables(call.payload);
   call.payload = projected.payload;
   const response = await dispatch();
-  return { ...response, events: restoreNamespaceEvents(response.events, projected.names) };
+  return { ...response, events: restoreCallableEvents(response.events, projected.names) };
 };
 const run = async (call: { payload: CanonicalOpenAIResponsesPayload }) => await project(call, async () => result());
 
@@ -392,4 +392,78 @@ test('callable projection only looks up declared-length prefixes in heavily dott
   assert(flatName?.type === 'function');
   assertEquals(call.payload.input[0], { type: 'function_call', call_id: 'old', name: flatName.name, arguments: '{}', status: 'completed' });
   assertEquals(call.payload.tool_choice, { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: flatName.name }, { type: 'function', name: missing }] });
+});
+
+test.each(['.', '__'])('replay-only qualification is independent of history order (%s)', separator => {
+  const explicit = { type: 'function_call' as const, namespace: 'files', name: 'read', call_id: 'explicit', arguments: '{}', status: 'completed' as const };
+  const qualified = { ...explicit, namespace: undefined, name: `files${separator}read`, call_id: 'qualified' };
+  for (const input of [[explicit, qualified], [qualified, explicit]]) {
+    const { payload } = projectCallables({ model: 'm', input });
+    expect(payload.input.map(item => item.type === 'function_call' ? [item.name, item.namespace] : [])).toEqual([['files_read', undefined], ['files_read', undefined]]);
+  }
+});
+
+test('ambiguous qualified replay fails even when both explicit scopes occur later', () => {
+  const call = { type: 'function_call' as const, call_id: 'past', arguments: '{}', status: 'completed' as const };
+  const input = [{ ...call, name: 'a.b.c' }, { ...call, namespace: 'a.b', name: 'c' }, { ...call, namespace: 'a', name: 'b.c' }];
+  for (const history of [input, [...input].reverse()]) {
+    expect(() => projectCallables({ model: 'm', input: history })).toThrow('Ambiguous qualified');
+  }
+});
+
+test('callable restoration retains only echo fields, not the source request or input', () => {
+  const request: CanonicalOpenAIResponsesPayload = { model: 'm', input: [{ type: 'message', role: 'user', content: 'Long conversation' }], tools: [{ type: 'namespace', name: 'files', description: '', tools: [functionTool('read')] }] };
+  const { names } = projectCallables(request);
+  const reachable = new Set<unknown>();
+  const visit = (value: unknown) => {
+    if (typeof value !== 'object' || value === null || reachable.has(value)) return;
+    reachable.add(value);
+    for (const child of value instanceof Map ? value.values() : Object.values(value)) visit(child);
+  };
+  visit(names);
+  expect(reachable.has(request.tools)).toBe(true);
+  expect(reachable.has(request)).toBe(false);
+  expect(reachable.has(request.input)).toBe(false);
+});
+
+test.each(['forced', 'allowed_tools'] as const)('unchanged flat %s choices and response frames keep their references', async mode => {
+  const selector = { type: 'function' as const, name: 'read' };
+  const request: CanonicalOpenAIResponsesPayload = { model: 'm', input: [], tools: [functionTool('read')], tool_choice: mode === 'forced' ? selector : { type: 'allowed_tools', mode: 'auto', tools: [selector] } };
+  const { payload, names } = projectCallables(request);
+  expect(payload.tool_choice).toBe(request.tool_choice);
+  expect(names.toolChoiceChanged).toBe(false);
+  const item = { type: 'function_call' as const, id: 'item', call_id: 'call', name: 'read', arguments: '{}', status: 'completed' as const };
+  const source: ProtocolFrame<OpenAIResponsesStreamEvent>[] = [
+    eventFrame({ type: 'response.output_item.added', output_index: 0, item }),
+    eventFrame({ type: 'response.function_call_arguments.done', item_id: 'item', output_index: 0, name: 'read', arguments: '{}' } as OpenAIResponsesStreamEvent),
+    eventFrame({ type: 'response.output_item.done', output_index: 0, item }),
+    eventFrame({ type: 'response.completed', response: { ...emptyResult(), output: [item], tools: request.tools ?? undefined, tool_choice: request.tool_choice } }),
+    doneFrame(),
+  ];
+  const restored = [];
+  for await (const frame of restoreCallableEvents((async function* () { yield* source; })(), names)) restored.push(frame);
+  expect(restored).toHaveLength(source.length);
+  restored.forEach((frame, index) => expect(frame).toBe(source[index]));
+});
+
+test('plain and repeated qualified history do not scan every registered namespace length', () => {
+  const count = 200;
+  const namespaces = Array.from({ length: count }, (_, i) => 'n'.repeat(i + 1));
+  const call = { type: 'function_call' as const, call_id: 'past', arguments: '{}', status: 'completed' as const };
+  const request: CanonicalOpenAIResponsesPayload = {
+    model: 'm', tools: namespaces.map(name => ({ type: 'namespace', name, description: '', tools: [functionTool('run')] })),
+    input: Array.from({ length: count }, (_, i) => [{ ...call, name: `legacy_${i}` }, { ...call, name: 'n.run' }]).flat(),
+  };
+  const startsWith = vi.spyOn(String.prototype, 'startsWith');
+  let checks = 0;
+  let payload: CanonicalOpenAIResponsesPayload;
+  try {
+    // A positive control establishes that the instrument sees the old scope loop.
+    expect('n__run'.startsWith('__', 1)).toBe(true);
+    ({ payload } = projectCallables(request));
+    checks = startsWith.mock.calls.filter(([search, position]) => search === '__' && position !== undefined).length;
+  } finally { startsWith.mockRestore(); }
+  expect(checks).toBeGreaterThanOrEqual(1);
+  expect(checks).toBeLessThanOrEqual(2 * count + 1);
+  expect(payload.input.map(item => item.type === 'function_call' ? item.name : '')).toEqual(Array.from({ length: count }, (_, i) => [`legacy_${i}`, 'n_run']).flat());
 });

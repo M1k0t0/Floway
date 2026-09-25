@@ -1,5 +1,6 @@
 import { beforeEach, test, vi } from 'vitest';
 
+import { dispatchWithCallableProjection } from '../../../../../src/data-plane/chat/openai-responses/interceptors/callable-projection.ts';
 import { withOpenAIResponsesServerToolShim } from '../../../../../src/data-plane/chat/openai-responses/interceptors/server-tool-shim.ts';
 import {
   consumeTurnStreaming,
@@ -6316,16 +6317,36 @@ for (const namespace of [undefined, '', 'functions', 'client']) {
   });
 }
 
-test('hosted dispatch refuses a closing call whose full identity changed', async () => {
+test.each([
+  { namespace: 'client' },
+  { name: 'other' },
+  { type: 'custom_tool_call' as const, input: '{}' },
+  { call_id: 'other' },
+  { id: 'other' },
+  { id: undefined },
+])('hosted dispatch refuses a closing call whose identity changed: %j', async changed => {
   const records: DispatchRecord[] = [];
   const iter = consumeTurnStreaming(framesOf(
     mkResponseCreated(),
-    mkFunctionCallAdded(0, 'call', SHIM_TOOL_NAME),
-    eventFrame({ type: 'response.output_item.done', output_index: 0, item: { type: 'function_call', name: SHIM_TOOL_NAME, namespace: 'client', call_id: 'call', arguments: '{}', status: 'completed' } }),
+    eventFrame({ type: 'response.output_item.added', output_index: 0, item: { type: 'function_call', name: SHIM_TOOL_NAME, id: 'item', call_id: 'call', arguments: '', status: 'in_progress' } }),
+    eventFrame({ type: 'response.output_item.done', output_index: 0, item: { type: 'function_call', name: SHIM_TOOL_NAME, id: 'item', call_id: 'call', arguments: '{}', status: 'completed', ...changed } }),
     mkResponseCompleted(),
   ), createMergeState(), true, new Map([[SHIM_TOOL_NAME, recordingDispatcher(records)]]), loopState(), []);
   await assertRejects(() => drain(iter, records), Error, 'changed a server-tool function identity');
   assertEquals(records, []);
+});
+
+test.each([undefined, 'item'])('hosted dispatch accepts a matching call instance with item ID %s', async id => {
+  const records: DispatchRecord[] = [];
+  const item = { type: 'function_call' as const, name: SHIM_TOOL_NAME, id, call_id: 'call', arguments: '{"q":"matched"}', status: 'completed' as const };
+  const iter = consumeTurnStreaming(framesOf(
+    mkResponseCreated(),
+    eventFrame({ type: 'response.output_item.added', output_index: 0, item: { ...item, arguments: '', status: 'in_progress' } }),
+    eventFrame({ type: 'response.output_item.done', output_index: 0, item }),
+    mkResponseCompleted(),
+  ), createMergeState(), true, new Map([[SHIM_TOOL_NAME, recordingDispatcher(records)]]), loopState(), []);
+  await drain(iter, records);
+  assertEquals(records.length, 1);
 });
 
 for (const targetApi of ['openaiChatCompletions', 'anthropicMessages', 'openaiResponses'] as const) {
@@ -6338,7 +6359,7 @@ for (const targetApi of ['openaiChatCompletions', 'anthropicMessages', 'openaiRe
     });
     const ctx = makeGatewayCtx();
     let turns = 0;
-    const { frames } = await runShimAndDrain(withOpenAIResponsesWebSearchShim, inv, ctx, async () => {
+    const { frames } = await runShimAndDrain(withOpenAIResponsesWebSearchShim, inv, ctx, () => dispatchWithCallableProjection(inv, async dispatch => {
       turns++;
       assertEquals(inv.payload.tools?.[0], { ...inv.payload.tools?.[0], name: `${SHIM_TOOL_NAME}_2` });
       if (targetApi === 'openaiResponses') {
@@ -6351,7 +6372,7 @@ for (const targetApi of ['openaiChatCompletions', 'anthropicMessages', 'openaiRe
         ]]).run();
       }
       if (targetApi === 'openaiChatCompletions') {
-        const trip = await translateOpenAIResponsesViaOpenAIChatCompletions(inv.payload, { model: 'm' });
+        const trip = await translateOpenAIResponsesViaOpenAIChatCompletions(dispatch.payload, { model: 'm' });
         const client = trip.target.tools?.[1];
         assert(client?.type === 'function');
         const events = (async function* (): AsyncGenerator<ProtocolFrame<OpenAIChatCompletionsStreamEvent>> {
@@ -6360,7 +6381,7 @@ for (const targetApi of ['openaiChatCompletions', 'anthropicMessages', 'openaiRe
         })();
         return eventResult(trip.events(events), testTelemetryModelIdentity);
       }
-      const trip = await translateOpenAIResponsesViaAnthropicMessages(inv.payload, { model: 'm', loadRemoteImage: async () => { throw new Error('Unexpected image'); } });
+      const trip = await translateOpenAIResponsesViaAnthropicMessages(dispatch.payload, { model: 'm', loadRemoteImage: async () => { throw new Error('Unexpected image'); } });
       const name = trip.target.tools?.[1].name;
       assert(typeof name === 'string');
       const events = (async function* (): AsyncGenerator<ProtocolFrame<AnthropicMessagesStreamEvent>> {
@@ -6372,7 +6393,7 @@ for (const targetApi of ['openaiChatCompletions', 'anthropicMessages', 'openaiRe
         yield eventFrame({ type: 'message_stop' });
       })();
       return eventResult(trip.events(events), testTelemetryModelIdentity);
-    });
+    }));
     assertEquals(turns, 1);
     assertEquals(backend.calls, []);
     assertEquals(findResponseCompleted(frames).response.output.map(item => item.type === 'function_call' ? [item.type, item.name, item.namespace] : [item.type]), [['function_call', SHIM_TOOL_NAME, 'functions']]);
@@ -6426,17 +6447,17 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
       const alias = `${SHIM_TOOL_NAME}_2`;
       const script = scriptedRun([fcTurn(0, 'hosted', alias, '{"search_query":[{"q":"hosted"}]}'), messageTurn('done')]);
       const choices: unknown[] = [];
-      const { frames } = await runShimAndDrain(withOpenAIResponsesWebSearchShim, inv, makeGatewayCtx(), async () => {
+      const { frames } = await runShimAndDrain(withOpenAIResponsesWebSearchShim, inv, makeGatewayCtx(), () => dispatchWithCallableProjection(inv, async dispatch => {
         choices.push(structuredClone(inv.payload.tool_choice));
         const before = structuredClone(inv.payload);
         const trip = target === 'openaiChatCompletions'
-          ? await translateOpenAIResponsesViaOpenAIChatCompletions(inv.payload, { model: 'm' })
-          : await translateOpenAIResponsesViaAnthropicMessages(inv.payload, { model: 'm', loadRemoteImage: async () => { throw new Error('Unexpected image'); } });
+          ? await translateOpenAIResponsesViaOpenAIChatCompletions(dispatch.payload, { model: 'm' })
+          : await translateOpenAIResponsesViaAnthropicMessages(dispatch.payload, { model: 'm', loadRemoteImage: async () => { throw new Error('Unexpected image'); } });
         const wire = JSON.parse(JSON.stringify(trip.target)) as { tools: Array<{ name?: string; function?: { name: string } }> };
         assert(wire.tools.some(tool => (tool.function?.name ?? tool.name) === alias), 'the translated subset must declare the helper alias');
         assertEquals(inv.payload, before, 'repeated translation must preserve the outer loop payload');
         return await script.run();
-      });
+      }));
       const renamed = { type: 'function', name: alias };
       assertEquals(choices, mode === 'forced' ? [renamed, 'auto'] : [
         { type: 'allowed_tools', mode, tools: [renamed] },
