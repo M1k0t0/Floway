@@ -23,7 +23,7 @@ for (const target of ['chat', 'messages'] as const) {
         calls: request.messages.flatMap(message => message.tool_calls?.map(call => call.function.name) ?? []),
       };
     }
-    const { target: request } = await translateOpenAIResponsesViaAnthropicMessages(payload, { model: 'm' });
+    const { target: request } = await translateOpenAIResponsesViaAnthropicMessages(payload, { model: 'm', loadRemoteImage: async () => { throw new Error('Unexpected image in callable identity fixture'); } });
     return {
       tools: request.tools?.map(tool => tool.name),
       calls: request.messages.flatMap(message => Array.isArray(message.content) ? message.content.flatMap(block => block.type === 'tool_use' ? [block.name] : []) : []),
