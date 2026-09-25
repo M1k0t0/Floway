@@ -1,5 +1,6 @@
 import { klona } from 'klona/json';
 
+import { dispatchWithCallableProjection } from './interceptors/callable-projection.ts';
 import { openaiResponsesInterceptors } from './interceptors/index.ts';
 import type { OpenAIResponsesAttemptResult, OpenAIResponsesInvocation } from './interceptors/types.ts';
 import { normalizeAssistantInputText } from './items/normalize-assistant-content.ts';
@@ -101,13 +102,8 @@ export const openaiResponsesAttempt = {
       targetApi,
       headers,
     };
-    const chainResult = await runInterceptors(invocation, ctx, openaiResponsesInterceptors, async () => {
-      // Translation owns wire names and event restoration. Its target can share
-      // nested schemas with the source, so retain dispatch isolation from target
-      // rules and provider mutations across iterations of the outer tool loop.
-      const dispatch = invocation.targetApi === 'openaiResponses' ? invocation : { ...invocation, payload: klona(invocation.payload) };
-      return await dispatchOpenAIResponses(dispatch, ctx);
-    });
+    const chainResult = await runInterceptors(invocation, ctx, openaiResponsesInterceptors, () =>
+      dispatchWithCallableProjection(invocation, dispatch => dispatchOpenAIResponses(dispatch, ctx)));
 
     if (chainResult.type !== 'events') return chainResult;
 

@@ -322,16 +322,6 @@ export const resolveServerToolName = (
   throw new Error(`Unable to resolve a free server tool function name for ${baseName} within ${MAX_NAME_RESOLUTION_ATTEMPTS} attempts`);
 };
 
-const historicalClientCallableUsesName = (name: string, input: readonly OpenAIResponsesInputItem[]): boolean =>
-  input.some(item => {
-    if (item.type === 'additional_tools' || item.type === 'tool_search_output') {
-      return Array.isArray(item.tools) && item.tools.some(tool =>
-        tool != null && (tool.type === 'function' || tool.type === 'custom') && tool.name === name);
-    }
-    return (item.type === 'function_call' || item.type === 'custom_tool_call')
-      && item.namespace === undefined && item.name === name;
-  });
-
 // Azure and Copilot both deduplicate repeated hosted-tool declarations as one
 // family and retain the last complete declaration, including aliases and
 // configuration. The replacement occupies the first declaration's array slot
@@ -660,9 +650,9 @@ export const consumeTurnStreaming = async function* (
       const upstreamIndex = event.output_index;
       const intercepted = interceptedByUpstreamIndex.get(upstreamIndex);
       if (intercepted !== undefined) {
-        if (event.item.type !== 'function_call' || event.item.call_id !== intercepted.intercepted.callId
-          || (intercepted.addedItem.id !== undefined && event.item.id !== undefined && event.item.id !== intercepted.addedItem.id)) {
-          throw new Error('Server-tool candidate changed its item type, call ID, or item ID before completion.');
+        if (event.item.type !== 'function_call' || event.item.name !== intercepted.intercepted.name
+          || event.item.call_id !== intercepted.intercepted.callId || event.item.id !== intercepted.addedItem.id) {
+          throw new Error('Upstream changed a server-tool function identity before closing its call.');
         }
         const finalDispatcher = event.item.namespace === undefined ? dispatchers.get(event.item.name) : undefined;
         if (finalDispatcher === undefined) {

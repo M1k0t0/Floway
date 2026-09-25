@@ -1,9 +1,8 @@
 import { expect, test } from 'vitest';
 
-import { buildTargetRequest as messagesRequest } from '../../../src/openai-responses-via-anthropic-messages/request.ts';
-import { buildTargetRequest as chatRequest } from '../../../src/openai-responses-via-openai-chat-completions/request.ts';
-import { TranslatorInputError } from '../../../src/translator-input-error.ts';
+import { projectCallables } from '../../../../../src/data-plane/chat/openai-responses/interceptors/callable-projection.ts';
 import type { OpenAIResponsesRequestPayload, OpenAIResponsesTool } from '@floway-dev/protocols/openai-responses';
+import { canonicalizeOpenAIResponsesPayload, TranslatorInputError, translateOpenAIResponsesViaAnthropicMessages, translateOpenAIResponsesViaOpenAIChatCompletions } from '@floway-dev/translate';
 
 const namespace = (name: string): OpenAIResponsesTool => ({ type: 'namespace', name: 'files', description: 'File policy.', tools: [{ type: 'function', name }] });
 const freeze = <T>(value: T): T => {
@@ -16,19 +15,27 @@ const freeze = <T>(value: T): T => {
 
 for (const target of ['chat', 'messages'] as const) {
   const translate = async (source: OpenAIResponsesRequestPayload) => {
+    const { payload } = projectCallables(canonicalizeOpenAIResponsesPayload(source));
     if (target === 'chat') {
-      const { target: request } = chatRequest(source);
+      const { target: request } = await translateOpenAIResponsesViaOpenAIChatCompletions(payload, { model: 'm' });
       return {
         tools: request.tools?.map(tool => tool.type === 'function' ? tool.function.name : ''),
         calls: request.messages.flatMap(message => message.tool_calls?.map(call => call.function.name) ?? []),
       };
     }
-    const { target: request } = await messagesRequest(source);
+    const { target: request } = await translateOpenAIResponsesViaAnthropicMessages(payload, { model: 'm' });
     return {
       tools: request.tools?.map(tool => tool.name),
       calls: request.messages.flatMap(message => Array.isArray(message.content) ? message.content.flatMap(block => block.type === 'tool_use' ? [block.name] : []) : []),
     };
   };
+
+  test.each(['function', 'custom'] as const)(`${target} selects a same-name %s without widening the subset`, async kind => {
+    const source: OpenAIResponsesRequestPayload = { model: 'm', input: [], tools: [{ type: 'function', name: 'read' }, { type: 'custom', name: 'read' }], tool_choice: { type: 'allowed_tools', mode: 'auto', tools: [{ type: kind, name: 'read' }] } };
+    expect(await translate(source)).toEqual({ tools: [kind === 'function' ? 'read' : 'read_2'], calls: [] });
+    source.tool_choice = { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: 'read' }, { type: 'custom', name: 'read' }] };
+    expect(await translate(source)).toEqual({ tools: ['read', 'read_2'], calls: [] });
+  });
 
   test(`${target} separates historical function and current custom without a namespace trigger`, async () => {
     const source = freeze<OpenAIResponsesRequestPayload>({

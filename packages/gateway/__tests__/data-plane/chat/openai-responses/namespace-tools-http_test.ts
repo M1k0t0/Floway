@@ -44,6 +44,31 @@ const toolCallResponse = (target: TargetApi, name: string): Response => {
 };
 
 for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
+  test.each([false, true])(`HTTP ${target} resolves replay-only qualification before dispatch (qualified first %s)`, async qualifiedFirst => {
+    const { apiKey } = await setup(target);
+    const explicit = { type: 'function_call', namespace: 'files', name: 'read', call_id: 'explicit', arguments: '{}', status: 'completed' };
+    const qualified = { ...explicit, namespace: undefined, name: 'files.read', call_id: 'qualified' };
+    const calls = qualifiedFirst ? [qualified, explicit] : [explicit, qualified];
+    const wire: WireRequest[] = [];
+    await withMockedFetch(async request => {
+      if (new URL(request.url).pathname === '/v1/models') return Response.json({ data: [{ id: 'model' }] });
+      assertEquals(new URL(request.url).pathname, target === 'openaiChatCompletions' ? '/v1/chat/completions' : '/v1/messages');
+      wire.push(await request.json() as WireRequest);
+      return toolCallResponse(target, 'files_read');
+    }, async () => {
+      const response = await requestApp('/v1/responses', {
+        method: 'POST', headers: { authorization: `Bearer ${apiKey.key}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'model', stream: false, store: false, input: calls.flatMap(call => [call, { type: 'function_call_output', call_id: call.call_id, output: 'done' }]) }),
+      });
+      const body = await response.json() as OpenAIResponsesResult;
+      assertEquals(response.status, 200, JSON.stringify(body));
+      assertEquals(body.output.filter(item => item.type === 'function_call').map(item => [item.name, item.namespace]), [['read', 'files']]);
+      await flushBackground();
+    });
+    assertEquals(wire.length, 1, 'the provider serializer must observe the request');
+    assertEquals(JSON.stringify(wire[0].messages).match(/"name":"files_read"/g)?.length, 2);
+  });
+
   for (const representation of ['Standard', 'Standard carrier'] as const) {
     for (const mode of ['auto', 'required'] as const) {
       test.each(['callable', 'namespace', 'qualified'] as const)(`HTTP ${representation} preserves namespace allowed_tools and descriptions on final ${target} wire (${mode}, %s selector)`, async selection => {
