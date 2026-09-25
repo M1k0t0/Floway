@@ -1,8 +1,7 @@
 import { expect, test } from 'vitest';
 
-import { projectCallables } from '../../../../../src/data-plane/chat/openai-responses/interceptors/callable-projection.ts';
+import { TranslatorInputError, translateOpenAIResponsesViaAnthropicMessages, translateOpenAIResponsesViaOpenAIChatCompletions } from '../../../src/index.ts';
 import type { OpenAIResponsesRequestPayload, OpenAIResponsesTool } from '@floway-dev/protocols/openai-responses';
-import { canonicalizeOpenAIResponsesPayload, TranslatorInputError, translateOpenAIResponsesViaAnthropicMessages, translateOpenAIResponsesViaOpenAIChatCompletions } from '@floway-dev/translate';
 
 const namespace = (name: string): OpenAIResponsesTool => ({ type: 'namespace', name: 'files', description: 'File policy.', tools: [{ type: 'function', name }] });
 const freeze = <T>(value: T): T => {
@@ -15,15 +14,14 @@ const freeze = <T>(value: T): T => {
 
 for (const target of ['chat', 'messages'] as const) {
   const translate = async (source: OpenAIResponsesRequestPayload) => {
-    const { payload } = projectCallables(canonicalizeOpenAIResponsesPayload(source));
     if (target === 'chat') {
-      const { target: request } = await translateOpenAIResponsesViaOpenAIChatCompletions(payload, { model: 'm' });
+      const { target: request } = await translateOpenAIResponsesViaOpenAIChatCompletions(source, { model: 'm' });
       return {
         tools: request.tools?.map(tool => tool.type === 'function' ? tool.function.name : ''),
         calls: request.messages.flatMap(message => message.tool_calls?.map(call => call.function.name) ?? []),
       };
     }
-    const { target: request } = await translateOpenAIResponsesViaAnthropicMessages(payload, { model: 'm', loadRemoteImage: async () => { throw new Error('Unexpected image in callable identity fixture'); } });
+    const { target: request } = await translateOpenAIResponsesViaAnthropicMessages(source, { model: 'm', loadRemoteImage: async () => { throw new Error('Unexpected image in callable identity fixture'); } });
     return {
       tools: request.tools?.map(tool => tool.name),
       calls: request.messages.flatMap(message => Array.isArray(message.content) ? message.content.flatMap(block => block.type === 'tool_use' ? [block.name] : []) : []),
