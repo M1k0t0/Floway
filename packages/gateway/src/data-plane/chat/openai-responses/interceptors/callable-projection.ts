@@ -56,8 +56,7 @@ export const projectCallables = (request: CanonicalOpenAIResponsesPayload): {
   const history = request.input.filter(item => item.type === 'function_call' || item.type === 'custom_tool_call');
   // Reserve flat history/choices too: a continuation can change or omit its tool
   // declarations, but a past callable must never alias a newly declared one.
-  const flatNames = new Set(declared.filter(isCallableTool).map(tool => tool.name));
-  const reserved = new Set(flatNames);
+  const reserved = new Set(declared.filter(isCallableTool).map(tool => tool.name));
   for (const item of [...history, ...choices.filter(isCallableTool)]) {
     if ('name' in item && typeof item.name === 'string' && (!('namespace' in item) || item.namespace === undefined)) reserved.add(item.name);
   }
@@ -66,9 +65,8 @@ export const projectCallables = (request: CanonicalOpenAIResponsesPayload): {
   // Kind is part of identity: a historical function may share namespace/name
   // with a current custom declaration without borrowing its wire identity.
   const scopes = new Map<string | undefined, Map<string, Map<CallableIdentity['type'], string>>>();
-  const namespaceLengths = new Set<number>();
   const identities = new Map<string, CallableIdentity>();
-  const indexIdentity = (source: CallableIdentity): Map<CallableIdentity['type'], string> => {
+  const allocate = (source: CallableIdentity): string => {
     if (typeof source.name !== 'string' || (source.namespace !== undefined && typeof source.namespace !== 'string')) {
       throw new TranslatorInputError('Cannot flatten a malformed OpenAI Responses callable identity');
     }
@@ -76,17 +74,12 @@ export const projectCallables = (request: CanonicalOpenAIResponsesPayload): {
     if (scope === undefined) {
       scope = new Map();
       scopes.set(source.namespace, scope);
-      if (source.namespace !== undefined) namespaceLengths.add(source.namespace.length);
     }
     let kinds = scope.get(source.name);
     if (kinds === undefined) {
       kinds = new Map();
       scope.set(source.name, kinds);
     }
-    return kinds;
-  };
-  const allocate = (source: CallableIdentity): string => {
-    const kinds = indexIdentity(source);
     const existing = kinds.get(source.type);
     if (existing !== undefined) return existing;
 
@@ -148,41 +141,11 @@ export const projectCallables = (request: CanonicalOpenAIResponsesPayload): {
     }
   }
   const declaredNames = new Set(identities.keys());
-  // Inventory explicit replay identities before resolving any qualified name.
-  // Registration does not allocate aliases or make replay-only tools selectable.
-  for (const item of history) {
-    if (item.namespace !== undefined) indexIdentity({ name: item.name, namespace: item.namespace, type: item.type });
-  }
-  const qualifiedNames = new Map<string, { namespace: string; name: string } | null>();
-  // Qualified Standard names are already accepted by the translators. Resolve
-  // them through the same structured scope index rather than storing repeated
-  // `namespace.child` strings; explicit flat declarations retain priority.
-  const canonicalIdentity = (source: CallableIdentity): CallableIdentity => {
-    if (typeof source.name !== 'string' || (source.namespace !== undefined && typeof source.namespace !== 'string')) {
-      throw new TranslatorInputError('Cannot flatten a malformed OpenAI Responses callable identity');
-    }
-    if (source.namespace !== undefined || flatNames.has(source.name) || namespaceLengths.size === 0) return source;
-    const cached = qualifiedNames.get(source.name);
-    if (cached !== undefined) return cached === null ? source : { ...source, ...cached };
-    let qualified: { namespace: string; name: string } | undefined;
-    // Scan this spelling once, rather than every registered namespace length
-    // per history item. Hash only known-length prefixes, so long dotted names
-    // do not create a sequence of growing, undeclared lookup keys.
-    for (let length = 0; length < source.name.length; length++) {
-      const separatorLength = source.name[length] === '.' ? 1 : source.name[length] === '_' && source.name[length + 1] === '_' ? 2 : 0;
-      if (separatorLength === 0 || !namespaceLengths.has(length)) continue;
-      const namespace = source.name.slice(0, length);
-      const name = source.name.slice(length + separatorLength);
-      if (!scopes.get(namespace)?.has(name)) continue;
-      if (qualified !== undefined) throw new TranslatorInputError(`Ambiguous qualified OpenAI Responses callable name '${source.name}'`);
-      qualified = { namespace, name };
-    }
-    qualifiedNames.set(source.name, qualified ?? null);
-    return qualified === undefined ? source : { ...source, ...qualified };
-  };
+  // Only an explicit namespace establishes scope. A flat name containing dots
+  // or double underscores remains a distinct identity, even when declarations
+  // or another historical call contain a matching namespace and child name.
   const rename = <T extends { name: string; namespace?: string }>(value: T, type: CallableIdentity['type']): T => {
-    const source = canonicalIdentity({ name: value.name, namespace: value.namespace, type });
-    const name = allocate(source);
+    const name = allocate({ name: value.name, namespace: value.namespace, type });
     if (name === value.name && value.namespace === undefined) return value;
     const next = { ...value, name };
     delete next.namespace;
@@ -192,12 +155,13 @@ export const projectCallables = (request: CanonicalOpenAIResponsesPayload): {
   const renameChoice = <T>(value: T): T => {
     if (!isCallableTool(value)) return value;
     const callable = value as T & { name: string; namespace?: string };
-    const source = canonicalIdentity({ name: callable.name, namespace: callable.namespace, type: value.type === 'function' ? 'function_call' : 'custom_tool_call' });
-    const name = scopes.get(source.namespace)?.get(source.name)?.get(source.type);
+    const namespace = callable.namespace;
+    if (namespace !== undefined && typeof namespace !== 'string') throw new TranslatorInputError('Cannot flatten a malformed OpenAI Responses callable identity');
+    const name = scopes.get(namespace)?.get(callable.name)?.get(value.type === 'function' ? 'function_call' : 'custom_tool_call');
     // Replay may allocate an identity without declaring it callable this turn.
     // Selectors must resolve through the declaration set, never allocate names.
-    if (source.namespace !== undefined && (name === undefined || !declaredNames.has(name))) {
-      throw new TranslatorInputError(`Cannot translate tool_choice / allowed_tools selector for undeclared namespace tool '${source.namespace}.${source.name}'.`);
+    if (namespace !== undefined && (name === undefined || !declaredNames.has(name))) {
+      throw new TranslatorInputError(`Cannot translate tool_choice / allowed_tools selector for undeclared namespace tool '${namespace}.${callable.name}'.`);
     }
     if (name === undefined || !declaredNames.has(name)) return value;
     if (name === callable.name && callable.namespace === undefined) return value;

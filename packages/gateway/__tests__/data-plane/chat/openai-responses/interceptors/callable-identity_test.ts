@@ -70,11 +70,14 @@ for (const target of ['chat', 'messages'] as const) {
     await expect(translate(source)).rejects.toBeInstanceOf(TranslatorInputError);
   });
 
-  test(`${target} resolves qualified replay while retaining callable kind`, async () => {
+  test.each(['.', '__'])(`${target} preserves literal historical names containing %s beside a namespaced custom tool`, async separator => {
+    const name = `files${separator}read`;
     const source: OpenAIResponsesRequestPayload = {
       model: 'm', tools: [{ type: 'namespace', name: 'files', description: '', tools: [{ type: 'custom', name: 'read' }] }],
-      input: [{ type: 'function_call', name: 'files.read', call_id: 'old', arguments: '{}', status: 'completed' }],
+      input: [{ type: 'function_call', name, call_id: 'old', arguments: '{}', status: 'completed' }],
     };
-    expect(await translate(source)).toEqual({ tools: ['files_read'], calls: ['files_read_2'] });
+    expect(await translate(source)).toEqual({ tools: ['files_read'], calls: [name] });
+    source.tool_choice = { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'custom', name }] };
+    await expect(translate(source)).rejects.toBeInstanceOf(TranslatorInputError);
   });
 }

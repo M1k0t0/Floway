@@ -7,7 +7,14 @@ import { assert, assertEquals, withMockedFetch } from '@floway-dev/test-utils';
 
 type TargetApi = 'openaiChatCompletions' | 'anthropicMessages';
 interface WireTool { name?: string; description?: string; function?: { name: string; description?: string } }
-interface WireRequest { tools?: WireTool[]; tool_choice?: unknown; messages?: unknown[] }
+interface WireRequest {
+  tools?: WireTool[];
+  tool_choice?: unknown;
+  messages?: Array<{ tool_calls?: Array<{ function: { name: string } }>; content?: string | Array<{ type: string; name?: string }> }>;
+}
+const replayNames = (request: WireRequest): string[] => request.messages?.flatMap(message =>
+  message.tool_calls?.map(call => call.function.name)
+  ?? (Array.isArray(message.content) ? message.content.flatMap(block => block.type === 'tool_use' && block.name !== undefined ? [block.name] : []) : [])) ?? [];
 
 const namespace = {
   type: 'namespace', name: 'payments', description: 'Read-only access. Never charge the account.',
@@ -44,17 +51,20 @@ const toolCallResponse = (target: TargetApi, name: string): Response => {
 };
 
 for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
-  test.each([false, true])(`HTTP ${target} resolves replay-only qualification before dispatch (qualified first %s)`, async qualifiedFirst => {
+  test.each([
+    { separator: '.', flatFirst: false }, { separator: '.', flatFirst: true },
+    { separator: '__', flatFirst: false }, { separator: '__', flatFirst: true },
+  ])(`HTTP ${target} keeps flat replay separate from explicit namespace replay (%j)`, async ({ separator, flatFirst }) => {
     const { apiKey } = await setup(target);
     const explicit = { type: 'function_call', namespace: 'files', name: 'read', call_id: 'explicit', arguments: '{}', status: 'completed' };
-    const qualified = { ...explicit, namespace: undefined, name: 'files.read', call_id: 'qualified' };
-    const calls = qualifiedFirst ? [qualified, explicit] : [explicit, qualified];
+    const flat = { ...explicit, namespace: undefined, name: `files${separator}read`, call_id: 'flat' };
+    const calls = flatFirst ? [flat, explicit] : [explicit, flat];
     const wire: WireRequest[] = [];
     await withMockedFetch(async request => {
       if (new URL(request.url).pathname === '/v1/models') return Response.json({ data: [{ id: 'model' }] });
       assertEquals(new URL(request.url).pathname, target === 'openaiChatCompletions' ? '/v1/chat/completions' : '/v1/messages');
       wire.push(await request.json() as WireRequest);
-      return toolCallResponse(target, 'files_read');
+      return toolCallResponse(target, flat.name);
     }, async () => {
       const response = await requestApp('/v1/responses', {
         method: 'POST', headers: { authorization: `Bearer ${apiKey.key}`, 'content-type': 'application/json' },
@@ -62,20 +72,53 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
       });
       const body = await response.json() as OpenAIResponsesResult;
       assertEquals(response.status, 200, JSON.stringify(body));
-      assertEquals(body.output.filter(item => item.type === 'function_call').map(item => [item.name, item.namespace]), [['read', 'files']]);
+      assertEquals(body.output.filter(item => item.type === 'function_call').map(item => [item.name, item.namespace]), [[flat.name, undefined]]);
       await flushBackground();
     });
     assertEquals(wire.length, 1, 'the provider serializer must observe the request');
-    assertEquals(JSON.stringify(wire[0].messages).match(/"name":"files_read"/g)?.length, 2);
+    assertEquals(replayNames(wire[0]), flatFirst ? [flat.name, 'files_read'] : ['files_read', flat.name]);
+  });
+
+  test.each(['.', '__'])(`HTTP ${target} preserves a flat tool across stateless turns after its declaration is removed (%s)`, async separator => {
+    const { apiKey } = await setup(target);
+    const name = `files${separator}read`;
+    const scoped = { type: 'namespace', name: 'files', tools: [{ type: 'function', name: 'read', parameters: { type: 'object' } }] };
+    const wire: WireRequest[] = [];
+    await withMockedFetch(async request => {
+      if (new URL(request.url).pathname === '/v1/models') return Response.json({ data: [{ id: 'model' }] });
+      assertEquals(new URL(request.url).pathname, target === 'openaiChatCompletions' ? '/v1/chat/completions' : '/v1/messages');
+      wire.push(await request.json() as WireRequest);
+      return toolCallResponse(target, wire.length === 1 ? name : 'files_read');
+    }, async () => {
+      const headers = { authorization: `Bearer ${apiKey.key}`, 'content-type': 'application/json' };
+      const base = { model: 'model', stream: false, store: false };
+      const first = await requestApp('/v1/responses', {
+        method: 'POST', headers, body: JSON.stringify({ ...base, tools: [scoped, { type: 'function', name, parameters: { type: 'object' } }], input: 'Read the file.' }),
+      });
+      const firstBody = await first.json() as OpenAIResponsesResult;
+      assertEquals(first.status, 200, JSON.stringify(firstBody));
+      const call = firstBody.output.find(item => item.type === 'function_call');
+      assert(call?.type === 'function_call');
+      assertEquals([call.name, call.namespace], [name, undefined]);
+      const second = await requestApp('/v1/responses', {
+        method: 'POST', headers, body: JSON.stringify({ ...base, tools: [scoped], input: [...firstBody.output, { type: 'function_call_output', call_id: call.call_id, output: 'done' }] }),
+      });
+      const secondBody = await second.json() as OpenAIResponsesResult;
+      assertEquals(second.status, 200, JSON.stringify(secondBody));
+      assertEquals(secondBody.output.filter(item => item.type === 'function_call').map(item => [item.name, item.namespace]), [['read', 'files']]);
+      await flushBackground();
+    });
+    assertEquals(wire.length, 2, 'both turns must reach the final provider serializer');
+    assertEquals(replayNames(wire[1]), [name]);
+    assertEquals(wire[1].tools?.map(tool => tool.function?.name ?? tool.name), ['files_read']);
   });
 
   for (const representation of ['Standard', 'Standard carrier'] as const) {
     for (const mode of ['auto', 'required'] as const) {
-      test.each(['callable', 'namespace', 'qualified'] as const)(`HTTP ${representation} preserves namespace allowed_tools and descriptions on final ${target} wire (${mode}, %s selector)`, async selection => {
+      test.each(['callable', 'namespace'] as const)(`HTTP ${representation} preserves namespace allowed_tools and descriptions on final ${target} wire (${mode}, %s selector)`, async selection => {
         const { apiKey } = await setup(target);
         const selector = selection === 'namespace' ? { type: 'namespace', name: 'payments' }
-          : selection === 'qualified' ? { type: 'function', name: 'payments__read' }
-            : { type: 'function', namespace: 'payments', name: 'read' };
+          : { type: 'function', namespace: 'payments', name: 'read' };
         const choice = { type: 'allowed_tools', mode, tools: [selector] };
         const input = [{ type: 'message', role: 'user', content: 'Read my account.' }];
         const payload = { model: 'model', stream: false, store: false, tool_choice: choice, ...(representation !== 'Standard' ? { input: [{ type: 'additional_tools', role: 'developer', tools: [namespace] }, ...input] } : { input, tools: [namespace] }) };
@@ -126,7 +169,8 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
           { tools: [{ ...namespace, tools: null }] },
           { tools: [{ ...namespace, tools: [null] }] },
           { tools: [{ ...namespace, name: 123 }] },
-          { tools: [{ ...namespace, name: 'a', tools: [{ type: 'function', name: 'b.c' }] }, { ...namespace, name: 'a.b', tools: [{ type: 'function', name: 'c' }] }], tool_choice: { type: 'function', name: 'a.b.c' } },
+          { tool_choice: { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: 'payments.read' }] } },
+          { tool_choice: { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: 'payments__read' }] } },
           { tool_choice: { type: 'allowed_tools', mode: 'required', tools: [{ type: 'mcp', server_label: 'remote' }] } },
           { tool_choice: { type: 'function', namespace: 'payments', name: 'missing' } },
           { tool_choice: { type: 'custom', namespace: 'payments', name: 'read' } },
