@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 
 import { RESPONSES_LITE_HEADER } from '../../../../src/data-plane/codex/responses-lite.ts';
-import { buildCustomUpstreamRecord, requestApp, setupAppTest, sseResponse } from '../../../test-utils/app.ts';
+import { buildCustomUpstreamRecord, requestAppWithWarmModels, setupAppTest, sseResponse } from '../../../test-utils/app.ts';
 import { flushBackground } from '../../../test-utils/background-tracker.ts';
 import type { OpenAIResponsesResult } from '@floway-dev/protocols/openai-responses';
 import { assert, assertEquals, withMockedFetch } from '@floway-dev/test-utils';
@@ -61,7 +61,7 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
           wire.push(body);
           return toolCallResponse(target, 'payments_read');
         }, async () => {
-          const response = await requestApp('/v1/responses', { method: 'POST', headers: { authorization: `Bearer ${apiKey.key}`, 'content-type': 'application/json', ...(lite ? { [RESPONSES_LITE_HEADER]: 'true' } : {}) }, body: JSON.stringify(payload) });
+          const response = await requestAppWithWarmModels('/v1/responses', { method: 'POST', headers: { authorization: `Bearer ${apiKey.key}`, 'content-type': 'application/json', ...(lite ? { [RESPONSES_LITE_HEADER]: 'true' } : {}) }, body: JSON.stringify(payload) });
           const resource = await response.json() as OpenAIResponsesResult;
           assertEquals(response.status, 200);
           assertEquals(resource.status, 'completed');
@@ -91,7 +91,7 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
         return Response.json({ error: { message: 'Valid control reached upstream', type: 'control' } }, { status: 418 });
       }, async () => {
         const base = { model: 'model', input: 'Read only.', stream, store: false, tools: [namespace] };
-        const control = await requestApp('/v1/responses', { method: 'POST', headers, body: JSON.stringify(base) });
+        const control = await requestAppWithWarmModels('/v1/responses', { method: 'POST', headers, body: JSON.stringify(base) });
         assertEquals(control.status, 418);
         await control.text();
         assertEquals(calls, 1, 'valid control must prove the dispatch observer is on the route');
@@ -106,7 +106,7 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
           { tool_choice: { type: 'allowed_tools', mode: 'future', tools: [{ type: 'function', namespace: 'payments', name: 'read' }] } },
           { tool_choice: { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', namespace: 'payments', name: 'missing' }] } },
         ]) {
-          const response = await requestApp('/v1/responses', { method: 'POST', headers, body: JSON.stringify({ ...base, ...extra }) });
+          const response = await requestAppWithWarmModels('/v1/responses', { method: 'POST', headers, body: JSON.stringify({ ...base, ...extra }) });
           const body = await response.json() as { error: { type: string; code: string | null; message: string } };
           assertEquals(response.status, 400, JSON.stringify(body));
           assertEquals(body.error.type, 'invalid_request_error');
