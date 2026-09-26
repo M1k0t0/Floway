@@ -96,13 +96,13 @@ test.each(['.', '__'])('preserves literal forced selectors containing %s', async
   expect((await messagesRequest(source)).target.tool_choice).toEqual({ type: 'tool', name: `agents${separator}spawn` });
 });
 
-test('distinct callable kinds and explicit namespace tuples remain independently addressable', () => {
+test('distinct explicit namespace tuples remain independently addressable', () => {
   const tools: OpenAIResponsesRequestPayload['tools'] = [
     { type: 'namespace', name: 'x.y', description: '', tools: [{ type: 'function', name: 'f' }] },
-    { type: 'namespace', name: 'x', description: '', tools: [{ type: 'function', name: 'y.f' }, { type: 'custom', name: 'y.f' }] },
+    { type: 'namespace', name: 'x', description: '', tools: [{ type: 'custom', name: 'y.f' }] },
   ];
   const request = chatRequest({ model: 'm', input: [], tools });
-  expect(request.target.tools?.map(tool => tool.type === 'function' ? tool.function.name : '')).toEqual(['x_y_f', 'x_y_f_2', 'x_y_f_3']);
+  expect(request.target.tools?.map(tool => tool.type === 'function' ? tool.function.name : '')).toEqual(['x_y_f', 'x_y_f_2']);
   expect(chatRequest({ model: 'm', input: [], tools, tool_choice: { type: 'function', name: 'x.y.f' } }).target.tool_choice).toEqual({ type: 'function', function: { name: 'x.y.f' } });
 });
 

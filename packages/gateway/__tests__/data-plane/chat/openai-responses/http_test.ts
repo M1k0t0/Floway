@@ -759,7 +759,7 @@ const translatedNamespaceCandidate = (
 
 for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
   for (const scope of ['namespace', 'flat'] as const) {
-    test(`${target} continuation keeps historical function and current custom identities distinct in ${scope} tools`, async () => {
+    test(`${target} continuation never aliases historical calls when ${scope} tools change kind`, async () => {
       const repo = installRepo();
       const bodies: Record<string, unknown>[] = [];
       const tools = (type: 'function' | 'custom') => scope === 'namespace'
@@ -780,13 +780,24 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ model: 'test-model', tools: tools('custom'), previous_response_id: previous.id, input: [{ type: 'function_call_output', call_id: history.call_id, output: 'done' }, { role: 'user', content: 'continue' }] }),
       });
-      assertEquals(second.status, 200);
-      const current = await second.json() as OpenAIResponsesResult;
-      const output = current.output.find(item => item.type === 'custom_tool_call');
-      assert(output?.type === 'custom_tool_call');
-      assertEquals([output.name, output.namespace, output.input], ['read', scope === 'namespace' ? 'fs' : undefined, 'patch']);
-      assertEquals(bodies.length, 2);
-      assert(JSON.stringify(bodies[1]!.messages).includes(`"name":"${currentName}_2"`), 'historical function must not borrow the current custom alias');
+      if (scope === 'namespace') {
+        assertEquals(second.status, 400);
+        const error = await second.json() as { error: { type: string; message: string } };
+        assertEquals(error.error.type, 'invalid_request_error');
+        assertEquals(error.error.message, "Cannot translate ambiguous namespace tool 'fs.read'.");
+        assertEquals(bodies.length, 1, 'only the first turn may reach the provider');
+      } else {
+        assertEquals(second.status, 200);
+        const current = await second.json() as OpenAIResponsesResult;
+        const output = current.output.find(item => item.type === 'custom_tool_call');
+        assert(output?.type === 'custom_tool_call');
+        assertEquals([output.name, output.namespace, output.input], ['read', undefined, 'patch']);
+        assertEquals(bodies.length, 2);
+        const messages = bodies[1]!.messages as Array<{ tool_calls?: Array<{ function: { name: string } }>; content?: string | Array<{ type: string; name?: string }> }>;
+        const replayNames = messages.flatMap(message => message.tool_calls?.map(call => call.function.name)
+          ?? (Array.isArray(message.content) ? message.content.filter(block => block.type === 'tool_use').map(block => block.name) : []));
+        assertEquals(replayNames, ['read']);
+      }
       const rows = await repo.openaiResponsesItems.lookupMany(API_KEY_ID, [history.id!], 0);
       assertEquals(rows[0]?.payload.item, history);
     });

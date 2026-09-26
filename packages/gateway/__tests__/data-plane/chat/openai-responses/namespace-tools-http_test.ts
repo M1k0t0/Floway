@@ -51,6 +51,40 @@ const toolCallResponse = (target: TargetApi, name: string): Response => {
 };
 
 for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
+  test.each(['function', 'custom'] as const)(`HTTP ${target} selects a same-name %s and restores its kind without an alias`, async kind => {
+    const { apiKey } = await setup(target);
+    const tools = [{ type: 'function', name: 'read', parameters: { type: 'object' } }, { type: 'custom', name: 'read' }];
+    const choice = { type: 'allowed_tools', mode: 'required', tools: [{ type: kind, name: 'read' }] };
+    const wire: WireRequest[] = [];
+    await withMockedFetch(async request => {
+      if (new URL(request.url).pathname === '/v1/models') return Response.json({ data: [{ id: 'model' }] });
+      assertEquals(new URL(request.url).pathname, target === 'openaiChatCompletions' ? '/v1/chat/completions' : '/v1/messages');
+      wire.push(await request.json() as WireRequest);
+      return toolCallResponse(target, 'read');
+    }, async () => {
+      const response = await requestApp('/v1/responses', {
+        method: 'POST', headers: { authorization: `Bearer ${apiKey.key}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'model', stream: false, store: false, tools, tool_choice: choice,
+          input: [
+            { type: 'function_call', name: 'read', call_id: 'past', arguments: '{}', status: 'completed' },
+            { type: 'function_call_output', call_id: 'past', output: 'done' },
+          ],
+        }),
+      });
+      const body = await response.json() as OpenAIResponsesResult;
+      assertEquals(response.status, 200, JSON.stringify(body));
+      const call = body.output.find(item => item.type === 'function_call' || item.type === 'custom_tool_call');
+      assert(call?.type === 'function_call' || call?.type === 'custom_tool_call');
+      assertEquals([call.type, call.name, call.namespace], [kind === 'function' ? 'function_call' : 'custom_tool_call', 'read', undefined]);
+      assertEquals(body.tool_choice, choice);
+      await flushBackground();
+    });
+    assertEquals(wire.length, 1, 'the selected callable must reach the provider serializer');
+    assertEquals(wire[0].tools?.map(tool => tool.function?.name ?? tool.name), ['read']);
+    assertEquals(replayNames(wire[0]), ['read']);
+  });
+
   test.each([
     { separator: '.', flatFirst: false }, { separator: '.', flatFirst: true },
     { separator: '__', flatFirst: false }, { separator: '__', flatFirst: true },
@@ -166,6 +200,11 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
         await control.text();
         assertEquals(calls, 1, 'valid control must prove the dispatch observer is on the route');
         for (const extra of [
+          { tools: [{ type: 'function', name: 'read' }, { type: 'custom', name: 'read' }] },
+          { tools: [{ type: 'function', name: 'read' }, { type: 'custom', name: 'read' }], tool_choice: { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: 'read' }, { type: 'custom', name: 'read' }] } },
+          { tools: [{ type: 'function', name: 'read' }], input: [{ type: 'additional_tools', role: 'developer', tools: [{ type: 'custom', name: 'read' }] }] },
+          { tools: [{ type: 'function', name: 'read' }], input: [{ type: 'tool_search_output', tools: [{ type: 'custom', name: 'read' }] }] },
+          { tools: [{ ...namespace, tools: [{ type: 'function', name: 'read' }, { type: 'custom', name: 'read' }] }] },
           { tools: [{ ...namespace, tools: null }] },
           { tools: [{ ...namespace, tools: [null] }] },
           { tools: [{ ...namespace, name: 123 }] },
