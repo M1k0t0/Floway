@@ -73,8 +73,7 @@ for (const kind of ['function', 'custom'] as const) {
         const { payload, names } = flattenNamespaceTools(request);
         assertEquals(payload.input, [item]);
         assertEquals(payload.tool_choice, tool_choice);
-        expect(names.targetToSource.get(name)).toMatchObject({ name, type: item.type });
-        expect(names.targetToSource.get(name)?.namespace).toBeUndefined();
+        expect(names.targetToSource.has(name)).toBe(false);
         assertEquals(payload.tools?.map(tool => 'name' in tool ? tool.name : null), declared ? ['files_read', name] : ['files_read']);
         const frame = eventFrame<OpenAIResponsesStreamEvent>({ type: 'response.output_item.done', output_index: 0, item });
         const restored = [];
@@ -248,11 +247,12 @@ test('callable projection restores lifecycle-appropriate function status from cu
   assertEquals(statuses, ['in_progress', 'in_progress', 'completed', 'completed']);
 });
 
-test('callable projection distinguishes callable kinds and preserves dotted flat selectors', async () => {
+test('callable projection rejects mixed kinds in one namespace and preserves dotted flat selectors', async () => {
   const request: CanonicalOpenAIResponsesPayload = { model: 'm', input: [], tools: [{ type: 'namespace', name: 'files', description: '', tools: [functionTool('read')] }] };
   const distinct = invocation({ ...request, tools: [{ type: 'namespace', name: 'files', description: '', tools: [functionTool('read'), { type: 'custom', name: 'read' }] }] });
-  await run(distinct);
-  assertEquals(distinct.payload.tools?.map(tool => 'name' in tool ? tool.name : null), ['files_read', 'files_read_2']);
+  await assertRejects(() => run(distinct), TranslatorInputError, "ambiguous namespace tool 'files.read'");
+  const replay = invocation({ ...request, input: [{ type: 'custom_tool_call', namespace: 'files', name: 'read', call_id: 'past', input: 'patch' }] });
+  await assertRejects(() => run(replay), TranslatorInputError, "ambiguous namespace tool 'files.read'");
   const flat = invocation({ ...request, tools: [{ type: 'namespace', name: 'a.b', description: '', tools: [functionTool('c')] }, { type: 'namespace', name: 'a', description: '', tools: [functionTool('b.c')] }], tool_choice: { type: 'function', name: 'a.b.c' } });
   await run(flat);
   assertEquals(flat.payload.tool_choice, { type: 'function', name: 'a.b.c' });
@@ -383,7 +383,7 @@ test.each(['.', '__', '_'])('flat and explicit namespace replay remain distinct 
     const explicitName = separator === '_' ? 'files_read_2' : 'files_read';
     expect(payload.input.map(item => item.type === 'function_call' ? [item.call_id, item.name, item.namespace] : [])).toEqual(input.map(item => [item.call_id, item.call_id === 'flat' ? flat.name : explicitName, undefined]));
     expect(names.targetToSource.get(explicitName)).toEqual({ namespace: 'files', name: 'read', type: 'function_call' });
-    expect(names.targetToSource.get(flat.name)).toEqual({ namespace: undefined, name: flat.name, type: 'function_call' });
+    expect(names.targetToSource.has(flat.name)).toBe(false);
   }
 });
 

@@ -30,18 +30,25 @@ for (const target of ['chat', 'messages'] as const) {
 
   test.each(['function', 'custom'] as const)(`${target} selects a same-name %s without widening the subset`, async kind => {
     const source: OpenAIResponsesRequestPayload = { model: 'm', input: [], tools: [{ type: 'function', name: 'read' }, { type: 'custom', name: 'read' }], tool_choice: { type: 'allowed_tools', mode: 'auto', tools: [{ type: kind, name: 'read' }] } };
-    expect(await translate(source)).toEqual({ tools: [kind === 'function' ? 'read' : 'read_2'], calls: [] });
-    source.tool_choice = { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: 'read' }, { type: 'custom', name: 'read' }] };
-    expect(await translate(source)).toEqual({ tools: ['read', 'read_2'], calls: [] });
+    expect(await translate(source)).toEqual({ tools: ['read'], calls: [] });
   });
 
-  test(`${target} separates historical function and current custom without a namespace trigger`, async () => {
+  test.each(['tools', 'additional_tools', 'tool_search_output'] as const)(`${target} rejects same-name callable kinds from %s without allocating aliases`, async carrier => {
+    const tools = [{ type: 'function', name: 'read' }, { type: 'custom', name: 'read' }] satisfies OpenAIResponsesTool[];
+    const source: OpenAIResponsesRequestPayload = carrier === 'tools'
+      ? { model: 'm', input: [], tools }
+      : { model: 'm', input: [carrier === 'additional_tools' ? { type: carrier, role: 'developer', tools } : { type: carrier, tools }] };
+    await expect(translate(freeze(source))).rejects.toThrow(TranslatorInputError);
+    await expect(translate({ ...source, tool_choice: { type: 'allowed_tools', mode: 'auto', tools } })).rejects.toThrow(TranslatorInputError);
+  });
+
+  test(`${target} preserves the literal name of a historical function beside a current custom tool`, async () => {
     const source = freeze<OpenAIResponsesRequestPayload>({
       model: 'm', tools: [{ type: 'custom', name: 'read' }],
       input: [{ type: 'function_call', name: 'read', call_id: 'old', arguments: '{}', status: 'completed' }],
     });
-    expect(await translate(source)).toEqual({ tools: ['read'], calls: ['read_2'] });
-    expect(await translate(source)).toEqual({ tools: ['read'], calls: ['read_2'] });
+    expect(await translate(source)).toEqual({ tools: ['read'], calls: ['read'] });
+    expect(await translate(source)).toEqual({ tools: ['read'], calls: ['read'] });
   });
 
   test(`${target} maps all declaration carriers and replay through the same inventory`, async () => {

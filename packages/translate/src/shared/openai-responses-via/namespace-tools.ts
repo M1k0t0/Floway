@@ -12,15 +12,13 @@ export interface NamespaceToolNames {
 
 export interface CallableIdentity {
   readonly name: string;
-  readonly namespace?: string;
+  readonly namespace: string;
   readonly type: 'function_call' | 'custom_tool_call';
 }
 
 const isCallableTool = (value: unknown): value is Extract<OpenAIResponsesTool, { type: 'function' | 'custom' }> =>
   typeof value === 'object' && value !== null && 'type' in value && 'name' in value
   && (value.type === 'function' || value.type === 'custom') && typeof value.name === 'string';
-const toolIdentity = (tool: Extract<OpenAIResponsesTool, { type: 'function' | 'custom' }>, namespace?: string): CallableIdentity =>
-  ({ name: tool.name, ...(namespace === undefined ? {} : { namespace }), type: tool.type === 'function' ? 'function_call' : 'custom_tool_call' });
 
 // Both translated targets accept this common callable-name alphabet; Chat's
 // 64-character bound also limits names allocated for Anthropic Messages.
@@ -58,12 +56,10 @@ export const flattenNamespaceTools = (request: CanonicalOpenAIResponsesPayload):
   }
   const nextSuffixes = new Map<string, number>();
   // Scope text is stored once, not serialized into a key for every child.
-  // Kind is part of identity: a historical function may share namespace/name
-  // with a current custom declaration without borrowing its wire identity.
-  const scopes = new Map<string | undefined, Map<string, Map<CallableIdentity['type'], string>>>();
+  const scopes = new Map<string, Map<string, string>>();
   const identities = new Map<string, CallableIdentity>();
   const allocate = (source: CallableIdentity): string => {
-    if (typeof source.name !== 'string' || (source.namespace !== undefined && typeof source.namespace !== 'string')) {
+    if (typeof source.name !== 'string' || typeof source.namespace !== 'string') {
       throw new TranslatorInputError('Cannot flatten a malformed OpenAI Responses callable identity');
     }
     let scope = scopes.get(source.namespace);
@@ -71,45 +67,40 @@ export const flattenNamespaceTools = (request: CanonicalOpenAIResponsesPayload):
       scope = new Map();
       scopes.set(source.namespace, scope);
     }
-    let kinds = scope.get(source.name);
-    if (kinds === undefined) {
-      kinds = new Map();
-      scope.set(source.name, kinds);
+    const existing = scope.get(source.name);
+    if (existing !== undefined) {
+      if (identities.get(existing)?.type !== source.type) {
+        throw new TranslatorInputError(`Cannot translate ambiguous namespace tool '${source.namespace}.${source.name}'.`);
+      }
+      return existing;
     }
-    const existing = kinds.get(source.type);
-    if (existing !== undefined) return existing;
 
-    // Keep a flat spelling when no other callable owns it. Only allocated
-    // aliases use the common alphabet; do not rewrite unrelated flat tools.
-    let name = source.name;
-    if (source.namespace !== undefined || identities.has(name)) {
-      // Bound the input before concatenating or sanitizing. A long shared scope
-      // must not be scanned/copied once per child just to discard its tail.
-      const scopePrefix = source.namespace === undefined ? '' : `${source.namespace.slice(0, MAX_FLAT_TOOL_NAME_LENGTH)}_`.slice(0, MAX_FLAT_TOOL_NAME_LENGTH);
-      const preferred = `${scopePrefix}${source.name.slice(0, MAX_FLAT_TOOL_NAME_LENGTH - scopePrefix.length)}`.replaceAll(/[^a-zA-Z0-9_-]/g, '_');
-      name = preferred;
-      if (reserved.has(name)) {
-        let index = 2;
-        for (;;) {
-          const suffix = `_${index}`;
-          const prefix = preferred.slice(0, MAX_FLAT_TOOL_NAME_LENGTH - suffix.length);
-          // A shorter preferred name can still have unused one-digit suffixes.
-          // Share cursors by the actual truncated prefix and suffix width.
-          const cursorKey = `${suffix.length}:${prefix}`;
-          const next = nextSuffixes.get(cursorKey);
-          if (next !== undefined && next > index) {
-            index = next;
-            continue;
-          }
-          name = `${prefix}${suffix}`;
-          nextSuffixes.set(cursorKey, index + 1);
-          if (!reserved.has(name)) break;
-          index++;
+    // Bound the input before concatenating or sanitizing. A long shared scope
+    // must not be scanned/copied once per child just to discard its tail.
+    const scopePrefix = `${source.namespace.slice(0, MAX_FLAT_TOOL_NAME_LENGTH)}_`.slice(0, MAX_FLAT_TOOL_NAME_LENGTH);
+    const preferred = `${scopePrefix}${source.name.slice(0, MAX_FLAT_TOOL_NAME_LENGTH - scopePrefix.length)}`.replaceAll(/[^a-zA-Z0-9_-]/g, '_');
+    let name = preferred;
+    if (reserved.has(name)) {
+      let index = 2;
+      for (;;) {
+        const suffix = `_${index}`;
+        const prefix = preferred.slice(0, MAX_FLAT_TOOL_NAME_LENGTH - suffix.length);
+        // A shorter preferred name can still have unused one-digit suffixes.
+        // Share cursors by the actual truncated prefix and suffix width.
+        const cursorKey = `${suffix.length}:${prefix}`;
+        const next = nextSuffixes.get(cursorKey);
+        if (next !== undefined && next > index) {
+          index = next;
+          continue;
         }
+        name = `${prefix}${suffix}`;
+        nextSuffixes.set(cursorKey, index + 1);
+        if (!reserved.has(name)) break;
+        index++;
       }
     }
     reserved.add(name);
-    kinds.set(source.type, name);
+    scope.set(source.name, name);
     identities.set(name, source);
     return name;
   };
@@ -118,8 +109,7 @@ export const flattenNamespaceTools = (request: CanonicalOpenAIResponsesPayload):
     ? new Map<string, Array<{ type: 'function' | 'custom'; name: string }>>() : undefined;
   for (const tool of declared) {
     if (tool.type !== 'namespace') {
-      const name = isCallableTool(tool) ? allocate(toolIdentity(tool)) : undefined;
-      tools.push(name !== undefined && isCallableTool(tool) && name !== tool.name ? { ...tool, name } : tool);
+      tools.push(tool);
       continue;
     }
     if (typeof tool.name !== 'string' || !Array.isArray(tool.tools)) throw new TranslatorInputError('Cannot flatten a malformed OpenAI Responses namespace');
@@ -127,7 +117,7 @@ export const flattenNamespaceTools = (request: CanonicalOpenAIResponsesPayload):
     namespaceSelectors?.set(tool.name, selectors);
     for (const child of tool.tools) {
       if (!isCallableTool(child)) throw new TranslatorInputError(`Cannot flatten a non-callable tool in namespace ${tool.name}`);
-      const name = allocate(toolIdentity(child, tool.name));
+      const name = allocate({ name: child.name, namespace: tool.name, type: child.type === 'function' ? 'function_call' : 'custom_tool_call' });
       if (namespaceSelectors !== undefined) selectors.push({ type: child.type, name });
       tools.push({
         ...child,
@@ -141,8 +131,9 @@ export const flattenNamespaceTools = (request: CanonicalOpenAIResponsesPayload):
   // or double underscores remains a distinct identity, even when declarations
   // or another historical call contain a matching namespace and child name.
   const rename = <T extends { name: string; namespace?: string }>(value: T, type: CallableIdentity['type']): T => {
+    if (typeof value.name !== 'string') throw new TranslatorInputError('Cannot flatten a malformed OpenAI Responses callable identity');
+    if (value.namespace === undefined) return value;
     const name = allocate({ name: value.name, namespace: value.namespace, type });
-    if (name === value.name && value.namespace === undefined) return value;
     const next = { ...value, name };
     delete next.namespace;
     return next;
@@ -152,15 +143,14 @@ export const flattenNamespaceTools = (request: CanonicalOpenAIResponsesPayload):
     if (!isCallableTool(value)) return value;
     const callable = value as T & { name: string; namespace?: string };
     const namespace = callable.namespace;
-    if (namespace !== undefined && typeof namespace !== 'string') throw new TranslatorInputError('Cannot flatten a malformed OpenAI Responses callable identity');
-    const name = scopes.get(namespace)?.get(callable.name)?.get(value.type === 'function' ? 'function_call' : 'custom_tool_call');
+    if (namespace === undefined) return value;
+    if (typeof namespace !== 'string') throw new TranslatorInputError('Cannot flatten a malformed OpenAI Responses callable identity');
+    const name = scopes.get(namespace)?.get(callable.name);
     // Replay may allocate an identity without declaring it callable this turn.
     // Selectors must resolve through the declaration set, never allocate names.
-    if (namespace !== undefined && (name === undefined || !declaredNames.has(name))) {
+    if (name === undefined || !declaredNames.has(name) || identities.get(name)?.type !== (value.type === 'function' ? 'function_call' : 'custom_tool_call')) {
       throw new TranslatorInputError(`Cannot translate tool_choice / allowed_tools selector for undeclared namespace tool '${namespace}.${callable.name}'.`);
     }
-    if (name === undefined || !declaredNames.has(name)) return value;
-    if (name === callable.name && callable.namespace === undefined) return value;
     const next = { ...callable, name };
     delete next.namespace;
     return next;
@@ -194,9 +184,8 @@ export const flattenNamespaceTools = (request: CanonicalOpenAIResponsesPayload):
 const restoreItem = (item: OpenAIResponsesOutputItem, identities: ReadonlyMap<string, CallableIdentity>, status: 'in_progress' | 'completed'): OpenAIResponsesOutputItem => {
   if ((item.type !== 'function_call' && item.type !== 'custom_tool_call') || item.namespace !== undefined) return item;
   const identity = identities.get(item.name);
-  if (identity === undefined || (identity.name === item.name && identity.namespace === item.namespace && identity.type === item.type)) return item;
-  const restored = { ...item, name: identity.name, type: identity.type } as Record<string, unknown>;
-  if (identity.namespace !== undefined) restored.namespace = identity.namespace;
+  if (identity === undefined) return item;
+  const restored = { ...item, name: identity.name, namespace: identity.namespace, type: identity.type } as Record<string, unknown>;
   if (identity.type === 'function_call' && item.type === 'custom_tool_call') {
     restored.arguments = item.input;
     delete restored.input;
@@ -213,7 +202,7 @@ export const restoreNamespaceEvents = async function* (
   names: NamespaceToolNames,
 ): AsyncGenerator<ProtocolFrame<OpenAIResponsesStreamEvent>> {
   const { targetToSource: identities, sourceTools, sourceToolChoice, toolsChanged, toolChoiceChanged } = names;
-  const items = new Map<string, CallableIdentity>();
+  const items = new Map<string, Pick<CallableIdentity, 'name' | 'type'>>();
   for await (const frame of frames) {
     if (frame.type !== 'event') {
       yield frame;
@@ -223,7 +212,7 @@ export const restoreNamespaceEvents = async function* (
     const identity = 'item_id' in event ? items.get(event.item_id) : undefined;
     if (event.type === 'response.output_item.added' || event.type === 'response.output_item.done') {
       const item = restoreItem(event.item, identities, event.type === 'response.output_item.added' ? 'in_progress' : 'completed');
-      if ((item.type === 'function_call' || item.type === 'custom_tool_call') && typeof item.id === 'string') items.set(item.id, { name: item.name, namespace: item.namespace, type: item.type });
+      if ((item.type === 'function_call' || item.type === 'custom_tool_call') && typeof item.id === 'string') items.set(item.id, { name: item.name, type: item.type });
       yield item === event.item ? frame : { ...frame, event: { ...event, item } };
     } else if (event.type === 'response.function_call_arguments.delta' && identity?.type === 'custom_tool_call') {
       yield { ...frame, event: { ...event, type: 'response.custom_tool_call_input.delta' } };
