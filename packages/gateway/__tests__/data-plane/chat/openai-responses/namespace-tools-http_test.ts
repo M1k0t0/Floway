@@ -149,10 +149,11 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
 
   for (const representation of ['Standard', 'Standard carrier'] as const) {
     for (const mode of ['auto', 'required'] as const) {
-      test.each(['callable', 'namespace'] as const)(`HTTP ${representation} preserves namespace allowed_tools and descriptions on final ${target} wire (${mode}, %s selector)`, async selection => {
+      test.each(['callable', 'namespace', '.', '__'] as const)(`HTTP ${representation} preserves namespace allowed_tools and descriptions on final ${target} wire (${mode}, %s selector)`, async selection => {
         const { apiKey } = await setup(target);
         const selector = selection === 'namespace' ? { type: 'namespace', name: 'payments' }
-          : { type: 'function', namespace: 'payments', name: 'read' };
+          : selection === 'callable' ? { type: 'function', namespace: 'payments', name: 'read' }
+            : { type: 'function', name: `payments${selection}read` };
         const choice = { type: 'allowed_tools', mode, tools: [selector] };
         const input = [{ type: 'message', role: 'user', content: 'Read my account.' }];
         const payload = { model: 'model', stream: false, store: false, tool_choice: choice, ...(representation !== 'Standard' ? { input: [{ type: 'additional_tools', role: 'developer', tools: [namespace] }, ...input] } : { input, tools: [namespace] }) };
@@ -205,11 +206,13 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
           { tools: [{ type: 'function', name: 'read' }], input: [{ type: 'additional_tools', role: 'developer', tools: [{ type: 'custom', name: 'read' }] }] },
           { tools: [{ type: 'function', name: 'read' }], input: [{ type: 'tool_search_output', tools: [{ type: 'custom', name: 'read' }] }] },
           { tools: [{ ...namespace, tools: [{ type: 'function', name: 'read' }, { type: 'custom', name: 'read' }] }] },
+          { tools: [{ ...namespace, name: 'a.b', tools: [{ type: 'function', name: 'c' }] }, { ...namespace, name: 'a', tools: [{ type: 'function', name: 'b.c' }] }] },
+          { tools: [{ ...namespace, name: 'a.b', tools: [{ type: 'function', name: 'c' }] }], input: [{ type: 'function_call', namespace: 'a', name: 'b.c', call_id: 'past', arguments: '{}', status: 'completed' }] },
           { tools: [{ ...namespace, tools: null }] },
           { tools: [{ ...namespace, tools: [null] }] },
           { tools: [{ ...namespace, name: 123 }] },
-          { tool_choice: { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: 'payments.read' }] } },
-          { tool_choice: { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: 'payments__read' }] } },
+          { tool_choice: { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: 'payments.missing' }] } },
+          { tool_choice: { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: 'payments__missing' }] } },
           { tool_choice: { type: 'allowed_tools', mode: 'required', tools: [{ type: 'mcp', server_label: 'remote' }] } },
           { tool_choice: { type: 'function', namespace: 'payments', name: 'missing' } },
           { tool_choice: { type: 'custom', namespace: 'payments', name: 'read' } },

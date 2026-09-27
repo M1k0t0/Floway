@@ -89,21 +89,62 @@ test('restores function and custom calls across item events and terminal snapsho
   });
 });
 
-test.each(['.', '__'])('preserves literal forced selectors containing %s', async separator => {
-  const source = payload();
-  source.tool_choice = { type: 'function', name: `agents${separator}spawn` };
-  expect(chatRequest(source).target.tool_choice).toEqual({ type: 'function', function: { name: `agents${separator}spawn` } });
-  expect((await messagesRequest(source)).target.tool_choice).toEqual({ type: 'tool', name: `agents${separator}spawn` });
-});
+for (const kind of ['function', 'custom'] as const) {
+  test.each(['.', '__'])(`resolves qualified ${kind} selectors containing %s on both targets`, async separator => {
+    const source = payload();
+    const child = kind === 'function' ? 'spawn' : 'audit';
+    const name = kind === 'function' ? 'agents_spawn_2' : 'agents_audit';
+    const selector = { type: kind, name: `agents${separator}${child}` };
+    source.tool_choice = selector;
+    expect(chatRequest(source).target.tool_choice).toEqual({ type: 'function', function: { name } });
+    expect((await messagesRequest(source)).target.tool_choice).toEqual({ type: 'tool', name });
+    source.tool_choice = { type: 'allowed_tools', mode: 'required', tools: [selector] };
+    expect(chatRequest(source).target.tools?.map(tool => tool.type === 'function' ? tool.function.name : '')).toEqual([name]);
+    expect((await messagesRequest(source)).target.tools?.map(tool => tool.name)).toEqual([name]);
+  });
 
-test('distinct explicit namespace tuples remain independently addressable', () => {
+  test.each(['.', '__'])(`flat ${kind} declarations take priority over qualified %s selectors without history`, async separator => {
+    const name = `files${separator}read`;
+    const selector = { type: kind, name };
+    const source: OpenAIResponsesRequestPayload = {
+      model: 'm', input: [], tools: [
+        { type: 'namespace', name: 'files', description: '', tools: [{ type: kind, name: 'read' }] },
+        { type: kind, name },
+      ],
+      tool_choice: selector,
+    };
+    expect(chatRequest(source).target.tool_choice).toEqual({ type: 'function', function: { name } });
+    expect((await messagesRequest(source)).target.tool_choice).toEqual({ type: 'tool', name });
+    source.tool_choice = { type: 'allowed_tools', mode: 'required', tools: [selector] };
+    expect(chatRequest(source).target.tools?.map(tool => tool.type === 'function' ? tool.function.name : '')).toEqual([name]);
+    expect((await messagesRequest(source)).target.tools?.map(tool => tool.name)).toEqual([name]);
+  });
+}
+
+test.each(['function', 'custom'] as const)('rejects ambiguous qualified namespace identities with a %s child on both targets', async kind => {
   const tools: OpenAIResponsesRequestPayload['tools'] = [
     { type: 'namespace', name: 'x.y', description: '', tools: [{ type: 'function', name: 'f' }] },
-    { type: 'namespace', name: 'x', description: '', tools: [{ type: 'custom', name: 'y.f' }] },
+    { type: 'namespace', name: 'x', description: '', tools: [{ type: kind, name: 'y.f' }] },
   ];
-  const request = chatRequest({ model: 'm', input: [], tools });
-  expect(request.target.tools?.map(tool => tool.type === 'function' ? tool.function.name : '')).toEqual(['x_y_f', 'x_y_f_2']);
-  expect(chatRequest({ model: 'm', input: [], tools, tool_choice: { type: 'function', name: 'x.y.f' } }).target.tool_choice).toEqual({ type: 'function', function: { name: 'x.y.f' } });
+  for (const inventory of [tools, [...tools].reverse()]) {
+    const source = { model: 'm', input: [], tools: inventory };
+    expect(() => chatRequest(source)).toThrow("Cannot translate ambiguous namespace tool 'x.y.f'.");
+    await expect(messagesRequest(source)).rejects.toThrow("Cannot translate ambiguous namespace tool 'x.y.f'.");
+  }
+});
+
+test('rejects ambiguous double-underscore selectors on both targets', async () => {
+  const source: OpenAIResponsesRequestPayload = {
+    model: 'm', input: [], tools: [
+      { type: 'namespace', name: 'a__b', description: '', tools: [{ type: 'function', name: 'c' }] },
+      { type: 'namespace', name: 'a', description: '', tools: [{ type: 'function', name: 'b__c' }] },
+    ],
+  };
+  const selector = { type: 'function' as const, name: 'a__b__c' };
+  for (const tool_choice of [selector, { type: 'allowed_tools' as const, mode: 'auto' as const, tools: [selector] }]) {
+    expect(() => chatRequest({ ...source, tool_choice })).toThrow("Cannot select ambiguous qualified tool 'a__b__c'.");
+    await expect(messagesRequest({ ...source, tool_choice })).rejects.toThrow("Cannot select ambiguous qualified tool 'a__b__c'.");
+  }
 });
 
 test('the complete Chat Completions trip restores the namespace after target tool calls', async () => {

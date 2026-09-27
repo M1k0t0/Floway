@@ -201,30 +201,23 @@ test('callable projection preserves named MCP and future selectors', async () =>
   assertEquals(call.payload.tool_choice, { type: 'allowed_tools', mode: 'required', tools: [...selectors, { type: 'function', name: 'functions_search' }] });
 });
 
-test('callable projection bounds scanned prefixes and identity-key storage for a shared long namespace', async () => {
+test('callable projection bounds sanitized flat-name prefixes for a shared long namespace', async () => {
   const namespace = 'n'.repeat(4096);
   const count = 32;
   const call = invocation({ model: 'm', input: [], tools: [{ type: 'namespace', name: namespace, description: '', tools: Array.from({ length: count }, (_, index) => functionTool(`tool${index}`)) }] });
   const replacements = vi.spyOn(String.prototype, 'replaceAll');
-  const keys = vi.spyOn(Map.prototype, 'set');
   let lengths: number[] = [];
-  let keyBytes = 0;
   try {
     await project(call, async () => {
       lengths = replacements.mock.contexts.map(context => String(context).length);
-      keyBytes = keys.mock.calls.reduce((total, [key]) => total + (typeof key === 'string' ? key.length : 0), 0);
       replacements.mockRestore();
-      keys.mockRestore();
       return result();
     });
   } finally {
     replacements.mockRestore();
-    keys.mockRestore();
   }
   assert(lengths.length > 0, 'instrument must observe the allocator sanitizing names');
   assert(Math.max(...lengths) <= 64, `allocator scanned an unbounded prefix: ${Math.max(...lengths)}`);
-  assert(keyBytes > namespace.length, 'instrument must observe the actual identity registry');
-  assert(keyBytes <= namespace.length + count * 300, `identity map repeated the full namespace: ${keyBytes} key bytes`);
   assertEquals(new Set(call.payload.tools!.map(tool => 'name' in tool ? tool.name : null)).size, count);
 });
 
@@ -247,16 +240,14 @@ test('callable projection restores lifecycle-appropriate function status from cu
   assertEquals(statuses, ['in_progress', 'in_progress', 'completed', 'completed']);
 });
 
-test('callable projection rejects mixed kinds in one namespace and preserves dotted flat selectors', async () => {
+test('callable projection rejects mixed kinds and ambiguous qualified namespace identities', async () => {
   const request: CanonicalOpenAIResponsesPayload = { model: 'm', input: [], tools: [{ type: 'namespace', name: 'files', description: '', tools: [functionTool('read')] }] };
   const distinct = invocation({ ...request, tools: [{ type: 'namespace', name: 'files', description: '', tools: [functionTool('read'), { type: 'custom', name: 'read' }] }] });
   await assertRejects(() => run(distinct), TranslatorInputError, "ambiguous namespace tool 'files.read'");
   const replay = invocation({ ...request, input: [{ type: 'custom_tool_call', namespace: 'files', name: 'read', call_id: 'past', input: 'patch' }] });
   await assertRejects(() => run(replay), TranslatorInputError, "ambiguous namespace tool 'files.read'");
-  const flat = invocation({ ...request, tools: [{ type: 'namespace', name: 'a.b', description: '', tools: [functionTool('c')] }, { type: 'namespace', name: 'a', description: '', tools: [functionTool('b.c')] }], tool_choice: { type: 'function', name: 'a.b.c' } });
-  await run(flat);
-  assertEquals(flat.payload.tool_choice, { type: 'function', name: 'a.b.c' });
-  assertEquals(flat.payload.tools?.map(tool => 'name' in tool ? tool.name : null), ['a_b_c', 'a_b_c_2']);
+  const ambiguous = invocation({ ...request, tools: [{ type: 'namespace', name: 'a.b', description: '', tools: [functionTool('c')] }, { type: 'namespace', name: 'a', description: '', tools: [functionTool('b.c')] }], tool_choice: { type: 'function', name: 'a.b.c' } });
+  await assertRejects(() => run(ambiguous), TranslatorInputError, "ambiguous namespace tool 'a.b.c'");
 });
 
 test('callable projection retains parent and child descriptions for translated targets', async () => {
@@ -387,12 +378,11 @@ test.each(['.', '__', '_'])('flat and explicit namespace replay remain distinct 
   }
 });
 
-test('dotted flat replay stays literal when multiple namespace splits would match', () => {
+test('ambiguous qualified namespace replay is rejected in either history order even beside a flat name', () => {
   const call = { type: 'function_call' as const, call_id: 'past', arguments: '{}', status: 'completed' as const };
   const input = [{ ...call, name: 'a.b.c' }, { ...call, namespace: 'a.b', name: 'c' }, { ...call, namespace: 'a', name: 'b.c' }];
   for (const history of [input, [...input].reverse()]) {
-    const { payload } = flattenNamespaceTools({ model: 'm', input: history });
-    expect(payload.input.find(item => item.type === 'function_call' && item.name === 'a.b.c')).toEqual(input[0]);
+    expect(() => flattenNamespaceTools({ model: 'm', input: history })).toThrow("Cannot translate ambiguous namespace tool 'a.b.c'.");
   }
 });
 

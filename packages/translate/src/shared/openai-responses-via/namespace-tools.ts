@@ -48,35 +48,35 @@ export const flattenNamespaceTools = (request: CanonicalOpenAIResponsesPayload):
   }
   const choices = typeof choice === 'object' && choice !== null ? choice.type === 'allowed_tools' ? choice.tools : [choice] : [];
   const history = request.input.filter(item => item.type === 'function_call' || item.type === 'custom_tool_call');
-  // Reserve flat history/choices too: a continuation can change or omit its tool
+  // Reserve flat history too: a continuation can change or omit its tool
   // declarations, but a past callable must never alias a newly declared one.
-  const reserved = new Set(declared.filter(isCallableTool).map(tool => tool.name));
-  for (const item of [...history, ...choices.filter(isCallableTool)]) {
-    if ('name' in item && typeof item.name === 'string' && (!('namespace' in item) || item.namespace === undefined)) reserved.add(item.name);
+  const flatNames = new Set(declared.filter(isCallableTool).map(tool => tool.name));
+  for (const item of history) {
+    if (typeof item.name === 'string' && item.namespace === undefined) flatNames.add(item.name);
   }
+  const reserved = new Set(flatNames);
   const nextSuffixes = new Map<string, number>();
-  // Scope text is stored once, not serialized into a key for every child.
-  const scopes = new Map<string, Map<string, string>>();
+  const sourceToTarget = new Map<string, string>();
   const identities = new Map<string, CallableIdentity>();
   const allocate = (source: CallableIdentity): string => {
     if (typeof source.name !== 'string' || typeof source.namespace !== 'string') {
       throw new TranslatorInputError('Cannot flatten a malformed OpenAI Responses callable identity');
     }
-    let scope = scopes.get(source.namespace);
-    if (scope === undefined) {
-      scope = new Map();
-      scopes.set(source.namespace, scope);
-    }
-    const existing = scope.get(source.name);
+    const key = `${source.namespace}.${source.name}`;
+    const existing = sourceToTarget.get(key);
     if (existing !== undefined) {
-      if (identities.get(existing)?.type !== source.type) {
-        throw new TranslatorInputError(`Cannot translate ambiguous namespace tool '${source.namespace}.${source.name}'.`);
+      const identity = identities.get(existing)!;
+      // Qualified selectors cannot distinguish namespace="a.b", name="c"
+      // from namespace="a", name="b.c": both spell "a.b.c". Reject these
+      // competing identities even when their callable kinds are identical.
+      if (identity.namespace !== source.namespace || identity.name !== source.name || identity.type !== source.type) {
+        throw new TranslatorInputError(`Cannot translate ambiguous namespace tool '${key}'.`);
       }
       return existing;
     }
 
-    // Bound the input before concatenating or sanitizing. A long shared scope
-    // must not be scanned/copied once per child just to discard its tail.
+    // Bound the flat-name input before concatenating or sanitizing so the
+    // allocator does not scan a long shared scope just to discard its tail.
     const scopePrefix = `${source.namespace.slice(0, MAX_FLAT_TOOL_NAME_LENGTH)}_`.slice(0, MAX_FLAT_TOOL_NAME_LENGTH);
     const preferred = `${scopePrefix}${source.name.slice(0, MAX_FLAT_TOOL_NAME_LENGTH - scopePrefix.length)}`.replaceAll(/[^a-zA-Z0-9_-]/g, '_');
     let name = preferred;
@@ -100,7 +100,7 @@ export const flattenNamespaceTools = (request: CanonicalOpenAIResponsesPayload):
       }
     }
     reserved.add(name);
-    scope.set(source.name, name);
+    sourceToTarget.set(key, name);
     identities.set(name, source);
     return name;
   };
@@ -127,7 +127,7 @@ export const flattenNamespaceTools = (request: CanonicalOpenAIResponsesPayload):
     }
   }
   const declaredNames = new Set(identities.keys());
-  // Only an explicit namespace establishes scope. A flat name containing dots
+  // In history, only an explicit namespace establishes scope. A name with dots
   // or double underscores remains a distinct identity, even when declarations
   // or another historical call contain a matching namespace and child name.
   const rename = <T extends { name: string; namespace?: string }>(value: T, type: CallableIdentity['type']): T => {
@@ -143,14 +143,21 @@ export const flattenNamespaceTools = (request: CanonicalOpenAIResponsesPayload):
     if (!isCallableTool(value)) return value;
     const callable = value as T & { name: string; namespace?: string };
     const namespace = callable.namespace;
-    if (namespace === undefined) return value;
-    if (typeof namespace !== 'string') throw new TranslatorInputError('Cannot flatten a malformed OpenAI Responses callable identity');
-    const name = scopes.get(namespace)?.get(callable.name);
+    if (namespace !== undefined && typeof namespace !== 'string') throw new TranslatorInputError('Cannot flatten a malformed OpenAI Responses callable identity');
+    const key = namespace === undefined ? callable.name : `${namespace}.${callable.name}`;
+    if (namespace === undefined && flatNames.has(callable.name)) return value;
+    const explicitName = namespace === undefined ? undefined : sourceToTarget.get(key);
     // Replay may allocate an identity without declaring it callable this turn.
-    // Selectors must resolve through the declaration set, never allocate names.
-    if (name === undefined || !declaredNames.has(name) || identities.get(name)?.type !== (value.type === 'function' ? 'function_call' : 'custom_tool_call')) {
-      throw new TranslatorInputError(`Cannot translate tool_choice / allowed_tools selector for undeclared namespace tool '${namespace}.${callable.name}'.`);
+    // Explicit namespace selectors must resolve through the declaration set.
+    if (namespace !== undefined && (explicitName === undefined || !declaredNames.has(explicitName) || identities.get(explicitName)?.type !== (value.type === 'function' ? 'function_call' : 'custom_tool_call'))) {
+      throw new TranslatorInputError(`Cannot translate tool_choice / allowed_tools selector for undeclared namespace tool '${key}'.`);
     }
+    const qualified = namespace === undefined
+      ? [...identities].filter(([, identity]) => `${identity.namespace}.${identity.name}` === key || `${identity.namespace}__${identity.name}` === key)
+      : [];
+    if (qualified.length > 1) throw new TranslatorInputError(`Cannot select ambiguous qualified tool '${key}'.`);
+    const name = namespace === undefined ? qualified[0]?.[0] : explicitName;
+    if (name === undefined) return value;
     const next = { ...callable, name };
     delete next.namespace;
     return next;
