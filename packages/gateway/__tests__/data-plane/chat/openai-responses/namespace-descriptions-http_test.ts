@@ -67,6 +67,7 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
           const resource = await response.json() as OpenAIResponsesResult;
           assertEquals(response.status, 200);
           assertEquals(resource.status, 'completed');
+          assertEquals(resource.tool_choice, choice);
           const call = resource.output.find(item => item.type === 'function_call');
           assert(call?.type === 'function_call');
           assertEquals([call.name, call.namespace], ['read', 'payments']);
