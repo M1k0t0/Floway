@@ -7,6 +7,10 @@ export interface NamespaceToolNames {
   targetToSource: Map<string, { namespace: string; name: string }>;
 }
 
+const isCallableTool = (value: unknown): value is Extract<OpenAIResponsesTool, { type: 'function' | 'custom' }> =>
+  typeof value === 'object' && value !== null && 'type' in value && 'name' in value
+  && (value.type === 'function' || value.type === 'custom') && typeof value.name === 'string';
+
 // Both translated targets require flat callable names. Build the map from the
 // full inventory and replay before selecting allowed tools so an excluded
 // historical call cannot acquire a different identity on a later turn.
@@ -15,10 +19,17 @@ export const flattenNamespaceTools = (payload: CanonicalOpenAIResponsesPayload):
   payload: CanonicalOpenAIResponsesPayload;
   names: NamespaceToolNames;
 } => {
-  const inventories = [payload.tools ?? [], ...payload.input.flatMap(item =>
-    item.type === 'additional_tools' || item.type === 'tool_search_output' ? [item.tools] : [])];
+  const inventories = [payload.tools ?? [], ...payload.input.flatMap(item => {
+    if (item.type !== 'additional_tools' && item.type !== 'tool_search_output') return [];
+    if ((item.type === 'additional_tools' && item.role !== 'developer') || !Array.isArray(item.tools)
+      || item.tools.some(tool => typeof tool !== 'object' || typeof tool?.type !== 'string'
+        || ((tool.type === 'function' || tool.type === 'custom') && !isCallableTool(tool)))) {
+      throw new TranslatorInputError(`Cannot project a malformed OpenAI Responses ${item.type} item`);
+    }
+    return [item.tools];
+  })];
   const flatNames = new Set(inventories.flatMap(tools => tools.flatMap(tool =>
-    tool.type === 'function' || tool.type === 'custom' ? [tool.name] : [])));
+    isCallableTool(tool) ? [tool.name] : [])));
   for (const item of payload.input) {
     if ((item.type === 'function_call' || item.type === 'custom_tool_call') && item.namespace === undefined) flatNames.add(item.name);
   }
@@ -27,10 +38,14 @@ export const flattenNamespaceTools = (payload: CanonicalOpenAIResponsesPayload):
   const byNamespace = new Map<string, Array<{ type: 'function' | 'custom'; name: string }>>();
   const kinds = new Map<string, string>();
   const allocate = (namespace: string, name: string, kind: string): string => {
+    if (typeof namespace !== 'string' || typeof name !== 'string') throw new TranslatorInputError('Cannot flatten a malformed OpenAI Responses callable identity');
     const key = `${namespace}.${name}`;
     const existing = names.sourceToTarget.get(key);
     if (existing !== undefined) {
       const identity = names.targetToSource.get(existing)!;
+      // Qualified selectors cannot distinguish namespace="a.b", name="c"
+      // from namespace="a", name="b.c": both spell "a.b.c". Reject these
+      // competing identities even when their callable kinds are identical.
       if (identity.namespace !== namespace || identity.name !== name || kinds.get(existing) !== kind) {
         throw new TranslatorInputError(`Cannot translate ambiguous namespace tool '${key}'.`);
       }
@@ -58,12 +73,11 @@ export const flattenNamespaceTools = (payload: CanonicalOpenAIResponsesPayload):
         tools.push(tool);
         continue;
       }
+      if (typeof tool.name !== 'string' || !Array.isArray(tool.tools)) throw new TranslatorInputError('Cannot flatten a malformed OpenAI Responses namespace');
       const children = byNamespace.get(tool.name) ?? [];
       byNamespace.set(tool.name, children);
       for (const child of tool.tools) {
-        if (child.type !== 'function' && child.type !== 'custom') {
-          throw new TranslatorInputError(`Cannot translate non-callable child in namespace '${tool.name}'.`);
-        }
+        if (!isCallableTool(child)) throw new TranslatorInputError(`Cannot flatten a non-callable tool in namespace ${tool.name}`);
         const name = allocate(tool.name, child.name, child.type);
         children.push({ type: child.type, name });
         tools.push({ ...child, name });
@@ -73,13 +87,15 @@ export const flattenNamespaceTools = (payload: CanonicalOpenAIResponsesPayload):
   const input = payload.input.flatMap<OpenAIResponsesInputItem>(item => {
     if (item.type === 'additional_tools' || item.type === 'tool_search_output') return [];
     if (item.type !== 'function_call' && item.type !== 'custom_tool_call') return [item];
+    if (typeof item.name !== 'string') throw new TranslatorInputError('Cannot flatten a malformed OpenAI Responses callable identity');
     if (item.namespace === undefined) return [item];
     const { namespace, ...rest } = item;
     return [{ ...rest, name: allocate(namespace, item.name, item.type === 'function_call' ? 'function' : 'custom') }];
   });
   const selector = (choice: Exclude<OpenAIResponsesToolChoice, string | null | undefined>): Exclude<OpenAIResponsesToolChoice, string | null | undefined> => {
-    if (choice.type !== 'function' && choice.type !== 'custom') return choice;
+    if ((choice.type !== 'function' && choice.type !== 'custom') || typeof choice.name !== 'string') return choice;
     const namespace = choice.namespace;
+    if (namespace !== undefined && typeof namespace !== 'string') throw new TranslatorInputError('Cannot flatten a malformed OpenAI Responses callable identity');
     const key = namespace === undefined ? choice.name : `${namespace}.${choice.name}`;
     if (namespace === undefined && flatNames.has(choice.name)) return choice;
     if (namespace !== undefined && !byNamespace.get(namespace)?.some(child => child.type === choice.type && names.targetToSource.get(child.name)?.name === choice.name)) {
@@ -96,6 +112,7 @@ export const flattenNamespaceTools = (payload: CanonicalOpenAIResponsesPayload):
   };
   let choice = payload.tool_choice;
   if (typeof choice === 'object' && choice !== null) {
+    if (choice.type === 'allowed_tools' && !Array.isArray(choice.tools)) throw new TranslatorInputError('Cannot translate malformed allowed_tools tools array.');
     if (choice.type === 'allowed_tools' && Array.isArray(choice.tools)) {
       choice = {
         ...choice,
