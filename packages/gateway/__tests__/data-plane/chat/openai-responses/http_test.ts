@@ -718,37 +718,35 @@ test('POST /v1/responses nests a mid-stream failure under `error` so an SDK stre
   assertEquals(failed.response.id, created.response.id);
 });
 
-const translatedNamespaceCandidate = (
+const translatedCustomCandidate = (
   target: 'openaiChatCompletions' | 'anthropicMessages',
   observe: (body: Record<string, unknown>) => void,
-  returnedName?: string,
-  fail = false,
+  callExec = false,
+  toolName = 'exec',
 ): ModelCandidate => {
   const candidate = makeCandidate({ upstream: `up_${target}`, endpoints: { [target]: {} } });
   const instance = stubProvider({
     callOpenAIChatCompletions: async (_model, body) => {
       observe(body as unknown as Record<string, unknown>);
-      if (fail) return { ok: false, response: new Response('retry this candidate', { status: 500 }), modelKey: 'test-model-key' };
-      const chunk = (choices: OpenAIChatCompletionsStreamEvent['choices']): OpenAIChatCompletionsStreamEvent => ({ id: 'chat_namespace', object: 'chat.completion.chunk', created: 0, model: 'test-model', choices });
+      const chunk = (choices: OpenAIChatCompletionsStreamEvent['choices']): OpenAIChatCompletionsStreamEvent => ({ id: 'chat_exec', object: 'chat.completion.chunk', created: 0, model: 'test-model', choices });
       return {
         ok: true, modelKey: 'test-model-key', events: (async function* () {
           yield eventFrame(chunk([{ index: 0, delta: { role: 'assistant' }, finish_reason: null }]));
-          yield eventFrame(chunk([{ index: 0, delta: returnedName === undefined ? { content: 'done' } : { tool_calls: [{ index: 0, id: 'call_namespace', type: 'function', function: { name: returnedName, arguments: '{"input":"patch"}' } }] }, finish_reason: null }]));
-          yield eventFrame(chunk([{ index: 0, delta: {}, finish_reason: returnedName === undefined ? 'stop' : 'tool_calls' }]));
+          yield eventFrame(chunk([{ index: 0, delta: callExec ? { tool_calls: [{ index: 0, id: 'call_exec', type: 'function', function: { name: toolName, arguments: '{"input":"patch"}' } }] } : { content: 'done' }, finish_reason: null }]));
+          yield eventFrame(chunk([{ index: 0, delta: {}, finish_reason: callExec ? 'tool_calls' : 'stop' }]));
           yield doneFrame();
         })(),
       };
     },
     callAnthropicMessages: async (_model, body) => {
       observe(body as unknown as Record<string, unknown>);
-      if (fail) return { ok: false, response: new Response('retry this candidate', { status: 500 }), modelKey: 'test-model-key' };
       return {
         ok: true, modelKey: 'test-model-key', events: (async function* () {
-          yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'message_start', message: { id: 'msg_namespace', type: 'message', role: 'assistant', model: 'test-model', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 0 } } });
-          yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'content_block_start', index: 0, content_block: returnedName === undefined ? { type: 'text', text: '' } : { type: 'tool_use', id: 'call_namespace', name: returnedName, input: {} } });
-          yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'content_block_delta', index: 0, delta: returnedName === undefined ? { type: 'text_delta', text: 'done' } : { type: 'input_json_delta', partial_json: '{"input":"patch"}' } });
+          yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'message_start', message: { id: 'msg_exec', type: 'message', role: 'assistant', model: 'test-model', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 0 } } });
+          yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'content_block_start', index: 0, content_block: callExec ? { type: 'tool_use', id: 'call_exec', name: toolName, input: {} } : { type: 'text', text: '' } });
+          yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'content_block_delta', index: 0, delta: callExec ? { type: 'input_json_delta', partial_json: '{"input":"patch"}' } : { type: 'text_delta', text: 'done' } });
           yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'content_block_stop', index: 0 });
-          yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'message_delta', delta: { stop_reason: returnedName === undefined ? 'end_turn' : 'tool_use', stop_sequence: null }, usage: { output_tokens: 1 } });
+          yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'message_delta', delta: { stop_reason: callExec ? 'tool_use' : 'end_turn', stop_sequence: null }, usage: { output_tokens: 1 } });
           yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'message_stop' });
         })(),
       };
@@ -766,7 +764,7 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
         ? [{ type: 'namespace', name: 'fs', description: '', tools: [{ type, name: 'read' }] }]
         : [{ type, name: 'read' }];
       const currentName = scope === 'namespace' ? 'fs_read' : 'read';
-      queueResolution([translatedNamespaceCandidate(target, body => bodies.push(structuredClone(body)), currentName)]);
+      queueResolution([translatedCustomCandidate(target, body => bodies.push(structuredClone(body)), true, currentName)]);
       const first = await makeApp().request('/v1/responses', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ model: 'test-model', tools: tools('function'), input: 'read a file' }),
@@ -775,7 +773,7 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
       const previous = await first.json() as OpenAIResponsesResult;
       const history = previous.output.find(item => item.type === 'function_call');
       assert(history?.type === 'function_call');
-      queueResolution([translatedNamespaceCandidate(target, body => bodies.push(structuredClone(body)), currentName)]);
+      queueResolution([translatedCustomCandidate(target, body => bodies.push(structuredClone(body)), true, currentName)]);
       const second = await makeApp().request('/v1/responses', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ model: 'test-model', tools: tools('custom'), previous_response_id: previous.id, input: [{ type: 'function_call_output', call_id: history.call_id, output: 'done' }, { role: 'user', content: 'continue' }] }),
@@ -811,7 +809,7 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
     const observe = (body: Record<string, unknown>) => { bodies.push(structuredClone(body)); };
     const headers = { 'content-type': 'application/json' };
     const tools = [{ type: 'custom', name: 'exec' }];
-    queueResolution([translatedNamespaceCandidate(target, observe, 'exec')]);
+    queueResolution([translatedCustomCandidate(target, observe, true)]);
     const first = await makeApp().request('/v1/responses', {
       method: 'POST', headers,
       body: JSON.stringify({ model: 'test-model', store: true, tools, input: [{ role: 'user', content: 'inspect the request' }] }),
@@ -823,7 +821,7 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
     assertEquals([call.name, call.namespace, call.input], ['exec', undefined, 'patch']);
     assertEquals(bodies.length, 1);
 
-    queueResolution([translatedNamespaceCandidate(target, observe)]);
+    queueResolution([translatedCustomCandidate(target, observe)]);
     const second = await makeApp().request('/v1/responses', {
       method: 'POST', headers,
       body: JSON.stringify({

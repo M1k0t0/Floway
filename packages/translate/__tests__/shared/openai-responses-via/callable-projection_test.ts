@@ -4,26 +4,16 @@ import { flattenNamespaceTools, restoreNamespaceEvents } from '../../../src/shar
 import { TranslatorInputError } from '../../../src/translator-input-error.ts';
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
 import type { CanonicalOpenAIResponsesPayload, OpenAIResponsesResult, OpenAIResponsesStreamEvent, OpenAIResponsesTool } from '@floway-dev/protocols/openai-responses';
-import { assert, assertEquals, assertRejects } from '@floway-dev/test-utils';
+import { assert, assertEquals, assertThrows } from '@floway-dev/test-utils';
 
-const invocation = (payload: CanonicalOpenAIResponsesPayload) => ({ payload });
 const functionTool = (name: string): Extract<OpenAIResponsesTool, { type: 'function' }> => ({ type: 'function', name, parameters: { type: 'object' } });
 const emptyResult = (): OpenAIResponsesResult => ({ id: 'resp', object: 'response', model: 'model', status: 'completed', output: [], output_text: '', error: null, incomplete_details: null });
-const result = (events: OpenAIResponsesStreamEvent[] = []) => ({
-  type: 'events' as const, events: (async function* () {
-    for (const event of events) yield eventFrame(event);
-    yield doneFrame();
-  })(),
-});
-const project = async (call: { payload: CanonicalOpenAIResponsesPayload }, dispatch: () => Promise<ReturnType<typeof result>>) => {
-  const projected = flattenNamespaceTools(call.payload);
-  call.payload = projected.payload;
-  const response = await dispatch();
-  return { ...response, events: restoreNamespaceEvents(response.events, projected.names) };
+const framesOf = async function* (events: OpenAIResponsesStreamEvent[]): AsyncGenerator<ProtocolFrame<OpenAIResponsesStreamEvent>> {
+  for (const event of events) yield eventFrame(event);
+  yield doneFrame();
 };
-const run = async (call: { payload: CanonicalOpenAIResponsesPayload }) => await project(call, async () => result());
 
-test('callable projection maps declarations, custom history, choices and duplicate declarations without mutation', async () => {
+test('callable projection maps declarations, custom history, choices and duplicate declarations without mutation', () => {
   const custom = { type: 'custom' as const, name: 'edit', format: { type: 'text' as const }, description: 'custom tool' };
   const request: CanonicalOpenAIResponsesPayload = {
     model: 'm', tools: [functionTool('files_read'), { type: 'namespace', name: 'files', description: '', tools: [functionTool('read'), custom, functionTool('read')] }],
@@ -36,24 +26,21 @@ test('callable projection maps declarations, custom history, choices and duplica
     tool_choice: { type: 'allowed_tools', mode: 'required', tools: [{ type: 'function', name: 'read', namespace: 'files' }, { type: 'custom', name: 'edit', namespace: 'files' }, { type: 'future', extra: true }] },
   };
   const original = structuredClone(request);
-  const call = invocation(request);
-  await run(call);
+  const call = flattenNamespaceTools(request);
   assertEquals(call.payload.tools?.map(tool => 'name' in tool ? tool.name : null), ['files_read', 'files_read_2', 'files_edit', 'files_read_2']);
   assertEquals(call.payload.input.slice(0, 2).map(item => item.type === 'function_call' || item.type === 'custom_tool_call' ? [item.name, item.namespace] : null), [['files_read_2', undefined], ['files_edit', undefined]]);
   assertEquals(call.payload.input.slice(2), request.input.slice(2));
   assertEquals(call.payload.tool_choice, { type: 'allowed_tools', mode: 'required', tools: [{ type: 'function', name: 'files_read_2' }, { type: 'custom', name: 'files_edit' }, { type: 'future', extra: true }] });
   assertEquals(request, original);
-  const forced = invocation({ ...request, tool_choice: { type: 'custom', name: 'edit', namespace: 'files' } } as CanonicalOpenAIResponsesPayload);
-  await run(forced);
+  const forced = flattenNamespaceTools({ ...request, tool_choice: { type: 'custom', name: 'edit', namespace: 'files' } } as CanonicalOpenAIResponsesPayload);
   assertEquals(forced.payload.tool_choice, { type: 'custom', name: 'files_edit' });
 });
 
-test('callable projection allocates replay-only identities against the current flat collision set', async () => {
-  const call = invocation({
+test('callable projection allocates replay-only identities against the current flat collision set', () => {
+  const call = flattenNamespaceTools({
     model: 'm', tools: [functionTool('files_read'), functionTool('files_read_2')],
     input: [{ type: 'function_call', name: 'read', namespace: 'files', call_id: 'past', arguments: '{}', status: 'completed' }],
   });
-  await run(call);
   assertEquals(call.payload.input, [{ type: 'function_call', name: 'files_read_3', call_id: 'past', arguments: '{}', status: 'completed' }]);
   assertEquals(call.payload.tools, [functionTool('files_read'), functionTool('files_read_2')]);
 });
@@ -85,31 +72,28 @@ for (const kind of ['function', 'custom'] as const) {
   });
 }
 
-test('callable projection never applies a vendor default namespace to Standard history or tool choice', async () => {
-  const call = invocation({
+test('callable projection never applies a vendor default namespace to Standard history or tool choice', () => {
+  const call = flattenNamespaceTools({
     model: 'm', tools: [{ type: 'namespace', name: 'functions', description: '', tools: [functionTool('read')] }],
     input: [{ type: 'function_call', name: 'read', call_id: 'flat', arguments: '{}', status: 'completed' }],
     tool_choice: { type: 'function', name: 'read' },
   });
-  await run(call);
   assertEquals(call.payload.input[0], { type: 'function_call', name: 'read', call_id: 'flat', arguments: '{}', status: 'completed' });
   assertEquals(call.payload.tool_choice, { type: 'function', name: 'read' });
 });
 
 for (const [namespace, reservePreferred] of [['n'.repeat(64), false], ['n'.repeat(59), true]] as const) {
-  test(`callable projection bounds collision lookups for ${namespace.length}-character namespaces`, async () => {
+  test(`callable projection bounds collision lookups for ${namespace.length}-character namespaces`, () => {
     const count = 1000;
     const children = Array.from({ length: count }, (_, index) => functionTool(String(index).padStart(4, '0')));
     const reserved = reservePreferred ? children.map(child => functionTool(`${namespace}_${'name' in child ? child.name : ''}`)) : [];
-    const call = invocation({ model: 'm', input: [], tools: [...reserved, { type: 'namespace', name: namespace, description: '', tools: children }] });
+    const request: CanonicalOpenAIResponsesPayload = { model: 'm', input: [], tools: [...reserved, { type: 'namespace', name: namespace, description: '', tools: children }] };
+    let call: ReturnType<typeof flattenNamespaceTools>;
     const has = vi.spyOn(Set.prototype, 'has');
     let checks = 0;
     try {
-      await project(call, async () => {
-        checks = has.mock.calls.length;
-        has.mockRestore();
-        return result();
-      });
+      call = flattenNamespaceTools(request);
+      checks = has.mock.calls.length;
     } finally { has.mockRestore(); }
     const names = call.payload.tools!.slice(reserved.length).map(tool => 'name' in tool ? tool.name : '');
     assertEquals(names.length, count);
@@ -120,32 +104,30 @@ for (const [namespace, reservePreferred] of [['n'.repeat(64), false], ['n'.repea
   });
 }
 
-test('callable projection preserves suffix ordering across digit widths, invalid characters and duplicates', async () => {
+test('callable projection preserves suffix ordering across digit widths, invalid characters and duplicates', () => {
   const namespace = 'n'.repeat(59);
   const prefix = `${namespace}_`;
   const children = ['aaaa', 'aaab', 'aaac', 'a', 'aa', 'aaaa'];
   const reserved = [...children.slice(0, -1).map(name => `${prefix}${name}`), ...Array.from({ length: 8 }, (_, i) => `${prefix}aa_${i + 2}`), `${prefix}a_10`, `${prefix}a_12`];
-  const call = invocation({ model: 'm', input: [], tools: [...reserved.map(functionTool), { type: 'namespace', name: namespace, description: '', tools: children.map(functionTool) }, { type: 'namespace', name: 'bad.ns', description: '', tools: [functionTool('bad/name')] }] });
-  await run(call);
+  const call = flattenNamespaceTools({ model: 'm', input: [], tools: [...reserved.map(functionTool), { type: 'namespace', name: namespace, description: '', tools: children.map(functionTool) }, { type: 'namespace', name: 'bad.ns', description: '', tools: [functionTool('bad/name')] }] });
   assertEquals(call.payload.tools?.slice(reserved.length).map(tool => 'name' in tool ? tool.name : null), [`${prefix}a_11`, `${prefix}a_13`, `${prefix}a_14`, `${prefix}a_2`, `${prefix}a_15`, `${prefix}a_11`, 'bad_ns_bad_name']);
 });
 
 test('callable projection restores item lifecycle, function/custom types, and resource echoes before outer readers', async () => {
   const request: CanonicalOpenAIResponsesPayload = { model: 'm', input: [], tools: [{ type: 'namespace', name: 'files', description: '', tools: [{ type: 'custom', name: 'edit' }, functionTool('read')] }], tool_choice: { type: 'custom', name: 'edit', namespace: 'files' } as CanonicalOpenAIResponsesPayload['tool_choice'] };
-  const call = invocation(request);
+  const call = flattenNamespaceTools(request);
   const output = [
     { type: 'function_call' as const, name: 'files_edit', id: 'fc1', call_id: 'a', arguments: 'patch', status: 'completed' as const },
     { type: 'custom_tool_call' as const, name: 'files_read', id: 'fc2', call_id: 'b', input: '{}' },
   ];
   const upstream = { ...emptyResult(), output, tools: [functionTool('files_edit')], tool_choice: { type: 'function' as const, name: 'files_edit' }, extension: 'kept' };
-  const response = await project(call, async () => result([
+  const response = restoreNamespaceEvents(framesOf([
     { type: 'response.output_item.added', output_index: 0, item: output[0]! },
     { type: 'response.output_item.done', output_index: 0, item: output[0]! },
     { type: 'response.completed', response: upstream },
-  ]));
-  assert(response.type === 'events');
+  ]), call.names);
   const frames: ProtocolFrame<OpenAIResponsesStreamEvent>[] = [];
-  for await (const frame of response.events) frames.push(frame);
+  for await (const frame of response) frames.push(frame);
   const expected = [
     { type: 'custom_tool_call', name: 'edit', namespace: 'files', id: 'fc1', call_id: 'a', input: 'patch', status: 'completed' },
     { type: 'function_call', name: 'read', namespace: 'files', id: 'fc2', call_id: 'b', arguments: '{}', status: 'completed' },
@@ -159,23 +141,22 @@ test('callable projection restores item lifecycle, function/custom types, and re
 
 for (const type of ['function', 'custom'] as const) {
   test(`callable projection restores ${type} argument event types along with callable items`, async () => {
-    const call = invocation({ model: 'm', input: [], tools: [{ type: 'namespace', name: 'files', description: '', tools: [{ type, name: 'read' }] }] });
+    const call = flattenNamespaceTools({ model: 'm', input: [], tools: [{ type: 'namespace', name: 'files', description: '', tools: [{ type, name: 'read' }] }] });
     const sourceIsFunction = type === 'function';
     const item = sourceIsFunction
       ? { type: 'custom_tool_call' as const, id: 'item', name: 'files_read', call_id: 'call', input: '{}' }
       : { type: 'function_call' as const, id: 'item', name: 'files_read', call_id: 'call', arguments: '{}', status: 'completed' as const };
     const unknown = { type: 'future.event', opaque: { retained: true } } as unknown as OpenAIResponsesStreamEvent;
-    const response = await project(call, async () => result([
+    const response = restoreNamespaceEvents(framesOf([
       { type: 'response.output_item.added', output_index: 0, item },
       { type: sourceIsFunction ? 'response.custom_tool_call_input.delta' : 'response.function_call_arguments.delta', item_id: 'item', output_index: 0, delta: '{}' },
       sourceIsFunction
         ? { type: 'response.custom_tool_call_input.done', item_id: 'item', output_index: 0, input: '{}' }
         : { type: 'response.function_call_arguments.done', item_id: 'item', output_index: 0, arguments: '{}', name: 'files_read' } as OpenAIResponsesStreamEvent,
       unknown,
-    ]));
-    assert(response.type === 'events');
+    ]), call.names);
     const events: OpenAIResponsesStreamEvent[] = [];
-    for await (const frame of response.events) if (frame.type === 'event') events.push(frame.event);
+    for await (const frame of response) if (frame.type === 'event') events.push(frame.event);
     assertEquals(events[1], { type: sourceIsFunction ? 'response.function_call_arguments.delta' : 'response.custom_tool_call_input.delta', item_id: 'item', output_index: 0, delta: '{}' });
     assertEquals(events[2], { type: sourceIsFunction ? 'response.function_call_arguments.done' : 'response.custom_tool_call_input.done', item_id: 'item', output_index: 0, [sourceIsFunction ? 'arguments' : 'input']: '{}', ...(sourceIsFunction ? { name: 'read' } : {}) });
     assert(events[3] === unknown);
@@ -183,36 +164,32 @@ for (const type of ['function', 'custom'] as const) {
 }
 
 test('callable projection restores function arguments.done names without adding a namespace field', async () => {
-  const call = invocation({ model: 'm', input: [], tools: [{ type: 'namespace', name: 'files', description: '', tools: [functionTool('read')] }] });
-  const response = await project(call, async () => result([
+  const call = flattenNamespaceTools({ model: 'm', input: [], tools: [{ type: 'namespace', name: 'files', description: '', tools: [functionTool('read')] }] });
+  const response = restoreNamespaceEvents(framesOf([
     { type: 'response.output_item.added', output_index: 0, item: { type: 'function_call', id: 'item', call_id: 'call', name: 'files_read', arguments: '', status: 'in_progress' } },
     { type: 'response.function_call_arguments.done', item_id: 'item', output_index: 0, name: 'files_read', arguments: '{}' } as OpenAIResponsesStreamEvent,
-  ]));
-  assert(response.type === 'events');
+  ]), call.names);
   const events: OpenAIResponsesStreamEvent[] = [];
-  for await (const frame of response.events) if (frame.type === 'event') events.push(frame.event);
+  for await (const frame of response) if (frame.type === 'event') events.push(frame.event);
   assertEquals(events[1], { type: 'response.function_call_arguments.done', item_id: 'item', output_index: 0, name: 'read', arguments: '{}' });
 });
 
-test('callable projection preserves named MCP and future selectors', async () => {
+test('callable projection preserves named MCP and future selectors', () => {
   const selectors = [{ type: 'mcp', server_label: 'remote', name: 'functions.search' }, { type: 'future', name: 'functions.search' }];
-  const call = invocation({ model: 'm', input: [], tools: [{ type: 'namespace', name: 'functions', description: '', tools: [functionTool('search')] }], tool_choice: { type: 'allowed_tools', mode: 'required', tools: [...selectors, { type: 'function', name: 'search', namespace: 'functions' }] } });
-  await run(call);
+  const call = flattenNamespaceTools({ model: 'm', input: [], tools: [{ type: 'namespace', name: 'functions', description: '', tools: [functionTool('search')] }], tool_choice: { type: 'allowed_tools', mode: 'required', tools: [...selectors, { type: 'function', name: 'search', namespace: 'functions' }] } });
   assertEquals(call.payload.tool_choice, { type: 'allowed_tools', mode: 'required', tools: [...selectors, { type: 'function', name: 'functions_search' }] });
 });
 
-test('callable projection bounds sanitized flat-name prefixes for a shared long namespace', async () => {
+test('callable projection bounds sanitized flat-name prefixes for a shared long namespace', () => {
   const namespace = 'n'.repeat(4096);
   const count = 32;
-  const call = invocation({ model: 'm', input: [], tools: [{ type: 'namespace', name: namespace, description: '', tools: Array.from({ length: count }, (_, index) => functionTool(`tool${index}`)) }] });
+  const request: CanonicalOpenAIResponsesPayload = { model: 'm', input: [], tools: [{ type: 'namespace', name: namespace, description: '', tools: Array.from({ length: count }, (_, index) => functionTool(`tool${index}`)) }] };
+  let call: ReturnType<typeof flattenNamespaceTools>;
   const replacements = vi.spyOn(String.prototype, 'replaceAll');
   let lengths: number[] = [];
   try {
-    await project(call, async () => {
-      lengths = replacements.mock.contexts.map(context => String(context).length);
-      replacements.mockRestore();
-      return result();
-    });
+    call = flattenNamespaceTools(request);
+    lengths = replacements.mock.contexts.map(context => String(context).length);
   } finally {
     replacements.mockRestore();
   }
@@ -222,17 +199,16 @@ test('callable projection bounds sanitized flat-name prefixes for a shared long 
 });
 
 test('callable projection restores lifecycle-appropriate function status from custom items', async () => {
-  const call = invocation({ model: 'm', input: [], tools: [{ type: 'namespace', name: 'files', description: '', tools: [functionTool('read')] }] });
+  const call = flattenNamespaceTools({ model: 'm', input: [], tools: [{ type: 'namespace', name: 'files', description: '', tools: [functionTool('read')] }] });
   const item = { type: 'custom_tool_call' as const, id: 'item', call_id: 'call', name: 'files_read', input: '{}' };
-  const response = await project(call, async () => result([
+  const response = restoreNamespaceEvents(framesOf([
     { type: 'response.output_item.added', output_index: 0, item },
     { type: 'response.created', response: { ...emptyResult(), status: 'in_progress', output: [item] } },
     { type: 'response.output_item.done', output_index: 0, item },
     { type: 'response.completed', response: { ...emptyResult(), output: [item] } },
-  ]));
-  assert(response.type === 'events');
+  ]), call.names);
   const statuses: unknown[] = [];
-  for await (const frame of response.events) {
+  for await (const frame of response) {
     if (frame.type !== 'event') continue;
     if ('item' in frame.event) statuses.push((frame.event.item as { status?: string }).status);
     else if ('response' in frame.event) statuses.push((frame.event.response.output[0] as { status?: string }).status);
@@ -240,17 +216,14 @@ test('callable projection restores lifecycle-appropriate function status from cu
   assertEquals(statuses, ['in_progress', 'in_progress', 'completed', 'completed']);
 });
 
-test('callable projection rejects mixed kinds and ambiguous qualified namespace identities', async () => {
+test('callable projection rejects mixed kinds and ambiguous qualified namespace identities', () => {
   const request: CanonicalOpenAIResponsesPayload = { model: 'm', input: [], tools: [{ type: 'namespace', name: 'files', description: '', tools: [functionTool('read')] }] };
-  const distinct = invocation({ ...request, tools: [{ type: 'namespace', name: 'files', description: '', tools: [functionTool('read'), { type: 'custom', name: 'read' }] }] });
-  await assertRejects(() => run(distinct), TranslatorInputError, "ambiguous namespace tool 'files.read'");
-  const replay = invocation({ ...request, input: [{ type: 'custom_tool_call', namespace: 'files', name: 'read', call_id: 'past', input: 'patch' }] });
-  await assertRejects(() => run(replay), TranslatorInputError, "ambiguous namespace tool 'files.read'");
-  const ambiguous = invocation({ ...request, tools: [{ type: 'namespace', name: 'a.b', description: '', tools: [functionTool('c')] }, { type: 'namespace', name: 'a', description: '', tools: [functionTool('b.c')] }], tool_choice: { type: 'function', name: 'a.b.c' } });
-  await assertRejects(() => run(ambiguous), TranslatorInputError, "ambiguous namespace tool 'a.b.c'");
+  assertThrows(() => flattenNamespaceTools({ ...request, tools: [{ type: 'namespace', name: 'files', description: '', tools: [functionTool('read'), { type: 'custom', name: 'read' }] }] }), TranslatorInputError, "ambiguous namespace tool 'files.read'");
+  assertThrows(() => flattenNamespaceTools({ ...request, input: [{ type: 'custom_tool_call', namespace: 'files', name: 'read', call_id: 'past', input: 'patch' }] }), TranslatorInputError, "ambiguous namespace tool 'files.read'");
+  assertThrows(() => flattenNamespaceTools({ ...request, tools: [{ type: 'namespace', name: 'a.b', description: '', tools: [functionTool('c')] }, { type: 'namespace', name: 'a', description: '', tools: [functionTool('b.c')] }], tool_choice: { type: 'function', name: 'a.b.c' } }), TranslatorInputError, "ambiguous namespace tool 'a.b.c'");
 });
 
-test('callable projection retains parent and child descriptions for translated targets', async () => {
+test('callable projection retains parent and child descriptions for translated targets', () => {
   const request: CanonicalOpenAIResponsesPayload = {
     model: 'm', input: [], tools: [
       { type: 'namespace', name: 'files', description: 'Read-only access. Never modify files.', tools: [{ ...functionTool('read'), description: 'Read a file.' }, { type: 'custom', name: 'inspect' }] },
@@ -258,21 +231,14 @@ test('callable projection retains parent and child descriptions for translated t
     ],
   };
   const original = structuredClone(request);
-  const call = invocation(request);
-  await run(call);
+  const call = flattenNamespaceTools(request);
   assertEquals(call.payload.tools?.map(tool => 'description' in tool ? tool.description : undefined), ['Read-only access. Never modify files.\n\nRead a file.', 'Read-only access. Never modify files.', 'Child-only description.']);
   assertEquals(request, original);
 });
 
 for (const tools of [null, [null], [{ type: 'function', name: 123 }]]) {
-  test(`callable projection uses typed input errors for malformed translated targets namespace children ${JSON.stringify(tools)}`, async () => {
-    const call = invocation({ model: 'm', input: [], tools: [{ type: 'namespace', name: 'invalid', description: '', tools }] } as unknown as CanonicalOpenAIResponsesPayload);
-    let reachedTarget = false;
-    await assertRejects(() => project(call, async () => {
-      reachedTarget = true;
-      return result();
-    }), TranslatorInputError, 'Cannot flatten');
-    assertEquals(reachedTarget, false);
+  test(`callable projection uses typed input errors for malformed translated targets namespace children ${JSON.stringify(tools)}`, () => {
+    assertThrows(() => flattenNamespaceTools({ model: 'm', input: [], tools: [{ type: 'namespace', name: 'invalid', description: '', tools }] } as unknown as CanonicalOpenAIResponsesPayload), TranslatorInputError, 'Cannot flatten');
   });
 }
 
@@ -291,19 +257,18 @@ test('callable projection projects Standard carriers before namespace allocation
     tool_choice: { type: 'allowed_tools', mode: 'required', tools: [{ type: 'custom', namespace: 'files', name: 'edit' }] },
   };
   const original = structuredClone(request);
-  const call = invocation(request);
-  const response = await project(call, async () => result([
+  const call = flattenNamespaceTools(request);
+  const response = restoreNamespaceEvents(framesOf([
     { type: 'response.completed', response: { ...emptyResult(), tools: call.payload.tools ?? undefined, tool_choice: call.payload.tool_choice, output: [{ type: 'function_call', name: 'files_edit_2', call_id: 'current', arguments: 'new patch', status: 'completed' }] } },
-  ]));
+  ]), call.names);
   assertEquals(call.payload.tools?.map(tool => 'name' in tool ? tool.name : undefined), ['files_edit', 'files_edit_2', 'read', 'delayed']);
   assertEquals(call.payload.tools?.[1], { type: 'custom', name: 'files_edit_2', description: 'File policy.\n\nEdit a file.' });
   assertEquals(call.payload.input, [developer, { type: 'custom_tool_call', name: 'files_edit_2', call_id: 'past', input: 'patch' }]);
   assert(call.payload.input[0] === developer);
   assertEquals(call.payload.tool_choice, { type: 'allowed_tools', mode: 'required', tools: [{ type: 'custom', name: 'files_edit_2' }] });
   assertEquals(request, original);
-  assert(response.type === 'events');
   const frames: ProtocolFrame<OpenAIResponsesStreamEvent>[] = [];
-  for await (const frame of response.events) frames.push(frame);
+  for await (const frame of response) frames.push(frame);
   const frame = frames[0];
   assert(frame.type === 'event' && frame.event.type === 'response.completed');
   assertEquals(frame.event.response.tools, request.tools);
@@ -315,15 +280,14 @@ for (const tools of [undefined, [], [functionTool('existing')]]) {
   for (const echo of [false, true]) {
     test(`carrier projection restores original tool echoes (${tools === undefined ? 'omitted' : tools.length} declarations, upstream echo ${echo})`, async () => {
       const request: CanonicalOpenAIResponsesPayload = { model: 'm', input: [{ type: 'additional_tools', role: 'developer', tools: [functionTool('read')] }], ...(tools === undefined ? {} : { tools }) };
-      const call = invocation(request);
-      const response = await project(call, async () => result([
+      const call = flattenNamespaceTools(request);
+      const response = restoreNamespaceEvents(framesOf([
         { type: 'response.completed', response: { ...emptyResult(), ...(echo ? { tools: call.payload.tools ?? undefined } : {}) } },
-      ]));
+      ]), call.names);
       assertEquals(call.payload.input, []);
       assertEquals(call.payload.tools, [...(tools ?? []), functionTool('read')]);
-      assert(response.type === 'events');
       let completed = 0;
-      for await (const frame of response.events) {
+      for await (const frame of response) {
         if (frame.type !== 'event' || frame.event.type !== 'response.completed') continue;
         completed++;
         assertEquals(frame.event.response.tools, echo ? tools : undefined);
@@ -340,16 +304,11 @@ for (const carrier of [
   { type: 'additional_tools', role: 'developer', tools: [null] },
   { type: 'additional_tools', role: 'developer', tools: [{ type: 'function', name: 42 }] },
 ]) {
-  test(`callable projection typed-rejects malformed Standard carrier ${JSON.stringify(carrier)}`, async () => {
+  test(`callable projection typed-rejects malformed Standard carrier ${JSON.stringify(carrier)}`, () => {
     const request = { model: 'm', input: [carrier] } as unknown as CanonicalOpenAIResponsesPayload;
-    const call = invocation(request);
-    let reachedTarget = false;
-    await assertRejects(() => project(call, async () => {
-      reachedTarget = true;
-      return result();
-    }), TranslatorInputError, 'additional_tools');
-    assertEquals(reachedTarget, false);
-    assert(call.payload === request);
+    const original = structuredClone(request);
+    assertThrows(() => flattenNamespaceTools(request), TranslatorInputError, 'additional_tools');
+    assertEquals(request, original);
   });
 }
 

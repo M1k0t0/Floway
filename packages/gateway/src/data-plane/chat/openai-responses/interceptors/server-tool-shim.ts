@@ -322,6 +322,17 @@ export const resolveServerToolName = (
   throw new Error(`Unable to resolve a free server tool function name for ${baseName} within ${MAX_NAME_RESOLUTION_ATTEMPTS} attempts`);
 };
 
+const historicalClientCallableUsesName = (name: string, input: readonly OpenAIResponsesInputItem[]): boolean =>
+  input.some(item => {
+    if (item.type === 'additional_tools' || item.type === 'tool_search_output') {
+      return Array.isArray(item.tools) && item.tools.some(tool =>
+        tool != null && (tool.type === 'function' || tool.type === 'custom') && tool.name === name
+        && (!('namespace' in tool) || tool.namespace === undefined));
+    }
+    return (item.type === 'function_call' || item.type === 'custom_tool_call')
+      && item.namespace === undefined && item.name === name;
+  });
+
 // Azure and Copilot both deduplicate repeated hosted-tool declarations as one
 // family and retain the last complete declaration, including aliases and
 // configuration. The replacement occupies the first declaration's array slot
@@ -1085,12 +1096,10 @@ export const withOpenAIResponsesServerToolShim = (
       && typeof choice === 'object' && choice !== null) {
       // Forced and allowed-tools selectors share the same ownership rule. A
       // bare helper spelling may be rebased only when no client owns it.
-      const hasClientDeclaration = (tools: readonly OpenAIResponsesTool[]) => tools.some(tool =>
+      const clientOwnsName = currentTools.some(tool =>
         (tool.type === 'function' || tool.type === 'custom') && tool.name === prepared.baseToolName
-        && (!('namespace' in tool) || tool.namespace === undefined));
-      const clientOwnsName = hasClientDeclaration(currentTools) || ctx.payload.input.some(item =>
-        ((item.type === 'function_call' || item.type === 'custom_tool_call') && item.namespace === undefined && item.name === prepared.baseToolName)
-        || ((item.type === 'additional_tools' || item.type === 'tool_search_output') && Array.isArray(item.tools) && hasClientDeclaration(item.tools)));
+        && (!('namespace' in tool) || tool.namespace === undefined))
+        || historicalClientCallableUsesName(prepared.baseToolName, ctx.payload.input);
       if (!clientOwnsName) {
         const rebaseSelector = <T>(selector: T): T => {
           if (typeof selector !== 'object' || selector === null || !('type' in selector) || selector.type !== 'function'
@@ -1155,7 +1164,7 @@ export const withOpenAIResponsesServerToolShim = (
     || (typeof finalToolChoice === 'object'
       && finalToolChoice !== null
       && finalToolChoice.type === 'function'
-      && (!('namespace' in finalToolChoice) || finalToolChoice.namespace === undefined)
+      && finalToolChoice.namespace === undefined
       && dispatchers.has(finalToolChoice.name))
     || (typeof finalToolChoice === 'object' && finalToolChoice?.type === 'allowed_tools'
       && finalToolChoice.mode === 'required' && Array.isArray(finalToolChoice.tools)

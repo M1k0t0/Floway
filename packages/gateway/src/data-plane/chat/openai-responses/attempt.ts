@@ -101,8 +101,8 @@ export const openaiResponsesAttempt = {
       targetApi,
       headers,
     };
-    const chainResult = await runInterceptors(invocation, ctx, openaiResponsesInterceptors, () =>
-      dispatchOpenAIResponses(invocation, ctx));
+    const chainResult = await runInterceptors(invocation, ctx, openaiResponsesInterceptors, async () =>
+      await dispatchOpenAIResponses(invocation, ctx));
 
     if (chainResult.type !== 'events') return chainResult;
 
