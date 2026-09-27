@@ -149,11 +149,10 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
 
   for (const representation of ['Standard', 'Standard carrier'] as const) {
     for (const mode of ['auto', 'required'] as const) {
-      test.each(['callable', 'namespace', '.', '__'] as const)(`HTTP ${representation} preserves namespace allowed_tools and descriptions on final ${target} wire (${mode}, %s selector)`, async selection => {
+      test.each(['callable', 'namespace'] as const)(`HTTP ${representation} preserves namespace allowed_tools and descriptions on final ${target} wire (${mode}, %s selector)`, async selection => {
         const { apiKey } = await setup(target);
         const selector = selection === 'namespace' ? { type: 'namespace', name: 'payments' }
-          : selection === 'callable' ? { type: 'function', namespace: 'payments', name: 'read' }
-            : { type: 'function', name: `payments${selection}read` };
+          : { type: 'function', namespace: 'payments', name: 'read' };
         const choice = { type: 'allowed_tools', mode, tools: [selector] };
         const input = [{ type: 'message', role: 'user', content: 'Read my account.' }];
         const payload = { model: 'model', stream: false, store: false, tool_choice: choice, ...(representation !== 'Standard' ? { input: [{ type: 'additional_tools', role: 'developer', tools: [namespace] }, ...input] } : { input, tools: [namespace] }) };
@@ -210,6 +209,7 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
           { tools: [{ ...namespace, name: 'a.b', tools: [{ type: 'function', name: 'c' }] }], input: [{ type: 'function_call', namespace: 'a', name: 'b.c', call_id: 'past', arguments: '{}', status: 'completed' }] },
           { tools: [{ ...namespace, tools: null }] },
           { tools: [{ ...namespace, tools: [null] }] },
+          { tools: [{ ...namespace, tools: [{ type: 'function', name: 123 }] }] },
           { tools: [{ ...namespace, name: 123 }] },
           { tool_choice: { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: 'payments.missing' }] } },
           { tool_choice: { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: 'payments__missing' }] } },
@@ -217,6 +217,7 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
           { tool_choice: { type: 'function', namespace: 'payments', name: 'missing' } },
           { tool_choice: { type: 'custom', namespace: 'payments', name: 'read' } },
           { input: [{ type: 'function_call', namespace: 'payments', name: 'missing', call_id: 'past', arguments: '{}', status: 'completed' }], tool_choice: { type: 'function', namespace: 'payments', name: 'missing' } },
+          { input: [{ type: 'function_call', namespace: 'payments', name: 'missing', call_id: 'past', arguments: '{}', status: 'completed' }], tool_choice: { type: 'allowed_tools', mode: 'required', tools: [{ type: 'function', namespace: 'payments', name: 'missing' }] } },
           { tool_choice: { type: 'allowed_tools', mode: 'required', tools: [] } },
           { tool_choice: { type: 'allowed_tools', mode: 'auto', tools: null } },
           { tool_choice: { type: 'allowed_tools', mode: 'future', tools: [{ type: 'function', namespace: 'payments', name: 'read' }] } },
@@ -238,7 +239,7 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
 
 for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
   for (const topLevel of [false, true]) {
-    test(`HTTP ${target} maps search-loaded history and namespace subsets once (top-level declarations ${topLevel})`, async () => {
+    test(`HTTP ${target} combines declaration carriers, history and namespace subsets (top-level declarations ${topLevel})`, async () => {
       const { apiKey } = await setup(target);
       const tool = (name: string) => ({ type: 'namespace', name: 'files', description: 'File policy.', tools: [{ type: 'function', name, parameters: { type: 'object' } }] });
       const wire: WireRequest[] = [];
@@ -255,6 +256,7 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
             ...(topLevel ? { tools: [tool('read')] } : {}),
             input: [
               { type: 'tool_search_output', tools: [tool('write')] },
+              { type: 'additional_tools', role: 'developer', tools: [tool('inspect')] },
               { type: 'function_call', namespace: 'files', name: 'write', call_id: 'past', arguments: '{}', status: 'completed' },
               { type: 'function_call_output', call_id: 'past', output: 'done' },
             ],
@@ -267,7 +269,7 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
         await flushBackground();
       });
       assertEquals(wire.length, 1, 'the final provider serializer must run');
-      assertEquals(wire[0].tools?.map(tool => tool.function?.name ?? tool.name), [...(topLevel ? ['files_read'] : []), 'files_write']);
+      assertEquals(wire[0].tools?.map(tool => tool.function?.name ?? tool.name), [...(topLevel ? ['files_read'] : []), 'files_write', 'files_inspect']);
       assert(JSON.stringify(wire[0].messages).includes('"name":"files_write"'), 'replay must reference the same declaration alias');
     });
   }

@@ -4213,7 +4213,7 @@ test('tool_choice "auto" stays "auto" — no demotion when never forced', async 
   assertEquals(seenToolChoices[1], 'auto');
 });
 
-test('forced namespaced client tool choice is not mistaken for the hosted shim function', async () => {
+test.each([false, true])('forced namespaced client tool choice is not mistaken for the hosted shim function (declared %s)', async declared => {
   const { backend } = makeStubDeps();
   const choice = { type: 'function' as const, namespace: 'client', name: SHIM_TOOL_NAME };
   const inv = makeInvocation({
@@ -4221,10 +4221,10 @@ test('forced namespaced client tool choice is not mistaken for the hosted shim f
       tool_choice: choice,
       tools: [
         { type: 'web_search' },
-        {
+        ...(declared ? [{
           type: 'namespace', name: 'client', description: 'Client tools',
           tools: [{ type: 'function', name: SHIM_TOOL_NAME, parameters: { type: 'object' } }],
-        },
+        } satisfies OpenAIResponsesTool] : []),
       ],
     },
   });
@@ -6577,20 +6577,6 @@ test('native helper injection allocates past namespace children while retaining 
   assertEquals(backend.calls.length, 1);
   assertEquals(script.callCount(), 2);
   assertEquals(findResponseCompleted(frames).response.status, 'completed');
-});
-
-test('namespaced forced choices survive helper iterations without demotion', async () => {
-  makeStubDeps();
-  const choice = { type: 'function', name: SHIM_TOOL_NAME, namespace: 'client' } as const;
-  const inv = makeInvocation({ payload: { tool_choice: choice } });
-  const script = scriptedRun([fcTurn(0, 'hosted', `${SHIM_TOOL_NAME}_2`, '{"search_query":[{"q":"hosted"}]}'), messageTurn('done')]);
-  const choices: unknown[] = [];
-  await runShimAndDrain(withOpenAIResponsesWebSearchShim, inv, makeGatewayCtx(), async () => {
-    choices.push(inv.payload.tool_choice);
-    return await script.run();
-  });
-  assertEquals(script.callCount(), 2);
-  assertEquals(choices, [choice, choice]);
 });
 
 for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {

@@ -121,6 +121,19 @@ for (const kind of ['function', 'custom'] as const) {
   });
 }
 
+test.each(['.', '__'])('preserves literal function history beside a namespaced custom tool (%s)', async separator => {
+  const name = `files${separator}read`;
+  const source: OpenAIResponsesRequestPayload = {
+    model: 'm', tools: [{ type: 'namespace', name: 'files', description: '', tools: [{ type: 'custom', name: 'read' }] }],
+    input: [{ type: 'function_call', name, call_id: 'old', arguments: '{}', status: 'completed' }],
+  };
+  expect(chatRequest(source).target.messages[0].tool_calls?.[0].function.name).toBe(name);
+  expect((await messagesRequest(source)).target.messages[0].content).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'tool_use', name })]));
+  source.tool_choice = { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'custom', name }] };
+  expect(() => chatRequest(source)).toThrow('allowed_tools');
+  await expect(messagesRequest(source)).rejects.toThrow('allowed_tools');
+});
+
 test.each(['function', 'custom'] as const)('rejects ambiguous qualified namespace identities with a %s child on both targets', async kind => {
   const tools: OpenAIResponsesRequestPayload['tools'] = [
     { type: 'namespace', name: 'x.y', description: '', tools: [{ type: 'function', name: 'f' }] },

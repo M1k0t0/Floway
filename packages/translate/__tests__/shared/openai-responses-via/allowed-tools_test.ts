@@ -40,12 +40,6 @@ for (const target of ['chat', 'messages'] as const) {
     assertEquals(result.namespaceToolNames.targetToSource.size, 0);
   });
 
-  test(`${target} request rejects an allowed subset containing same-name callable kinds`, async () => {
-    const payload = source({ type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: 'read' }, { type: 'custom', name: 'read' }] });
-    payload.tools!.push({ type: 'custom', name: 'read' });
-    await assertRejects(() => build(payload), TranslatorInputError, "distinct allowed_tools callable kinds sharing 'read'");
-  });
-
   for (const history of ['additional_tools', 'tool_search_output'] as const) {
     test(`${target} request rejects flat function/custom collisions from ${history} before converting calls`, async () => {
       const custom: OpenAIResponsesTool = { type: 'custom', name: 'web_search' };
@@ -91,6 +85,7 @@ for (const target of ['chat', 'messages'] as const) {
     ['unknown mode', { type: 'allowed_tools', mode: 'future', tools: [{ type: 'function', name: 'read' }] }],
     ['malformed tools array', { type: 'allowed_tools', mode: 'auto', tools: null }],
     ['malformed selector', { type: 'allowed_tools', mode: 'auto', tools: [null] }],
+    ['colliding callable kinds', { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: 'read' }, { type: 'custom', name: 'read' }] }],
   ] as const) {
     test(`${target} request typed-rejects ${label} instead of widening allowed_tools`, async () => {
       const payload = source(choice as unknown as OpenAIResponsesToolChoice);

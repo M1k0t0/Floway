@@ -216,13 +216,6 @@ test('callable projection restores lifecycle-appropriate function status from cu
   assertEquals(statuses, ['in_progress', 'in_progress', 'completed', 'completed']);
 });
 
-test('callable projection rejects mixed kinds and ambiguous qualified namespace identities', () => {
-  const request: CanonicalOpenAIResponsesPayload = { model: 'm', input: [], tools: [{ type: 'namespace', name: 'files', description: '', tools: [functionTool('read')] }] };
-  assertThrows(() => flattenNamespaceTools({ ...request, tools: [{ type: 'namespace', name: 'files', description: '', tools: [functionTool('read'), { type: 'custom', name: 'read' }] }] }), TranslatorInputError, "ambiguous namespace tool 'files.read'");
-  assertThrows(() => flattenNamespaceTools({ ...request, input: [{ type: 'custom_tool_call', namespace: 'files', name: 'read', call_id: 'past', input: 'patch' }] }), TranslatorInputError, "ambiguous namespace tool 'files.read'");
-  assertThrows(() => flattenNamespaceTools({ ...request, tools: [{ type: 'namespace', name: 'a.b', description: '', tools: [functionTool('c')] }, { type: 'namespace', name: 'a', description: '', tools: [functionTool('b.c')] }], tool_choice: { type: 'function', name: 'a.b.c' } }), TranslatorInputError, "ambiguous namespace tool 'a.b.c'");
-});
-
 test('callable projection retains parent and child descriptions for translated targets', () => {
   const request: CanonicalOpenAIResponsesPayload = {
     model: 'm', input: [], tools: [
@@ -235,12 +228,6 @@ test('callable projection retains parent and child descriptions for translated t
   assertEquals(call.payload.tools?.map(tool => 'description' in tool ? tool.description : undefined), ['Read-only access. Never modify files.\n\nRead a file.', 'Read-only access. Never modify files.', 'Child-only description.']);
   assertEquals(request, original);
 });
-
-for (const tools of [null, [null], [{ type: 'function', name: 123 }]]) {
-  test(`callable projection uses typed input errors for malformed translated targets namespace children ${JSON.stringify(tools)}`, () => {
-    assertThrows(() => flattenNamespaceTools({ model: 'm', input: [], tools: [{ type: 'namespace', name: 'invalid', description: '', tools }] } as unknown as CanonicalOpenAIResponsesPayload), TranslatorInputError, 'Cannot flatten');
-  });
-}
 
 test('callable projection projects Standard carriers before namespace allocation without mutating history', async () => {
   const developer = { type: 'message' as const, role: 'developer' as const, content: 'Keep this ordinary developer instruction.' };
