@@ -3475,27 +3475,27 @@ for (const [source, item] of [
     tools: [{ type: 'custom', name: SHIM_TOOL_NAME }],
   }],
 ] as const) {
-  test(`hosted function rejects an ambiguous flat client tool from historical ${source}`, async () => {
-    makeStubDeps();
+  test(`hosted function reserves a distinct alias beside a flat client tool from historical ${source}`, async () => {
+    const { backend } = makeStubDeps();
     const inv = makeInvocation({
       payload: {
         tools: [{ type: 'web_search' }],
         input: [{ type: 'message', role: 'user', content: 'Search.' }, item] as OpenAIResponsesInputItem[],
       },
     });
-    const result = await withOpenAIResponsesWebSearchShim(inv, makeGatewayCtx(), async () => {
-      throw new Error('Ambiguous tool identity reached upstream');
-    });
-
-    assertEquals(result.type, 'api-error');
-    if (result.type !== 'api-error') throw new Error('Expected a client error');
-    assertEquals(result.status, 400);
-    assert(new TextDecoder().decode(result.body).includes(`Historical client callable '${SHIM_TOOL_NAME}' conflicts`));
-    assertEquals(inv.payload.tools, [{ type: 'web_search' }]);
+    const script = scriptedRun([messageTurn('done')]);
+    const { result } = await runShimAndDrain(withOpenAIResponsesWebSearchShim, inv, makeGatewayCtx(), script.run);
+    assertEquals(result.type, 'events');
+    assertEquals(script.callCount(), 1);
+    const injected = inv.payload.tools?.[0];
+    assert(injected?.type === 'function');
+    assertEquals(injected.name, `${SHIM_TOOL_NAME}_2`);
+    assertEquals(inv.payload.input[1], item);
+    assertEquals(backend.calls, []);
   });
 }
 
-test('a historical namespace child may share the hosted bare function name', async () => {
+test('a historical namespace child keeps its identity beside an aliased hosted function', async () => {
   makeStubDeps();
   const inv = makeInvocation({
     payload: {
@@ -3511,12 +3511,14 @@ test('a historical namespace child may share the hosted bare function name', asy
       ],
     },
   });
+  const history = structuredClone(inv.payload.input);
   const script = scriptedRun([messageTurn('done')]);
   const { result } = await runShimAndDrain(withOpenAIResponsesWebSearchShim, inv, makeGatewayCtx(), script.run);
   assertEquals(result.type, 'events');
   const injected = inv.payload.tools?.[0];
   assert(injected?.type === 'function');
-  assertEquals(injected.name, SHIM_TOOL_NAME);
+  assertEquals(injected.name, `${SHIM_TOOL_NAME}_2`);
+  assertEquals(inv.payload.input, history);
 });
 
 // ── 0-event safety bail ───────────────────────────────────────────────
@@ -4212,7 +4214,7 @@ test('tool_choice "auto" stays "auto" — no demotion when never forced', async 
 });
 
 test('forced namespaced client tool choice is not mistaken for the hosted shim function', async () => {
-  makeStubDeps();
+  const { backend } = makeStubDeps();
   const choice = { type: 'function' as const, namespace: 'client', name: SHIM_TOOL_NAME };
   const inv = makeInvocation({
     payload: {
@@ -4227,8 +4229,14 @@ test('forced namespaced client tool choice is not mistaken for the hosted shim f
     },
   });
   const seenToolChoices: unknown[] = [];
-  const script = scriptedRun([searchCallTurn(0, 'call_search', 'q1'), messageTurn('done')]);
+  const script = scriptedRun([
+    fcTurn(0, 'call_search', `${SHIM_TOOL_NAME}_2`, JSON.stringify({ search_query: [{ q: 'q1' }] })),
+    messageTurn('done'),
+  ]);
   const run = async () => {
+    const injected = inv.payload.tools?.[0];
+    assert(injected?.type === 'function');
+    assertEquals(injected.name, `${SHIM_TOOL_NAME}_2`);
     seenToolChoices.push(inv.payload.tool_choice);
     return await script.run();
   };
@@ -4236,6 +4244,7 @@ test('forced namespaced client tool choice is not mistaken for the hosted shim f
   await runShimAndDrain(withOpenAIResponsesWebSearchShim, inv, makeGatewayCtx(), run);
 
   assertEquals(seenToolChoices, [choice, choice]);
+  assertEquals(backend.calls.length, 1);
 });
 
 test('cap-exceeded does NOT set tool_choice="none" — the cap snippet alone nudges the model toward other tools', async () => {
@@ -6473,7 +6482,6 @@ for (const namespace of [undefined, '', 'functions', 'client']) {
 }
 
 test.each([
-  { namespace: 'client' },
   { name: 'other' },
   { type: 'custom_tool_call' as const, input: '{}' },
   { call_id: 'other' },
