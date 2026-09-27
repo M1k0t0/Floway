@@ -35,7 +35,7 @@ export const flattenNamespaceTools = (payload: CanonicalOpenAIResponsesPayload):
   const reserved = new Set(flatNames);
   const names: NamespaceToolNames = {
     sourceToTarget: new Map(), targetToSource: new Map(),
-    sourceTools: payload.tools, sourceToolChoice: payload.tool_choice,
+    sourceTools: undefined, sourceToolChoice: undefined,
     toolsChanged: false, toolChoiceChanged: false,
   };
   const byNamespace = new Map<string, Array<{ type: 'function' | 'custom'; name: string }>>();
@@ -127,8 +127,10 @@ export const flattenNamespaceTools = (payload: CanonicalOpenAIResponsesPayload):
       if (choice.tools.length === original.tools.length && choice.tools.every((tool, index) => tool === original.tools[index])) choice = original;
     } else choice = selector(choice);
   }
-  names.toolsChanged = inventories.length > 1 || payload.tools?.some(tool => tool.type === 'namespace') === true || tools.some((tool, index) => tool !== payload.tools?.[index]);
+  names.toolsChanged = inventories.length > 1 || payload.tools?.some(tool => tool.type === 'namespace') === true;
   names.toolChoiceChanged = choice !== payload.tool_choice;
+  names.sourceTools = names.toolsChanged ? payload.tools : undefined;
+  names.sourceToolChoice = names.toolChoiceChanged ? payload.tool_choice : undefined;
   return { payload: { ...payload, input, ...(payload.tools == null && inventories.length === 1 ? {} : { tools }), ...(choice === undefined ? {} : { tool_choice: choice }) }, names };
 };
 

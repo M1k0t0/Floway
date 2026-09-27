@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 
 import { flattenNamespaceTools, restoreNamespaceEvents } from '../../../src/shared/openai-responses-via/namespace-tools.ts';
 import { doneFrame, eventFrame, type ProtocolFrame } from '@floway-dev/protocols/common';
@@ -162,12 +162,15 @@ test('callable restoration retains only echo fields, not the source request or i
   expect(reachable.has(request.input)).toBe(false);
 });
 
-test.each(['forced', 'allowed_tools'] as const)('unchanged flat %s choices and response frames keep their references', async mode => {
+test.each(['forced', 'allowed_tools'] as const)('unchanged flat %s choices retain no echo sources and preserve response frames', async mode => {
   const selector = { type: 'function' as const, name: 'read' };
-  const request: CanonicalOpenAIResponsesPayload = { model: 'm', input: [], tools: [functionTool('read')], tool_choice: mode === 'forced' ? selector : { type: 'allowed_tools', mode: 'auto', tools: [selector] } };
+  const request: CanonicalOpenAIResponsesPayload = { model: 'm', input: [], tools: [functionTool('read'), functionTool('write')], tool_choice: mode === 'forced' ? selector : { type: 'allowed_tools', mode: 'auto', tools: [selector] } };
   const { payload, names } = flattenNamespaceTools(request);
   expect(payload.tool_choice).toBe(request.tool_choice);
+  expect(names.toolsChanged).toBe(false);
   expect(names.toolChoiceChanged).toBe(false);
+  expect(names.sourceTools).toBeUndefined();
+  expect(names.sourceToolChoice).toBeUndefined();
   const item = { type: 'function_call' as const, id: 'item', call_id: 'call', name: 'read', arguments: '{}', status: 'completed' as const };
   const source: ProtocolFrame<OpenAIResponsesStreamEvent>[] = [
     eventFrame({ type: 'response.output_item.added', output_index: 0, item }),
@@ -180,4 +183,29 @@ test.each(['forced', 'allowed_tools'] as const)('unchanged flat %s choices and r
   for await (const frame of restoreNamespaceEvents((async function* () { yield* source; })(), names)) restored.push(frame);
   expect(restored).toHaveLength(source.length);
   restored.forEach((frame, index) => expect(frame).toBe(source[index]));
+});
+
+test('callable projection does not rescan unchanged flattened tool references', () => {
+  const tools = Array.from({ length: 2000 }, (_, index) => functionTool(`tool_${index}`));
+  const scans: Array<{ array: unknown[]; visits: number }> = [];
+  const originalSome = Array.prototype.some;
+  const spy = vi.spyOn(Array.prototype, 'some').mockImplementation(function (this: unknown[], predicate, thisArg) {
+    const scan = { array: this, visits: 0 };
+    scans.push(scan);
+    return originalSome.call(this, (value, index, array) => {
+      scan.visits++;
+      return predicate.call(thisArg, value, index, array);
+    });
+  });
+  const prepared = (() => {
+    try {
+      return flattenNamespaceTools({ model: 'm', input: [], tools });
+    } finally {
+      spy.mockRestore();
+    }
+  })();
+  expect(prepared.payload.tools).toEqual(tools);
+  expect(prepared.payload.tools?.every((tool, index) => tool === tools[index])).toBe(true);
+  expect(scans.some(scan => scan.array === tools && scan.visits === tools.length)).toBe(true);
+  expect(scans.filter(scan => scan.array === prepared.payload.tools).reduce((total, scan) => total + scan.visits, 0)).toBe(0);
 });
