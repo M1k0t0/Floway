@@ -636,7 +636,7 @@ test('buildTargetRequest flattens namespace functions collision-safely and maps 
     },
     {
       name: 'web_run_2',
-      description: 'Access the web.',
+      description: 'Web tools.\n\nAccess the web.',
       input_schema: { type: 'object', properties: { search_query: { type: 'array' } } },
       strict: false,
       cache_control: { type: 'ephemeral' },

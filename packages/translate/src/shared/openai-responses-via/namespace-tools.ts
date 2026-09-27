@@ -66,7 +66,10 @@ export const flattenNamespaceTools = (payload: CanonicalOpenAIResponsesPayload):
         }
         const name = allocate(tool.name, child.name, child.type);
         children.push({ type: child.type, name });
-        tools.push({ ...child, name });
+        tools.push({
+          ...child, name,
+          ...(tool.description ? { description: child.description ? `${tool.description}\n\n${child.description}` : tool.description } : {}),
+        });
       }
     }
   }
