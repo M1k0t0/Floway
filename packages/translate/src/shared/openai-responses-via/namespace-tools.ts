@@ -26,6 +26,7 @@ export const flattenNamespaceTools = (payload: CanonicalOpenAIResponsesPayload):
   const names: NamespaceToolNames = { sourceToTarget: new Map(), targetToSource: new Map() };
   const byNamespace = new Map<string, Array<{ type: 'function' | 'custom'; name: string }>>();
   const kinds = new Map<string, string>();
+  const nextSuffixes = new Map<string, number>();
   const allocate = (namespace: string, name: string, kind: string): string => {
     const key = `${namespace}.${name}`;
     const existing = names.sourceToTarget.get(key);
@@ -38,10 +39,20 @@ export const flattenNamespaceTools = (payload: CanonicalOpenAIResponsesPayload):
     }
     // OpenAI Chat Completions limits function names to 64 ASCII characters.
     // https://github.com/openai/openai-node/blob/61539248cbe04665de68a71e6fd878127ae4db87/src/resources/chat/completions/completions.ts
-    const base = `${namespace}_${name}`.replaceAll(/[^a-zA-Z0-9_-]/g, '_');
-    for (let suffix = 1; suffix <= 1000; suffix++) {
+    // Bound sanitization work even for a long shared namespace.
+    const scope = `${namespace.slice(0, 64)}_`.slice(0, 64);
+    const base = `${scope}${name.slice(0, 64 - scope.length)}`.replaceAll(/[^a-zA-Z0-9_-]/g, '_');
+    for (let suffix = 1; ; suffix++) {
       const ending = suffix === 1 ? '' : `_${suffix}`;
-      const candidate = `${base.slice(0, 64 - ending.length)}${ending}`;
+      const prefix = base.slice(0, 64 - ending.length);
+      if (suffix > 1) {
+        // Share cursors only when both the truncated prefix and suffix width match.
+        const key = `${ending.length}:${prefix}`;
+        const next = nextSuffixes.get(key);
+        if (next !== undefined && next > suffix) { suffix = next - 1; continue; }
+        nextSuffixes.set(key, suffix + 1);
+      }
+      const candidate = `${prefix}${ending}`;
       if (reserved.has(candidate)) continue;
       reserved.add(candidate);
       kinds.set(candidate, kind);
@@ -49,7 +60,6 @@ export const flattenNamespaceTools = (payload: CanonicalOpenAIResponsesPayload):
       names.targetToSource.set(candidate, { namespace, name });
       return candidate;
     }
-    throw new TranslatorInputError(`Cannot allocate a flat tool name for '${key}'.`);
   };
   const tools: OpenAIResponsesTool[] = [];
   for (const inventory of inventories) {
