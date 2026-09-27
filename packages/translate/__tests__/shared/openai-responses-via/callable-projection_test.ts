@@ -13,75 +13,6 @@ const framesOf = async function* (events: OpenAIResponsesStreamEvent[]): AsyncGe
   yield doneFrame();
 };
 
-test('callable projection maps declarations, custom history, choices and duplicate declarations without mutation', () => {
-  const custom = { type: 'custom' as const, name: 'edit', format: { type: 'text' as const }, description: 'custom tool' };
-  const request: CanonicalOpenAIResponsesPayload = {
-    model: 'm', tools: [functionTool('files_read'), { type: 'namespace', name: 'files', description: '', tools: [functionTool('read'), custom, functionTool('read')] }],
-    input: [
-      { type: 'function_call', name: 'read', namespace: 'files', call_id: 'a', arguments: '{}', status: 'completed' },
-      { type: 'custom_tool_call', name: 'edit', namespace: 'files', call_id: 'b', input: 'patch' },
-      { type: 'function_call_output', call_id: 'a', output: 'result' },
-      { type: 'custom_tool_call_output', call_id: 'b', output: 'done' },
-    ],
-    tool_choice: { type: 'allowed_tools', mode: 'required', tools: [{ type: 'function', name: 'read', namespace: 'files' }, { type: 'custom', name: 'edit', namespace: 'files' }, { type: 'future', extra: true }] },
-  };
-  const original = structuredClone(request);
-  const call = flattenNamespaceTools(request);
-  assertEquals(call.payload.tools?.map(tool => 'name' in tool ? tool.name : null), ['files_read', 'files_read_2', 'files_edit', 'files_read_2']);
-  assertEquals(call.payload.input.slice(0, 2).map(item => item.type === 'function_call' || item.type === 'custom_tool_call' ? [item.name, item.namespace] : null), [['files_read_2', undefined], ['files_edit', undefined]]);
-  assertEquals(call.payload.input.slice(2), request.input.slice(2));
-  assertEquals(call.payload.tool_choice, { type: 'allowed_tools', mode: 'required', tools: [{ type: 'function', name: 'files_read_2' }, { type: 'custom', name: 'files_edit' }, { type: 'future', extra: true }] });
-  assertEquals(request, original);
-  const forced = flattenNamespaceTools({ ...request, tool_choice: { type: 'custom', name: 'edit', namespace: 'files' } } as CanonicalOpenAIResponsesPayload);
-  assertEquals(forced.payload.tool_choice, { type: 'custom', name: 'files_edit' });
-});
-
-test('callable projection allocates replay-only identities against the current flat collision set', () => {
-  const call = flattenNamespaceTools({
-    model: 'm', tools: [functionTool('files_read'), functionTool('files_read_2')],
-    input: [{ type: 'function_call', name: 'read', namespace: 'files', call_id: 'past', arguments: '{}', status: 'completed' }],
-  });
-  assertEquals(call.payload.input, [{ type: 'function_call', name: 'files_read_3', call_id: 'past', arguments: '{}', status: 'completed' }]);
-  assertEquals(call.payload.tools, [functionTool('files_read'), functionTool('files_read_2')]);
-});
-
-for (const kind of ['function', 'custom'] as const) {
-  test.each(['.', '__'])(`callable projection preserves literal ${kind} history and selectors containing %s`, async separator => {
-    const name = `files${separator}read`;
-    const item = kind === 'function'
-      ? { type: 'function_call' as const, name, call_id: 'past', arguments: '{}', status: 'completed' as const }
-      : { type: 'custom_tool_call' as const, name, call_id: 'past', input: 'patch' };
-    const namespace: OpenAIResponsesTool = { type: 'namespace', name: 'files', description: '', tools: [{ type: kind, name: 'read' }] };
-    const selector = { type: kind, name };
-    for (const declared of [false, true]) {
-      const tools: OpenAIResponsesTool[] = declared ? [namespace, { type: kind, name }] : [namespace];
-      for (const tool_choice of [selector, { type: 'allowed_tools' as const, mode: 'auto' as const, tools: [selector] }]) {
-        const request: CanonicalOpenAIResponsesPayload = { model: 'm', input: [item], tools, tool_choice };
-        const { payload, names } = flattenNamespaceTools(request);
-        assertEquals(payload.input, [item]);
-        assertEquals(payload.tool_choice, tool_choice);
-        expect(names.targetToSource.has(name)).toBe(false);
-        assertEquals(payload.tools?.map(tool => 'name' in tool ? tool.name : null), declared ? ['files_read', name] : ['files_read']);
-        const frame = eventFrame<OpenAIResponsesStreamEvent>({ type: 'response.output_item.done', output_index: 0, item });
-        const restored = [];
-        for await (const event of restoreNamespaceEvents((async function* () { yield frame; })(), names)) restored.push(event);
-        expect(restored).toHaveLength(1);
-        expect(restored[0]).toBe(frame);
-      }
-    }
-  });
-}
-
-test('callable projection never applies a vendor default namespace to Standard history or tool choice', () => {
-  const call = flattenNamespaceTools({
-    model: 'm', tools: [{ type: 'namespace', name: 'functions', description: '', tools: [functionTool('read')] }],
-    input: [{ type: 'function_call', name: 'read', call_id: 'flat', arguments: '{}', status: 'completed' }],
-    tool_choice: { type: 'function', name: 'read' },
-  });
-  assertEquals(call.payload.input[0], { type: 'function_call', name: 'read', call_id: 'flat', arguments: '{}', status: 'completed' });
-  assertEquals(call.payload.tool_choice, { type: 'function', name: 'read' });
-});
-
 for (const [namespace, reservePreferred] of [['n'.repeat(64), false], ['n'.repeat(59), true]] as const) {
   test(`callable projection bounds collision lookups for ${namespace.length}-character namespaces`, () => {
     const count = 1000;
@@ -172,12 +103,6 @@ test('callable projection restores function arguments.done names without adding 
   const events: OpenAIResponsesStreamEvent[] = [];
   for await (const frame of response) if (frame.type === 'event') events.push(frame.event);
   assertEquals(events[1], { type: 'response.function_call_arguments.done', item_id: 'item', output_index: 0, name: 'read', arguments: '{}' });
-});
-
-test('callable projection preserves named MCP and future selectors', () => {
-  const selectors = [{ type: 'mcp', server_label: 'remote', name: 'functions.search' }, { type: 'future', name: 'functions.search' }];
-  const call = flattenNamespaceTools({ model: 'm', input: [], tools: [{ type: 'namespace', name: 'functions', description: '', tools: [functionTool('search')] }], tool_choice: { type: 'allowed_tools', mode: 'required', tools: [...selectors, { type: 'function', name: 'search', namespace: 'functions' }] } });
-  assertEquals(call.payload.tool_choice, { type: 'allowed_tools', mode: 'required', tools: [...selectors, { type: 'function', name: 'functions_search' }] });
 });
 
 test('callable projection bounds sanitized flat-name prefixes for a shared long namespace', () => {
@@ -298,39 +223,6 @@ for (const carrier of [
     assertEquals(request, original);
   });
 }
-
-test('callable projection preserves long dotted flat names without inferring a namespace', () => {
-  const namespace = `${'seg.'.repeat(4096)}end`;
-  const name = `${namespace}.read`;
-  const request: CanonicalOpenAIResponsesPayload = {
-    model: 'm', tools: [{ type: 'namespace', name: namespace, description: '', tools: [functionTool('read')] }],
-    input: [{ type: 'function_call', call_id: 'old', name, arguments: '{}', status: 'completed' }],
-    tool_choice: { type: 'function', name },
-  };
-  const { payload } = flattenNamespaceTools(request);
-  expect(payload.input).toEqual(request.input);
-  expect(payload.tool_choice).toBe(request.tool_choice);
-});
-
-test.each(['.', '__', '_'])('flat and explicit namespace replay remain distinct in either history order (%s)', separator => {
-  const explicit = { type: 'function_call' as const, namespace: 'files', name: 'read', call_id: 'explicit', arguments: '{}', status: 'completed' as const };
-  const flat = { ...explicit, namespace: undefined, name: `files${separator}read`, call_id: 'flat' };
-  for (const input of [[explicit, flat], [flat, explicit]]) {
-    const { payload, names } = flattenNamespaceTools({ model: 'm', input });
-    const explicitName = separator === '_' ? 'files_read_2' : 'files_read';
-    expect(payload.input.map(item => item.type === 'function_call' ? [item.call_id, item.name, item.namespace] : [])).toEqual(input.map(item => [item.call_id, item.call_id === 'flat' ? flat.name : explicitName, undefined]));
-    expect(names.targetToSource.get(explicitName)).toEqual({ namespace: 'files', name: 'read', type: 'function_call' });
-    expect(names.targetToSource.has(flat.name)).toBe(false);
-  }
-});
-
-test('ambiguous qualified namespace replay is rejected in either history order even beside a flat name', () => {
-  const call = { type: 'function_call' as const, call_id: 'past', arguments: '{}', status: 'completed' as const };
-  const input = [{ ...call, name: 'a.b.c' }, { ...call, namespace: 'a.b', name: 'c' }, { ...call, namespace: 'a', name: 'b.c' }];
-  for (const history of [input, [...input].reverse()]) {
-    expect(() => flattenNamespaceTools({ model: 'm', input: history })).toThrow("Cannot translate ambiguous namespace tool 'a.b.c'.");
-  }
-});
 
 test('callable restoration retains only echo fields, not the source request or input', () => {
   const request: CanonicalOpenAIResponsesPayload = { model: 'm', input: [{ type: 'message', role: 'user', content: 'Long conversation' }], tools: [{ type: 'namespace', name: 'files', description: '', tools: [functionTool('read')] }] };

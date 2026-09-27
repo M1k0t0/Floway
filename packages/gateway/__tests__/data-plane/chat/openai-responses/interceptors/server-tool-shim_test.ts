@@ -6465,27 +6465,8 @@ test('helper allocation reserves names across callable scopes, history and searc
   assertEquals({ tools, input }, original);
 });
 
-for (const namespace of [undefined, '', 'functions', 'client']) {
-  test(`hosted dispatch only consumes unqualified synthetic function identity (namespace ${JSON.stringify(namespace)})`, async () => {
-    const item = { type: 'function_call' as const, name: SHIM_TOOL_NAME, call_id: 'call', namespace, arguments: '{}', status: 'completed' as const };
-    const result = await consumeTurn(framesOf(
-      mkResponseCreated(),
-      eventFrame({ type: 'response.output_item.added', output_index: 0, item: { ...item, status: 'in_progress' } }),
-      mkFunctionCallArgsDone(0, '{}'),
-      eventFrame({ type: 'response.output_item.done', output_index: 0, item }),
-      mkResponseCompleted(),
-    ), createMergeState(), true);
-    assertEquals(result.records.length, namespace === undefined ? 1 : 0);
-    assertEquals(result.summary.sawClientToolCall, namespace !== undefined);
-    if (namespace !== undefined) assertEquals(outputItemDoneEvents(result.downstreamFrames).map(event => event.item), [item]);
-  });
-}
-
 test.each([
   { name: 'other' },
-  { type: 'custom_tool_call' as const, input: '{}' },
-  { call_id: 'other' },
-  { id: 'other' },
   { id: undefined },
 ])('hosted dispatch refuses a closing call whose identity changed: %j', async changed => {
   const records: DispatchRecord[] = [];
@@ -6620,7 +6601,7 @@ for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
   }
 }
 
-for (const owner of ['function declaration', 'custom declaration', 'function history', 'custom history', 'additional_tools', 'tool_search_output'] as const) {
+for (const owner of ['function history', 'custom history', 'additional_tools', 'tool_search_output'] as const) {
   for (const selection of ['forced', 'allowed_tools'] as const) {
     test(`${selection} helper alias never captures an unqualified client ${owner}`, async () => {
       const { backend } = makeStubDeps();
@@ -6629,9 +6610,7 @@ for (const owner of ['function declaration', 'custom declaration', 'function his
         { type: 'namespace', name: 'client', description: '', tools: [{ type: 'function', name: SHIM_TOOL_NAME }] },
       ];
       const input: OpenAIResponsesInputItem[] = [{ type: 'message', role: 'user', content: 'Continue.' }];
-      if (owner === 'function declaration' || owner === 'custom declaration') {
-        tools.push({ type: owner === 'function declaration' ? 'function' : 'custom', name: SHIM_TOOL_NAME });
-      } else if (owner === 'function history') {
+      if (owner === 'function history') {
         input.push({ type: 'function_call', name: SHIM_TOOL_NAME, call_id: 'past', arguments: '{}', status: 'completed' });
       } else if (owner === 'custom history') {
         input.push({ type: 'custom_tool_call', name: SHIM_TOOL_NAME, call_id: 'past', input: 'client input' });

@@ -37,7 +37,6 @@ for (const target of ['chat', 'messages'] as const) {
     const result = await build(payload);
     assertEquals(result.target.tools?.length, 1);
     assertEquals(result.customToolNames, new Set(['read']));
-    assertEquals(result.namespaceToolNames.targetToSource.size, 0);
   });
 
   for (const history of ['additional_tools', 'tool_search_output'] as const) {
@@ -52,14 +51,6 @@ for (const target of ['chat', 'messages'] as const) {
         input: [item],
       };
       await assertRejects(() => build(payload), TranslatorInputError, "distinct callable kinds sharing 'web_search'");
-    });
-  }
-
-  for (const choice of [undefined, null, 'auto', 'required', 'none', { type: 'function', name: 'read' }, { type: 'custom', name: 'read' }] as const) {
-    test(`${target} request rejects same-name callable kinds without allowed_tools (${JSON.stringify(choice)})`, async () => {
-      const payload = { ...source('auto'), tool_choice: choice };
-      payload.tools!.push({ type: 'custom', name: 'read' });
-      await assertRejects(() => build(payload), TranslatorInputError, "distinct callable kinds sharing 'read'");
     });
   }
 

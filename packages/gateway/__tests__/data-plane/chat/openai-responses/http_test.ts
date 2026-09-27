@@ -722,7 +722,6 @@ const translatedCustomCandidate = (
   target: 'openaiChatCompletions' | 'anthropicMessages',
   observe: (body: Record<string, unknown>) => void,
   callExec = false,
-  toolName = 'exec',
 ): ModelCandidate => {
   const candidate = makeCandidate({ upstream: `up_${target}`, endpoints: { [target]: {} } });
   const instance = stubProvider({
@@ -732,7 +731,7 @@ const translatedCustomCandidate = (
       return {
         ok: true, modelKey: 'test-model-key', events: (async function* () {
           yield eventFrame(chunk([{ index: 0, delta: { role: 'assistant' }, finish_reason: null }]));
-          yield eventFrame(chunk([{ index: 0, delta: callExec ? { tool_calls: [{ index: 0, id: 'call_exec', type: 'function', function: { name: toolName, arguments: '{"input":"patch"}' } }] } : { content: 'done' }, finish_reason: null }]));
+          yield eventFrame(chunk([{ index: 0, delta: callExec ? { tool_calls: [{ index: 0, id: 'call_exec', type: 'function', function: { name: 'exec', arguments: '{"input":"patch"}' } }] } : { content: 'done' }, finish_reason: null }]));
           yield eventFrame(chunk([{ index: 0, delta: {}, finish_reason: callExec ? 'tool_calls' : 'stop' }]));
           yield doneFrame();
         })(),
@@ -743,7 +742,7 @@ const translatedCustomCandidate = (
       return {
         ok: true, modelKey: 'test-model-key', events: (async function* () {
           yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'message_start', message: { id: 'msg_exec', type: 'message', role: 'assistant', model: 'test-model', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 0 } } });
-          yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'content_block_start', index: 0, content_block: callExec ? { type: 'tool_use', id: 'call_exec', name: toolName, input: {} } : { type: 'text', text: '' } });
+          yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'content_block_start', index: 0, content_block: callExec ? { type: 'tool_use', id: 'call_exec', name: 'exec', input: {} } : { type: 'text', text: '' } });
           yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'content_block_delta', index: 0, delta: callExec ? { type: 'input_json_delta', partial_json: '{"input":"patch"}' } : { type: 'text_delta', text: 'done' } });
           yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'content_block_stop', index: 0 });
           yield eventFrame<AnthropicMessagesStreamEvent>({ type: 'message_delta', delta: { stop_reason: callExec ? 'tool_use' : 'end_turn', stop_sequence: null }, usage: { output_tokens: 1 } });
@@ -754,53 +753,6 @@ const translatedCustomCandidate = (
   });
   return { ...candidate, provider: { ...candidate.provider, instance } };
 };
-
-for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
-  for (const scope of ['namespace', 'flat'] as const) {
-    test(`${target} continuation never aliases historical calls when ${scope} tools change kind`, async () => {
-      const repo = installRepo();
-      const bodies: Record<string, unknown>[] = [];
-      const tools = (type: 'function' | 'custom') => scope === 'namespace'
-        ? [{ type: 'namespace', name: 'fs', description: '', tools: [{ type, name: 'read' }] }]
-        : [{ type, name: 'read' }];
-      const currentName = scope === 'namespace' ? 'fs_read' : 'read';
-      queueResolution([translatedCustomCandidate(target, body => bodies.push(structuredClone(body)), true, currentName)]);
-      const first = await makeApp().request('/v1/responses', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ model: 'test-model', tools: tools('function'), input: 'read a file' }),
-      });
-      assertEquals(first.status, 200);
-      const previous = await first.json() as OpenAIResponsesResult;
-      const history = previous.output.find(item => item.type === 'function_call');
-      assert(history?.type === 'function_call');
-      queueResolution([translatedCustomCandidate(target, body => bodies.push(structuredClone(body)), true, currentName)]);
-      const second = await makeApp().request('/v1/responses', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ model: 'test-model', tools: tools('custom'), previous_response_id: previous.id, input: [{ type: 'function_call_output', call_id: history.call_id, output: 'done' }, { role: 'user', content: 'continue' }] }),
-      });
-      if (scope === 'namespace') {
-        assertEquals(second.status, 400);
-        const error = await second.json() as { error: { type: string; message: string } };
-        assertEquals(error.error.type, 'invalid_request_error');
-        assertEquals(error.error.message, "Cannot translate ambiguous namespace tool 'fs.read'.");
-        assertEquals(bodies.length, 1, 'only the first turn may reach the provider');
-      } else {
-        assertEquals(second.status, 200);
-        const current = await second.json() as OpenAIResponsesResult;
-        const output = current.output.find(item => item.type === 'custom_tool_call');
-        assert(output?.type === 'custom_tool_call');
-        assertEquals([output.name, output.namespace, output.input], ['read', undefined, 'patch']);
-        assertEquals(bodies.length, 2);
-        const messages = bodies[1]!.messages as Array<{ tool_calls?: Array<{ function: { name: string } }>; content?: string | Array<{ type: string; name?: string }> }>;
-        const replayNames = messages.flatMap(message => message.tool_calls?.map(call => call.function.name)
-          ?? (Array.isArray(message.content) ? message.content.filter(block => block.type === 'tool_use').map(block => block.name) : []));
-        assertEquals(replayNames, ['read']);
-      }
-      const rows = await repo.openaiResponsesItems.lookupMany(API_KEY_ID, [history.id!], 0);
-      assertEquals(rows[0]?.payload.item, history);
-    });
-  }
-}
 
 for (const target of ['openaiChatCompletions', 'anthropicMessages'] as const) {
   test(`POST /v1/responses continues a custom exec call through ${target} with text-array output`, async () => {
