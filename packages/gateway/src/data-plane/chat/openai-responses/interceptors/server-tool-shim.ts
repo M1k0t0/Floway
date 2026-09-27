@@ -1038,6 +1038,11 @@ async function* runMultiTurnLoop(args: {
       }
       ctx.payload = nextPayload;
 
+      // OpenAI's allowed_tools mode "required" requires at least one listed tool;
+      // "auto" also permits a message.
+      // https://developers.openai.com/api/reference/resources/responses/methods/create
+      // After a server tool runs, Floway relaxes the forced choice for this internal
+      // continuation so the model can answer, keeping any allowed_tools subset.
       if (demoteForcedServerToolChoiceAfterFirstTurn) {
         const choice = ctx.payload.tool_choice;
         ctx.payload = {
