@@ -119,7 +119,7 @@ export const flattenNamespaceTools = (payload: CanonicalOpenAIResponsesPayload):
     return [{ ...rest, name: allocate(namespace, item.name, item.type === 'function_call' ? 'function' : 'custom') }];
   });
   const selector = (choice: Exclude<OpenAIResponsesToolChoice, string | null | undefined>): Exclude<OpenAIResponsesToolChoice, string | null | undefined> => {
-    if (!isCallableTool(choice)) return choice;
+    if ((choice.type !== 'function' && choice.type !== 'custom') || typeof choice.name !== 'string') return choice;
     const namespace = choice.namespace;
     if (namespace !== undefined && typeof namespace !== 'string') throw new TranslatorInputError('Cannot flatten a malformed OpenAI Responses callable identity');
     const key = namespace === undefined ? choice.name : `${namespace}.${choice.name}`;
