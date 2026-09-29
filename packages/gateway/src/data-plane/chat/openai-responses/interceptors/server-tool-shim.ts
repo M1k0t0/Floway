@@ -246,6 +246,35 @@ const rewriteHostedToolChoice = (
   return toolChoice;
 };
 
+const hostedToolChoiceToRestore = (
+  choice: OpenAIResponsesToolChoice | null | undefined,
+  hosted: ServerToolHostedDispatch | undefined,
+  toolName: string,
+): Exclude<OpenAIResponsesToolChoice, string> | undefined => {
+  if (hosted === undefined || typeof choice !== 'object' || choice === null) return undefined;
+  if (hosted.hostedTypes.includes(choice.type)) return choice;
+  if (choice.type !== 'allowed_tools' || !Array.isArray(choice.tools)) return undefined;
+
+  const selectsHostedTool = choice.tools.some(selector => {
+    if (typeof selector?.type !== 'string' || selector.namespace !== undefined) return false;
+    if (hosted.hostedTypes.includes(selector.type)) return true;
+    return choice.mode === 'required' && selector.type === 'function' && selector.name === toolName;
+  });
+  return selectsHostedTool ? choice : undefined;
+};
+
+const isForcedServerToolChoice = (
+  choice: OpenAIResponsesToolChoice | null | undefined,
+  dispatchers: ReadonlyMap<string, ServerToolDispatcher>,
+): boolean => {
+  if (choice === 'required') return true;
+  if (typeof choice !== 'object' || choice === null) return false;
+  if (choice.type === 'function') return choice.namespace === undefined && dispatchers.has(choice.name);
+  if (choice.type !== 'allowed_tools' || choice.mode !== 'required' || !Array.isArray(choice.tools)) return false;
+  return choice.tools.some(selector => selector?.type === 'function' && selector.namespace === undefined
+    && typeof selector.name === 'string' && dispatchers.has(selector.name));
+};
+
 // The shim demotes forced choice to `auto` after the first turn, so synthesized
 // echoes restore the captured client shape rather than the final upstream echo.
 const restoreEchoedToolChoice = (
@@ -307,11 +336,14 @@ export const resolveServerToolName = (
   if (typeof choice === 'object' && choice !== null) {
     const selectors = choice.type === 'allowed_tools' ? (Array.isArray(choice.tools) ? choice.tools : []) : [choice];
     for (const selector of selectors) {
-      // An unqualified forced choice may explicitly address the injected helper.
-      // Declared and historical client functions are already reserved above.
       if (typeof selector === 'object' && selector !== null
-        && (selector.type === 'function' || selector.type === 'custom') && typeof selector.name === 'string'
-        && (selector.type === 'custom' || ('namespace' in selector && selector.namespace !== undefined))) taken.add(selector.name);
+        && (selector.type === 'function' || selector.type === 'custom') && typeof selector.name === 'string') {
+        // Only the canonical unqualified function name can select this helper.
+        // Other selectors must not acquire it through an allocated alias.
+        const selectsHelper = selector.type === 'function' && selector.name === baseName
+          && (!('namespace' in selector) || selector.namespace === undefined);
+        if (!selectsHelper) taken.add(selector.name);
+      }
     }
   }
   if (!taken.has(baseName)) return baseName;
@@ -1125,16 +1157,7 @@ export const withOpenAIResponsesServerToolShim = (
       canonicalHostedTool = rewrite.canonicalHostedTool;
       ctx.payload = { ...ctx.payload, tools: rewrite.rewritten };
     }
-    const originalToolChoice = helperFunctionChoice ?? (hosted !== undefined
-      && typeof choice === 'object'
-      && choice !== null
-      && (hosted.hostedTypes.includes(choice.type)
-        || (choice.type === 'allowed_tools' && Array.isArray(choice.tools)
-          && choice.tools.some(selector => typeof selector?.type === 'string' && selector.namespace === undefined
-            && (hosted.hostedTypes.includes(selector.type)
-              || (choice.mode === 'required' && selector.type === 'function' && selector.name === toolName)))))
-      ? choice
-      : undefined);
+    const originalToolChoice = helperFunctionChoice ?? hostedToolChoiceToRestore(choice, hosted, toolName);
     if (helperFunctionChoice !== undefined) {
       ctx.payload = { ...ctx.payload, tool_choice: rewrittenHelperChoice };
     }
@@ -1164,17 +1187,7 @@ export const withOpenAIResponsesServerToolShim = (
     iterationCount: 1,
     remainingToolCalls: typeof ctx.payload.max_tool_calls === 'number' ? ctx.payload.max_tool_calls : undefined,
   };
-  const finalToolChoice = ctx.payload.tool_choice;
-  const demoteForcedServerToolChoiceAfterFirstTurn = finalToolChoice === 'required'
-    || (typeof finalToolChoice === 'object'
-      && finalToolChoice !== null
-      && finalToolChoice.type === 'function'
-      && finalToolChoice.namespace === undefined
-      && dispatchers.has(finalToolChoice.name))
-    || (typeof finalToolChoice === 'object' && finalToolChoice?.type === 'allowed_tools'
-      && finalToolChoice.mode === 'required' && Array.isArray(finalToolChoice.tools)
-      && finalToolChoice.tools.some(selector => selector?.type === 'function' && selector.namespace === undefined
-        && typeof selector.name === 'string' && dispatchers.has(selector.name)));
+  const demoteForcedServerToolChoiceAfterFirstTurn = isForcedServerToolChoice(ctx.payload.tool_choice, dispatchers);
 
   const merge = createMergeState();
   const firstResult = await run();

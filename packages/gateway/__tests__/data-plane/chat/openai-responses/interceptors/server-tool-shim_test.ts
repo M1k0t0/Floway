@@ -6465,6 +6465,37 @@ test('helper allocation reserves names across callable scopes, history and searc
   assertEquals({ tools, input }, original);
 });
 
+const undeclaredSelectorChoices: { name: string; choice: OpenAIResponsesToolChoice }[] = [
+  { name: 'forced', choice: { type: 'function', name: `${SHIM_TOOL_NAME}_2` } },
+  { name: 'allowed auto', choice: { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: `${SHIM_TOOL_NAME}_2` }] } },
+  { name: 'allowed required', choice: { type: 'allowed_tools', mode: 'required', tools: [{ type: 'function', name: `${SHIM_TOOL_NAME}_2` }] } },
+];
+
+test.each(undeclaredSelectorChoices)('helper allocation does not capture an undeclared $name selector', async ({ choice }) => {
+  const { backend } = makeStubDeps();
+  const tools: OpenAIResponsesTool[] = [
+    { type: 'web_search' },
+    { type: 'namespace', name: 'aux', description: '', tools: [{ type: 'function', name: SHIM_TOOL_NAME }] },
+  ];
+  const original = structuredClone({ tools, choice });
+  const inv = makeInvocation({
+    targetApi: 'openaiResponses',
+    enabledFlags: new Set(['openai-responses-web-search-shim']),
+    payload: { tools, tool_choice: choice },
+  });
+  const script = scriptedRun([messageTurn('done')]);
+  await runShimAndDrain(withOpenAIResponsesWebSearchShim, inv, makeGatewayCtx(), async () => {
+    const helper = inv.payload.tools?.[0];
+    assert(helper?.type === 'function');
+    assertEquals(helper.name, `${SHIM_TOOL_NAME}_3`);
+    assertEquals(inv.payload.tool_choice, choice);
+    return await script.run();
+  });
+  assertEquals(script.callCount(), 1);
+  assertEquals(backend.calls, []);
+  assertEquals({ tools, choice }, original);
+});
+
 test.each([
   { name: 'other' },
   { id: undefined },
