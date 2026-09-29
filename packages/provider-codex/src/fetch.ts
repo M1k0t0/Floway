@@ -387,7 +387,7 @@ const buildCodexClientMetadata = (identity: CodexRequestIdentity, turnMetadataJs
 interface PreparedCodexResponsesRequest {
   identity: CodexRequestIdentity;
   turnMetadataJson: CodexTurnMetadataJson;
-  lite?: CodexResponsesBody;
+  responsesLite: boolean;
   body: ReplayableBody;
 }
 
@@ -406,14 +406,12 @@ const prepareCodexResponsesRequest = (
       : { requestKind: 'turn' };
   const turnMetadataJson = buildCodexTurnMetadataJson(identity, metadata, clientTurnMetadata);
   const standard = { ...opts.body, client_metadata: clientMetadata };
-  const lite = codexModelUsesResponsesLite(opts.model)
-    ? encodeCodexResponsesLiteRequest(standard, identity.threadId)
-    : undefined;
-  const wire = lite ?? standard;
+  const responsesLite = codexModelUsesResponsesLite(opts.model);
+  const wire = responsesLite ? encodeCodexResponsesLiteRequest(standard, identity.threadId) : standard;
   return {
     identity,
     turnMetadataJson,
-    lite,
+    responsesLite,
     body: jsonRequestBody(action === 'compact'
       ? buildCodexOpenAIResponsesCompactBody(wire, opts.model.id)
       : buildCodexOpenAIResponsesBody(wire, opts.model.id, identity, turnMetadataJson.body)),
@@ -700,7 +698,7 @@ const performStreamingOpenAIResponsesCall = async (
     body: prepared.body,
     identity: prepared.identity,
     turnMetadataJson: prepared.turnMetadataJson.header,
-    responsesLite: prepared.lite !== undefined,
+    responsesLite: prepared.responsesLite,
   }).then(ensureSseContentType);
 
   const result = await streamingProviderCall(
@@ -738,7 +736,7 @@ const performUnaryCompactCall = async (
     body: prepared.body,
     identity: prepared.identity,
     turnMetadataJson: prepared.turnMetadataJson.header,
-    responsesLite: prepared.lite !== undefined,
+    responsesLite: prepared.responsesLite,
   });
 
   const attempt = await retryCodexAccess401(
