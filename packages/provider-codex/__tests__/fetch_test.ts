@@ -316,7 +316,7 @@ describe('Codex private Responses wire selection', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  test.each([true, false])('preserves upstream calls and resource fields through streaming=%s consumption', async stream => {
+  test.each([true, false])('projects moved top-level fields while preserving upstream calls through streaming=%s', async stream => {
     seedFreshAccessToken();
     const wireCall = { type: 'function_call' as const, id: 'fc_1', call_id: 'call_1', name: 'lookup', namespace: 'functions', arguments: '{}', status: 'completed' as const, future: 'retained' };
     const opaque = { type: 'reasoning', id: 'rs_opaque', summary: [], encrypted_content: 'opaque+encrypted==' };
@@ -349,11 +349,11 @@ describe('Codex private Responses wire selection', () => {
       expect(frames[0]).toMatchObject({ type: 'event', event: { item: wireCall } });
       expect(frames[1]).toEqual({ type: 'event', event: future });
       expect(frames[2]).toMatchObject({ type: 'event', event: { item: wireCall } });
-      expect(frames[3]).toMatchObject({ type: 'event', event: { response: wireResponse } });
+      expect(frames[3]).toMatchObject({ type: 'event', event: { response: { ...wireResponse, tools: body.tools, instructions: body.instructions } } });
       expect(frames[4]).toEqual({ type: 'done' });
     } else {
       const collected = await collectOpenAIResponsesProtocolEventsToResult(result.events);
-      expect(collected).toMatchObject(wireResponse);
+      expect(collected).toMatchObject({ ...wireResponse, tools: body.tools, instructions: body.instructions });
     }
   });
 

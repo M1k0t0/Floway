@@ -1,14 +1,24 @@
 import { v5 as uuidV5 } from 'uuid';
 
+import type { ProtocolFrame } from '@floway-dev/protocols/common';
 import type {
   CanonicalOpenAIResponsesPayload,
   OpenAIResponsesInputAdditionalToolsItem,
   OpenAIResponsesInputItem,
   OpenAIResponsesInputMessage,
+  OpenAIResponsesStreamEvent,
   OpenAIResponsesTool,
 } from '@floway-dev/protocols/openai-responses';
 
 export type CodexResponsesBody = Omit<CanonicalOpenAIResponsesPayload, 'model'>;
+
+export interface CodexResponsesLiteRequest {
+  body: CodexResponsesBody;
+  movedFields: {
+    tools?: OpenAIResponsesTool[];
+    instructions?: string;
+  };
+}
 
 // Official Codex groups flat function/custom tools under `functions` and tags
 // the base-instructions developer message when selecting Responses Lite.
@@ -134,7 +144,7 @@ const removeLiteImageDetail = (item: OpenAIResponsesInputItem): OpenAIResponsesI
 export const encodeCodexResponsesLiteRequest = (
   body: CodexResponsesBody,
   threadId: string,
-): CodexResponsesBody => {
+): CodexResponsesLiteRequest => {
   const next: CodexResponsesBody = { ...body };
   const topLevelTools = Array.isArray(body.tools) ? body.tools : [];
   const input: OpenAIResponsesInputItem[] = [...body.input];
@@ -164,5 +174,32 @@ export const encodeCodexResponsesLiteRequest = (
     ...(isRecord(body.reasoning) ? body.reasoning : {}),
     context: 'all_turns',
   };
-  return next;
+  return {
+    body: next,
+    movedFields: {
+      ...(Array.isArray(body.tools) ? { tools: body.tools } : {}),
+      ...(typeof body.instructions === 'string' && body.instructions.length > 0 ? { instructions: body.instructions } : {}),
+    },
+  };
+};
+
+// A Standard caller's top-level fields were moved into Lite input items. Show
+// those fields in its response resource; preserve output items, event families,
+// and all other response fields. Positional Lite callers move no top-level
+// fields and bypass this projection entirely.
+export const projectMovedCodexResponsesFields = async function* (
+  frames: AsyncIterable<ProtocolFrame<OpenAIResponsesStreamEvent>>,
+  movedFields: CodexResponsesLiteRequest['movedFields'],
+): AsyncGenerator<ProtocolFrame<OpenAIResponsesStreamEvent>> {
+  for await (const frame of frames) {
+    if (frame.type !== 'event') {
+      yield frame;
+      continue;
+    }
+    const event = frame.event;
+    if (event.type === 'response.queued' || event.type === 'response.created' || event.type === 'response.in_progress'
+      || event.type === 'response.completed' || event.type === 'response.incomplete' || event.type === 'response.failed') {
+      yield { ...frame, event: { ...event, response: { ...event.response, ...movedFields } } };
+    } else yield frame;
+  }
 };

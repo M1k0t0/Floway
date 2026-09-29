@@ -23,7 +23,9 @@ import {
 } from './quota.ts';
 import {
   encodeCodexResponsesLiteRequest,
+  projectMovedCodexResponsesFields,
   type CodexResponsesBody,
+  type CodexResponsesLiteRequest,
 } from './responses-lite.ts';
 import type { CodexAccessTokenEntry, CodexAccountCredential } from './state.ts';
 import { isEventStreamMediaType } from '@floway-dev/protocols/common';
@@ -388,6 +390,7 @@ interface PreparedCodexResponsesRequest {
   identity: CodexRequestIdentity;
   turnMetadataJson: CodexTurnMetadataJson;
   responsesLite: boolean;
+  movedFields: CodexResponsesLiteRequest['movedFields'];
   body: ReplayableBody;
 }
 
@@ -407,11 +410,13 @@ const prepareCodexResponsesRequest = (
   const turnMetadataJson = buildCodexTurnMetadataJson(identity, metadata, clientTurnMetadata);
   const standard = { ...opts.body, client_metadata: clientMetadata };
   const responsesLite = codexModelUsesResponsesLite(opts.model);
-  const wire = responsesLite ? encodeCodexResponsesLiteRequest(standard, identity.threadId) : standard;
+  const encoded = responsesLite ? encodeCodexResponsesLiteRequest(standard, identity.threadId) : undefined;
+  const wire = encoded?.body ?? standard;
   return {
     identity,
     turnMetadataJson,
     responsesLite,
+    movedFields: encoded?.movedFields ?? {},
     body: jsonRequestBody(action === 'compact'
       ? buildCodexOpenAIResponsesCompactBody(wire, opts.model.id)
       : buildCodexOpenAIResponsesBody(wire, opts.model.id, identity, turnMetadataJson.body)),
@@ -703,7 +708,11 @@ const performStreamingOpenAIResponsesCall = async (
 
   const result = await streamingProviderCall(
     upstreamFetch,
-    parseOpenAIResponsesStream,
+    Object.keys(prepared.movedFields).length === 0
+      ? parseOpenAIResponsesStream
+      : (stream, parserOpts) => projectMovedCodexResponsesFields(
+          parseOpenAIResponsesStream(stream, parserOpts), prepared.movedFields,
+        ),
     opts.model.id,
     opts.signal,
   );

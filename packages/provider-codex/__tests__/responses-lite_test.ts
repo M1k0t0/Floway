@@ -34,24 +34,25 @@ describe('Codex Responses Lite request encoding', () => {
     const original = structuredClone(body);
     const encoded = encodeCodexResponsesLiteRequest(body, 'thread');
 
-    expect(encoded).not.toHaveProperty('tools');
-    expect(encoded).not.toHaveProperty('instructions');
-    expect(encoded.input[0]).toMatchObject({
+    expect(encoded.body).not.toHaveProperty('tools');
+    expect(encoded.body).not.toHaveProperty('instructions');
+    expect(encoded.body.input[0]).toMatchObject({
       type: 'additional_tools', role: 'developer', id: expect.stringMatching(/^at_[0-9a-f-]{36}$/),
       tools: [
         { type: 'namespace', name: 'functions', description: '', tools: [functionTool('read'), customTool('shell')] },
         body.tools![2],
       ],
     });
-    expect(encoded.input[1]).toMatchObject({
+    expect(encoded.body.input[1]).toMatchObject({
       type: 'message', role: 'developer', id: expect.stringMatching(/^msg_[0-9a-f-]{36}$/),
       content: [{ type: 'input_text', text: 'Base instructions' }],
       internal_chat_message_metadata_passthrough: { content_item_kinds: ['model.base_instructions'] },
     });
-    expect(encoded.input.slice(2)).toEqual(body.input);
-    expect(encoded.input[3]).toBe(originalCarrier);
-    expect(encoded.parallel_tool_calls).toBe(false);
-    expect(encoded.reasoning).toEqual({ effort: 'high', context: 'all_turns' });
+    expect(encoded.body.input.slice(2)).toEqual(body.input);
+    expect(encoded.body.input[3]).toBe(originalCarrier);
+    expect(encoded.body.parallel_tool_calls).toBe(false);
+    expect(encoded.body.reasoning).toEqual({ effort: 'high', context: 'all_turns' });
+    expect(encoded.movedFields).toEqual({ tools: body.tools, instructions: body.instructions });
     expect(body).toEqual(original);
   });
 
@@ -69,21 +70,22 @@ describe('Codex Responses Lite request encoding', () => {
     });
     const encoded = encodeCodexResponsesLiteRequest(body, 'thread');
 
-    expect(encoded.input).toEqual(body.input);
-    expect(encoded.input[0]).toBe(initial);
-    expect(encoded.input[1]).toBe(base);
-    expect(encoded.input[3]).toBe(later);
-    expect(encoded).not.toHaveProperty('instructions');
+    expect(encoded.body.input).toEqual(body.input);
+    expect(encoded.body.input[0]).toBe(initial);
+    expect(encoded.body.input[1]).toBe(base);
+    expect(encoded.body.input[3]).toBe(later);
+    expect(encoded.body).not.toHaveProperty('instructions');
+    expect(encoded.movedFields).toEqual({});
   });
 
   test('emits an empty tools carrier only when the request has no positional carrier', () => {
     const empty = encodeCodexResponsesLiteRequest(requestBody({ instructions: '' }), 'thread');
-    expect(empty.input[0]).toMatchObject({ type: 'additional_tools', tools: [] });
-    expect(empty).not.toHaveProperty('instructions');
+    expect(empty.body.input[0]).toMatchObject({ type: 'additional_tools', tools: [] });
+    expect(empty.body).not.toHaveProperty('instructions');
 
     const carrier = additionalTools('at_existing', []);
     const existing = encodeCodexResponsesLiteRequest(requestBody({ input: [carrier] }), 'thread');
-    expect(existing.input).toEqual([carrier]);
+    expect(existing.body.input).toEqual([carrier]);
   });
 
   test('keeps generated IDs stable for one thread and isolates changed instructions', () => {
@@ -93,10 +95,10 @@ describe('Codex Responses Lite request encoding', () => {
     const changed = encodeCodexResponsesLiteRequest({ ...body, instructions: 'Changed rules' }, 'thread-a');
     const otherThread = encodeCodexResponsesLiteRequest(body, 'thread-b');
 
-    expect(retry.input.slice(0, 2)).toEqual(first.input.slice(0, 2));
-    expect(itemId(changed.input[0])).toBe(itemId(first.input[0]));
-    expect(itemId(changed.input[1])).not.toBe(itemId(first.input[1]));
-    expect(itemId(otherThread.input[0])).not.toBe(itemId(first.input[0]));
+    expect(retry.body.input.slice(0, 2)).toEqual(first.body.input.slice(0, 2));
+    expect(itemId(changed.body.input[0])).toBe(itemId(first.body.input[0]));
+    expect(itemId(changed.body.input[1])).not.toBe(itemId(first.body.input[1]));
+    expect(itemId(otherThread.body.input[0])).not.toBe(itemId(first.body.input[0]));
   });
 
   test('strips image detail only from message and callable-output content', () => {
@@ -112,9 +114,9 @@ describe('Codex Responses Lite request encoding', () => {
       tools: [{ ...functionTool('inspect'), parameters: { examples: [schemaImage] } }],
     }), 'thread');
 
-    expect(encoded.input[1]).toEqual({ ...message, content: [{ type: 'input_image', image_url: image.image_url }] });
-    expect(encoded.input[2]).toMatchObject({ output: [{ type: 'input_image', image_url: image.image_url }] });
-    expect(encoded.input[0]).toMatchObject({ tools: [{ tools: [{ parameters: { examples: [schemaImage] } }] }] });
+    expect(encoded.body.input[1]).toEqual({ ...message, content: [{ type: 'input_image', image_url: image.image_url }] });
+    expect(encoded.body.input[2]).toMatchObject({ output: [{ type: 'input_image', image_url: image.image_url }] });
+    expect(encoded.body.input[0]).toMatchObject({ tools: [{ tools: [{ parameters: { examples: [schemaImage] } }] }] });
     expect(image.detail).toBe('high');
   });
 
@@ -122,7 +124,7 @@ describe('Codex Responses Lite request encoding', () => {
     const tool_choice: CodexResponsesBody['tool_choice'] = { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'function', name: 'read' }] };
     const body = { ...requestBody({ tools: [functionTool('read')], tool_choice }), future_field: { value: 1 } };
     const encoded = encodeCodexResponsesLiteRequest(body, 'thread');
-    expect(encoded.tool_choice).toBe(tool_choice);
-    expect((encoded as unknown as Record<string, unknown>).future_field).toEqual({ value: 1 });
+    expect(encoded.body.tool_choice).toBe(tool_choice);
+    expect((encoded.body as unknown as Record<string, unknown>).future_field).toEqual({ value: 1 });
   });
 });
