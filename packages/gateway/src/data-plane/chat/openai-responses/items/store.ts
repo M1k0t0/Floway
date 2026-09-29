@@ -34,8 +34,6 @@ export interface OpenAIResponsesStatefulStore {
   loadInputItems(sourceItems: readonly OpenAIResponsesInputItem[], inputItemsToStage: readonly OpenAIResponsesInputItem[]): Promise<void>;
   getItemById(id: string): StoredOpenAIResponsesItem | undefined;
   stageInputItems(items: readonly OpenAIResponsesInputItem[]): Promise<void>;
-  // Source dependencies follow loaded snapshots unless explicitly replaced or cleared.
-  stageSourceItems(items: readonly OpenAIResponsesInputItem[] | undefined): Promise<void>;
   persistOutputItem(row: StoredOpenAIResponsesItem): Promise<void>;
   commitSnapshot(responseId: string, mode: OpenAIResponsesSnapshotMode, outputItemIds: readonly string[]): Promise<void>;
   // Per-attempt transient state. `beginAttempt` reseeds the private-payload
@@ -51,7 +49,6 @@ export class LayeredOpenAIResponsesStatefulStore implements OpenAIResponsesState
   private readonly loadedByItemHash = new Map<string, StoredOpenAIResponsesItem>();
   private readonly stagedInputItemIds: string[] = [];
   private previousSnapshotItemIds: string[] = [];
-  private sourceItemIds: readonly string[] | undefined;
   private readonly committedItemIds = new Set<string>();
   private readonly privatePayloads = new Map<string, unknown>();
   private readonly inputItemHashes = new WeakMap<OpenAIResponsesInputItem, string>();
@@ -70,12 +67,11 @@ export class LayeredOpenAIResponsesStatefulStore implements OpenAIResponsesState
     for (const backing of this.options.reads) {
       const snapshot = await backing.lookupSnapshot(this.apiKeyId, id);
       if (snapshot === null) continue;
-      const referencedIds = [...snapshot.itemIds, ...(snapshot.sourceItemIds ?? [])];
-      await this.loadItems({ ids: referencedIds, itemHashes: [] });
-      if (!referencedIds.every(itemId => this.loadedItems.has(itemId))) continue;
+      await this.loadItems({ ids: snapshot.itemIds, itemHashes: [] });
+      if (!snapshot.itemIds.every(itemId => this.loadedItems.has(itemId))) continue;
       if (this.options.writes.length > 0) {
         const refreshedAt = quantizeOpenAIResponsesRefreshedAt(Date.now());
-        const items = [...new Set(referencedIds)].map(itemId => this.loadedItems.get(itemId)!);
+        const items = snapshot.itemIds.map(itemId => this.loadedItems.get(itemId)!);
         await this.commitItems(items);
         const staleItems = items.filter(item => item.refreshedAt < refreshedAt);
         await Promise.all(this.options.writes.map(async write => {
@@ -88,7 +84,6 @@ export class LayeredOpenAIResponsesStatefulStore implements OpenAIResponsesState
         if (snapshot.refreshedAt < refreshedAt) snapshot.refreshedAt = refreshedAt;
       }
       this.previousSnapshotItemIds = [...snapshot.itemIds];
-      this.sourceItemIds = snapshot.sourceItemIds === undefined ? undefined : [...snapshot.sourceItemIds];
       return cloneStoredOpenAIResponsesSnapshot(snapshot);
     }
     return null;
@@ -119,25 +114,7 @@ export class LayeredOpenAIResponsesStatefulStore implements OpenAIResponsesState
 
   async stageInputItems(items: readonly OpenAIResponsesInputItem[]): Promise<void> {
     if (!this.writesState) return;
-    for (const item of items) {
-      const id = await this.rememberInputItem(item);
-      if (id !== undefined) this.stagedInputItemIds.push(id);
-    }
-  }
-
-  async stageSourceItems(items: readonly OpenAIResponsesInputItem[] | undefined): Promise<void> {
-    if (!this.writesState) return;
-    if (items === undefined) {
-      this.sourceItemIds = undefined;
-      return;
-    }
-    await this.loadInputItems(items, items);
-    const ids: string[] = [];
-    for (const item of items) {
-      const id = await this.rememberInputItem(item);
-      if (id !== undefined) ids.push(id);
-    }
-    this.sourceItemIds = ids;
+    for (const item of items) await this.stageInputItem(item);
   }
 
   async persistOutputItem(row: StoredOpenAIResponsesItem): Promise<void> {
@@ -155,9 +132,8 @@ export class LayeredOpenAIResponsesStatefulStore implements OpenAIResponsesState
     const itemIds = mode === 'replace'
       ? [...outputItemIds]
       : [...this.previousSnapshotItemIds, ...this.stagedInputItemIds, ...outputItemIds];
-    const referencedIds = [...itemIds, ...(this.sourceItemIds ?? [])];
-    if (referencedIds.length === 0 && this.sourceItemIds === undefined) return;
-    const uniqueRows = [...new Set(referencedIds)].map(id => {
+    if (itemIds.length === 0) return;
+    const uniqueRows = [...new Set(itemIds)].map(id => {
       const row = this.loadedItems.get(id);
       if (row === undefined) throw new Error(`OpenAI Responses snapshot item disappeared before commit: ${id}`);
       return row;
@@ -171,12 +147,11 @@ export class LayeredOpenAIResponsesStatefulStore implements OpenAIResponsesState
         if (row.refreshedAt < refreshedAt) row.refreshedAt = refreshedAt;
       }
     }
-    const snapshotRefreshedAt = uniqueRows.length === 0 ? refreshedAt : Math.min(...uniqueRows.map(row => row.refreshedAt));
+    const snapshotRefreshedAt = Math.min(...uniqueRows.map(row => row.refreshedAt));
     const snapshot: StoredOpenAIResponsesSnapshot = {
       id: responseId,
       apiKeyId: this.apiKeyId,
       itemIds,
-      ...(this.sourceItemIds === undefined ? {} : { sourceItemIds: [...this.sourceItemIds] }),
       refreshedAt: snapshotRefreshedAt,
     };
     await Promise.all(this.options.writes.map(write => write.insertSnapshot(snapshot)));
@@ -205,18 +180,22 @@ export class LayeredOpenAIResponsesStatefulStore implements OpenAIResponsesState
     }
   }
 
-  private async rememberInputItem(item: OpenAIResponsesInputItem): Promise<string | undefined> {
-    if (item.type === 'compaction_trigger') return undefined;
+  private async stageInputItem(item: OpenAIResponsesInputItem): Promise<void> {
+    if (item.type === 'compaction_trigger') return;
     if (item.type === 'item_reference') {
       const row = this.loadedItems.get(item.id);
       if (row === undefined) throw new Error(`Cannot stage unresolved OpenAI Responses item_reference id=${item.id}`);
-      return row.id;
+      this.stagedInputItemIds.push(row.id);
+      return;
     }
 
     const id = openaiResponsesItemId(item);
     if (id !== null) {
       const row = this.loadedItems.get(id);
-      if (row !== undefined) return row.id;
+      if (row !== undefined) {
+        this.stagedInputItemIds.push(row.id);
+        return;
+      }
 
       const created: StoredOpenAIResponsesItem = {
         id,
@@ -225,13 +204,17 @@ export class LayeredOpenAIResponsesStatefulStore implements OpenAIResponsesState
         itemHash: await this.hashInputItem(item),
         refreshedAt: quantizeOpenAIResponsesRefreshedAt(Date.now()),
       };
+      this.stagedInputItemIds.push(id);
       this.rememberItem(created);
-      return id;
+      return;
     }
 
     const itemHash = await this.hashInputItem(item);
     const existing = this.loadedByItemHash.get(itemHash);
-    if (existing !== undefined) return existing.id;
+    if (existing !== undefined) {
+      this.stagedInputItemIds.push(existing.id);
+      return;
+    }
 
     const row: StoredOpenAIResponsesItem = {
       id: createOpenAIResponsesStorageKey(),
@@ -240,8 +223,8 @@ export class LayeredOpenAIResponsesStatefulStore implements OpenAIResponsesState
       itemHash,
       refreshedAt: quantizeOpenAIResponsesRefreshedAt(Date.now()),
     };
+    this.stagedInputItemIds.push(row.id);
     this.rememberItem(row);
-    return row.id;
   }
 
   private async hashInputItem(item: OpenAIResponsesInputItem): Promise<string> {

@@ -2,7 +2,6 @@ import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 
 import { wrapOpenAIResponsesClientEgress } from './client-output.ts';
-import { responsesLiteSuccessHeaders, type ResponsesLiteClientView } from '../../codex/responses-lite.ts';
 import type { GatewayCtx } from '../../shared/gateway-ctx.ts';
 import { type StreamCompletion, writeSSEFrames } from '../../shared/sse.ts';
 import { recordFailedRequest } from '../../shared/telemetry/performance.ts';
@@ -50,13 +49,12 @@ export const respondOpenAIResponses = async (
   wantsStream: boolean,
   ctx: GatewayCtx,
   request: CanonicalOpenAIResponsesPayload,
-  clientView?: ResponsesLiteClientView,
 ): Promise<Response> => {
   if (result.type !== 'events') return respondOpenAIResponsesFailure(result, ctx);
 
   const state = new SourceStreamState();
   const observed = observeOpenAIResponsesFrames(result.events, state, ctx);
-  const frames = wrapOpenAIResponsesClientEgress(observed, ctx, request, clientView);
+  const frames = wrapOpenAIResponsesClientEgress(observed, ctx, request);
 
   if (!wantsStream) {
     try {
@@ -65,8 +63,7 @@ export const respondOpenAIResponses = async (
       const usage = tokenUsageFromBillableUsage(metadata.billableUsage);
       ctx.dump?.success(metadata.modelIdentity, usage);
       settle(ctx, metadata.performance, metadata.modelIdentity, usage, state.failed || response.status === 'failed');
-      const headers = responsesLiteSuccessHeaders(result.headers, state.failed || response.status === 'failed' ? undefined : clientView);
-      return Response.json(response, { headers: mergeForwardedUpstreamHeaders(undefined, headers) });
+      return Response.json(response, { headers: mergeForwardedUpstreamHeaders(undefined, result.headers) });
     } catch (error) {
       recordFailedRequest(ctx, result.performance);
       ctx.dump?.failed(error);
@@ -74,7 +71,7 @@ export const respondOpenAIResponses = async (
     }
   }
 
-  forwardUpstreamHeaders(c, responsesLiteSuccessHeaders(result.headers, clientView));
+  forwardUpstreamHeaders(c, result.headers);
   const response = streamSSE(c, async stream => {
     let completion: StreamCompletion = 'error';
     try {

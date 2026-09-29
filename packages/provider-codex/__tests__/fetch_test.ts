@@ -442,7 +442,7 @@ describe('Codex private Responses wire selection', () => {
     expect(wires[1]!.input).toEqual([
       (wires[0]!.input as unknown[])[0],
       expect.objectContaining({ type: 'message', content: [{ type: 'input_text', text: 'New instructions' }] }),
-      ...body.input.filter(item => item.type !== 'additional_tools'), opaque,
+      ...body.input, opaque,
     ]);
   });
 

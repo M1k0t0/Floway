@@ -39,7 +39,7 @@ const response = (overrides: Partial<OpenAIResponsesResult> = {}): OpenAIRespons
 });
 
 describe('Standard to Responses Lite encoder', () => {
-  test('relocates all declarations in order, retains duplicates and leaves the original request intact', () => {
+  test('encodes top-level declarations and preserves additional_tools at their input positions', () => {
     const duplicate = functionTool('flat_function');
     const body = requestBody({
       instructions: 'Base instructions',
@@ -70,7 +70,7 @@ describe('Standard to Responses Lite encoder', () => {
         body.tools![0],
         {
           type: 'namespace', name: 'functions', description: 'Caller functions',
-          tools: [duplicate, customTool('flat_custom'), functionTool('nested_function'), duplicate, functionTool('additional_function')],
+          tools: [duplicate, customTool('flat_custom'), functionTool('nested_function')],
         },
         body.tools![4],
       ],
@@ -80,19 +80,39 @@ describe('Standard to Responses Lite encoder', () => {
       content: [{ type: 'input_text', text: 'Base instructions' }],
       internal_chat_message_metadata_passthrough: { content_item_kinds: ['model.base_instructions'] },
     });
-    expect(encoded.input.slice(2)).toEqual([body.input[1]]);
+    expect(encoded.input.slice(2)).toEqual(body.input);
+    expect(encoded.input[2]).toBe(body.input[0]);
+    expect(encoded.input[4]).toBe(body.input[2]);
     expect(body).toEqual(original);
   });
 
-  test('encodes a leading Standard additional_tools carrier rather than inferring native Lite', () => {
+  test('keeps an existing additional_tools carrier and its identity', () => {
     const body = requestBody({ input: [additionalTools('at_standard', [functionTool('lookup')])] });
     const encoded = encodeCodexResponsesLiteRequest(body, 'thread');
-    expect(encoded.body.input).toEqual([{
-      type: 'additional_tools', role: 'developer', id: expect.stringMatching(/^at_[0-9a-f-]{36}$/),
-      tools: [{ type: 'namespace', name: 'functions', description: '', tools: [functionTool('lookup')] }],
-    }]);
-    expect(itemId(encoded.body.input[0])).not.toBe('at_standard');
+    expect(encoded.body.input).toEqual(body.input);
+    expect(encoded.body.input[0]).toBe(body.input[0]);
+    expect(itemId(encoded.body.input[0])).toBe('at_standard');
+    expect(encoded.generatedPrefix).toEqual([]);
     expect(encoded.callableIdentities.byNamespace.get('functions')?.size).toBe(1);
+  });
+
+  test('does not make a later additional_tools declaration available earlier', () => {
+    const initial = additionalTools('at_initial', [functionTool('read')]);
+    const later = additionalTools('at_later', [functionTool('write')]);
+    const input: OpenAIResponsesInputItem[] = [
+      initial,
+      { type: 'message', role: 'user', content: 'Read the file.' },
+      later,
+      { type: 'message', role: 'user', content: 'Now write the file.' },
+    ];
+    const encoded = encodeCodexResponsesLiteRequest(requestBody({ input }), 'thread');
+
+    expect(encoded.body.input).toEqual(input);
+    expect(encoded.body.input[0]).toBe(initial);
+    expect(encoded.body.input[2]).toBe(later);
+    expect(encoded.generatedPrefix).toEqual([]);
+    expect(encoded.callableIdentities.byNamespace.get('functions')?.has('read')).toBe(true);
+    expect(encoded.callableIdentities.byNamespace.get('functions')?.has('write')).toBe(true);
   });
 
   test.each([undefined, null, ''])('emits an empty tools carrier without empty instructions %s', instructions => {
@@ -317,13 +337,13 @@ describe('Responses Lite compact prefix provenance', () => {
     const wire = compact(structuredClone([...encoded.body.input, opaque]));
     const restored = restoreCodexResponsesCompactionResult(wire, encoded.callableIdentities, encoded.generatedPrefix);
     expect(restored.output).toEqual([...body.input, opaque]);
-    callerTools.forEach((item, index) => expect(restored.output[index]).toBe(item));
+    callerTools.forEach((item, index) => expect(restored.output[index]).toEqual(item));
     const replay = encodeCodexResponsesLiteRequest({
       ...body, instructions: 'New instructions', input: restored.output as OpenAIResponsesInputItem[],
     }, 'thread');
     expect(replay.body.input[0]).toEqual(encoded.body.input[0]);
     expect(replay.body.input[1]).toMatchObject({ content: [{ type: 'input_text', text: 'New instructions' }] });
-    expect(replay.body.input.slice(2)).toEqual([...body.input.filter(item => item.type !== 'additional_tools'), opaque]);
+    expect(replay.body.input.slice(2)).toEqual([...body.input, opaque]);
     expect(body).toEqual(original);
     expect(wire.output).toEqual([...encoded.body.input, opaque]);
   });

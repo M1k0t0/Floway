@@ -31,7 +31,6 @@ type CodexResponsesRequestEchoes = Pick<CodexResponsesBody, 'tools' | 'instructi
 
 interface CodexResponsesGeneratedPrefixItem {
   item: OpenAIResponsesInputAdditionalToolsItem | CodexBaseInstructionsMessage;
-  sourceItems: readonly OpenAIResponsesInputAdditionalToolsItem[];
   callerCopies: number;
 }
 
@@ -143,22 +142,6 @@ const registerToolIdentities = (
     const identity = identityForTool(child, tool.name);
     registerCallable(entries, identity, identity);
   }
-};
-
-// Only these two declaration surfaces are consolidated into the Lite prefix.
-// Search-loaded declarations stay at their input position and are inventoried
-// separately, without becoming prefix tools.
-// https://github.com/router-for-me/CLIProxyAPI/blob/7fac6b15bcfe5ea55c18c9eaec8e5b7e6457d974/internal/util/responses_tools.go#L65-L73
-const collectPrefixTools = (body: CodexResponsesBody): OpenAIResponsesTool[] => {
-  const tools: OpenAIResponsesTool[] = [];
-  if (Array.isArray(body.tools)) {
-    for (const tool of body.tools) tools.push(tool);
-  }
-  for (const item of body.input) {
-    if (!isAdditionalToolsItem(item)) continue;
-    for (const tool of item.tools) tools.push(tool);
-  }
-  return tools;
 };
 
 const toolsForLite = (
@@ -276,8 +259,13 @@ export const encodeCodexResponsesLiteRequest = (
 ): CodexResponsesLiteRequest => {
   const next: CodexResponsesBody = { ...body };
   const entries: CallableEntries = new Map();
-  const tools = collectPrefixTools(body);
-  for (const tool of tools) registerToolIdentities(entries, tool);
+  const topLevelTools = Array.isArray(body.tools) ? body.tools : [];
+  for (const tool of topLevelTools) registerToolIdentities(entries, tool);
+  for (const item of body.input) {
+    if (isAdditionalToolsItem(item)) {
+      for (const tool of item.tools) registerToolIdentities(entries, tool);
+    }
+  }
   // Search results declare callable identities at their existing history position.
   // Inventory them for inverse repair without moving or rewriting their tools.
   // https://github.com/openai/openai-node/blob/39a15b412fc129df15339ebd6e3e6547854aa81f/src/resources/responses/responses.ts#L7119-L7223
@@ -286,18 +274,24 @@ export const encodeCodexResponsesLiteRequest = (
     for (const tool of item.tools) registerToolIdentities(entries, tool);
   }
   const threadNamespace = uuidV5(threadId, UUID_NAMESPACE_OID);
-  const input: OpenAIResponsesInputItem[] = body.input.filter(item => !isAdditionalToolsItem(item));
-  const toolsItem = makeAdditionalToolsItem(toolsForLite(tools), threadNamespace);
-  const generatedPrefix: CodexResponsesGeneratedPrefixItem[] = [{
-    item: toolsItem, sourceItems: body.input.filter(isAdditionalToolsItem), callerCopies: 0,
-  }];
-  input.unshift(toolsItem);
+  const input: OpenAIResponsesInputItem[] = [...body.input];
+  const generatedPrefix: CodexResponsesGeneratedPrefixItem[] = [];
+  // Existing carriers are positional Responses input: moving one into a new
+  // prefix would make its tools available before the caller introduced them.
+  // https://developers.openai.com/api/docs/guides/tools-tool-search#add-tools-at-a-specific-point-in-the-input
+  const needsToolsPrefix = Array.isArray(body.tools) || !body.input.some(isAdditionalToolsItem)
+    || (typeof body.instructions === 'string' && body.instructions.length > 0);
+  if (needsToolsPrefix) {
+    const toolsItem = makeAdditionalToolsItem(toolsForLite(topLevelTools), threadNamespace);
+    generatedPrefix.push({ item: toolsItem, callerCopies: body.input.filter(item => matchesGeneratedPrefix(item, toolsItem)).length });
+    input.unshift(toolsItem);
+  }
   if (Array.isArray(body.tools) || body.tools === null) delete next.tools;
 
   if (typeof body.instructions === 'string' && body.instructions.length > 0) {
     const item = makeBaseInstructionsMessage(body.instructions, threadNamespace);
     generatedPrefix.push({
-      item, sourceItems: [], callerCopies: body.input.filter(source => matchesGeneratedPrefix(source, item)).length,
+      item, callerCopies: body.input.filter(source => matchesGeneratedPrefix(source, item)).length,
     });
     input.splice(1, 0, item);
     delete next.instructions;
@@ -394,8 +388,8 @@ export const restoreCodexResponsesResult = (
   return restored;
 };
 
-// Remote compact output can retain instruction/tool prefixes. Unlike Codex's
-// session-specific filter, this boundary must keep caller-owned developer items.
+// Remote compact output can retain generated instruction/tool prefixes. The
+// caller's input items were never moved into those prefixes.
 // Invert one matching generated representation, never an entire item family.
 // https://github.com/openai/codex/blob/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/core/src/compact_remote.rs
 const restoreCompactedPrefix = (
@@ -412,9 +406,7 @@ const restoreCompactedPrefix = (
     restored = restored.flatMap(item => {
       if (replaced || !matchesGeneratedPrefix(item, generated.item)) return [item];
       replaced = true;
-      // Only input carriers were merged into this prefix; top-level tools and
-      // instructions remain request fields, so they contribute no history here.
-      return generated.sourceItems as readonly OpenAIResponsesOutputItem[];
+      return [];
     });
   }
   return restored;

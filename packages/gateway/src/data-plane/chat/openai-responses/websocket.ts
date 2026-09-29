@@ -7,7 +7,6 @@ import { openaiResponsesServe } from './serve.ts';
 import type { DumpAccumulator } from '../../../dump/accumulator.ts';
 import { apiKeyFromContext, authenticateApiKey, type AuthedContext } from '../../../middleware/auth.ts';
 import { backgroundSchedulerFromContext } from '../../../runtime/background.ts';
-import { normalizeResponsesIngress, type ResponsesLiteClientView } from '../../codex/responses-lite.ts';
 import { inboundHeaders } from '../../shared/inbound-headers.ts';
 import { takeRequestBody } from '../../shared/request-body.ts';
 import { DOWNSTREAM_KEEP_ALIVE_INTERVAL_MS, type StreamCompletion } from '../../shared/sse.ts';
@@ -216,7 +215,6 @@ const handleClientMessage = async (
   const signal = downstreamAbortController.signal;
   let eventId: string | undefined;
   let ctx: ChatGatewayCtx | undefined;
-  let apiKeyId: string | undefined;
   let previousResponseId: string | undefined;
 
   // "If a continuation turn fails with a `4xx` or `5xx` error, the server MUST
@@ -235,8 +233,8 @@ const handleClientMessage = async (
   // `Map.delete` makes the second call inert.
   const turnFailure: OpenAIResponsesWsTurnFailure = {
     evict: () => {
-      if (apiKeyId === undefined || previousResponseId === undefined) return;
-      session.evictSnapshot(apiKeyId, previousResponseId);
+      if (ctx === undefined || previousResponseId === undefined) return;
+      session.evictSnapshot(ctx.store.apiKeyId, previousResponseId);
     },
     fail: (status, error) => {
       turnFailure.evict();
@@ -280,9 +278,8 @@ const handleClientMessage = async (
     const source = message.response && typeof message.response === 'object'
       ? message.response
       : Object.fromEntries(Object.entries(message).filter(([key]) => key !== 'type' && key !== 'event_id'));
-    apiKeyId = apiKeyFromContext(c).id;
-    previousResponseId = typeof source.previous_response_id === 'string' ? source.previous_response_id : undefined;
-    const { payload, headers, clientView, inputContext } = normalizeResponsesIngress(openaiResponsesPayloadFromClientSource(source), inboundHeaders(c), 'websocket');
+    const payload = openaiResponsesPayloadFromClientSource(source);
+    previousResponseId = payload.previous_response_id ?? undefined;
     ctx = createChatGatewayCtxFromHono(c, {
       wantsStream: true,
       downstreamAbortController,
@@ -297,7 +294,7 @@ const handleClientMessage = async (
 
     let result;
     try {
-      result = await openaiResponsesServe.generate({ payload, ctx, headers, inputContext });
+      result = await openaiResponsesServe.generate({ payload, ctx, headers: inboundHeaders(c) });
     } catch (error) {
       if (signal.aborted || isClosed()) return;
       // The HTTP entry renders this verbatim envelope as a 400; WS surfaces the
@@ -317,7 +314,7 @@ const handleClientMessage = async (
       throw error;
     }
 
-    await respondOpenAIResponsesWebSocket({ socket, eventId, signal, isClosed, result, ctx, payload, clientView, turnFailure });
+    await respondOpenAIResponsesWebSocket({ socket, eventId, signal, isClosed, result, ctx, payload, turnFailure });
   } catch (error) {
     if (signal.aborted || isClosed()) return;
     if (error instanceof TranslatorInputError) {
@@ -379,10 +376,9 @@ const respondOpenAIResponsesWebSocket = async (input: {
   readonly result: ExecuteResult<ProtocolFrame<OpenAIResponsesStreamEvent>>;
   readonly ctx: ChatGatewayCtx;
   readonly payload: CanonicalOpenAIResponsesPayload;
-  readonly clientView?: ResponsesLiteClientView;
   readonly turnFailure: OpenAIResponsesWsTurnFailure;
 }): Promise<void> => {
-  const { socket, eventId, signal, isClosed, result, ctx, payload, clientView, turnFailure } = input;
+  const { socket, eventId, signal, isClosed, result, ctx, payload, turnFailure } = input;
   if (result.type === 'api-error') {
     recordFailedRequest(ctx, result.performance);
     ctx.dump?.error(result.source, result.upstreamId);
@@ -404,7 +400,7 @@ const respondOpenAIResponsesWebSocket = async (input: {
   try {
     let terminalEvent: ClientOpenAIResponsesStreamEvent | undefined;
     const observed = observeOpenAIResponsesWebSocketFrames(result.events, state, ctx);
-    const output = wrapOpenAIResponsesClientEgress(observed, ctx, payload, clientView);
+    const output = wrapOpenAIResponsesClientEgress(observed, ctx, payload);
     const iterator = output[Symbol.asyncIterator]();
     let pendingNext = pendingWsFrameResult(iterator.next());
     let completed = false;
