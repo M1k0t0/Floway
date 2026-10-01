@@ -33,6 +33,11 @@ export interface OpenAIResponsesPayload {
   metadata?: Record<string, unknown> | null;
   stream?: boolean | null;
   store?: boolean | null;
+  // `false` asks for a prewarm: a response that records this request's
+  // context without generating, which the next request continues from via
+  // `previous_response_id`. Codex sends it on its WebSocket transport.
+  // https://github.com/openai/codex/blob/6989c6548b3737f108e2bb5ae1171b1d2032e30c/codex-rs/codex-api/src/common.rs#L355
+  generate?: boolean | null;
   parallel_tool_calls?: boolean | null;
   reasoning?: {
     effort?: string;
@@ -487,6 +492,8 @@ export interface OpenAIResponsesCompactionItem {
   id?: string | null;
   encrypted_content: string;
   created_by?: string;
+  internal_chat_message_metadata_passthrough?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 }
 
 export const isOpenAIResponsesCompactionItem = (item: { type: string }): item is OpenAIResponsesCompactionItem =>
@@ -828,6 +835,19 @@ export type OpenAIResponsesTool =
   | OpenAIResponsesLocalShellTool
   | OpenAIResponsesShellTool
   | OpenAIResponsesApplyPatchTool;
+
+export const collectOpenAIResponsesToolEntries = (
+  payload: CanonicalOpenAIResponsesPayload,
+): Array<{ tool: OpenAIResponsesTool; path: string }> => [
+  ...(payload.tools ?? []).map((tool, index) => ({ tool, path: `tools[${index}]` })),
+  ...payload.input.flatMap((item, inputIndex) =>
+    item.type === 'additional_tools' || item.type === 'tool_search_output'
+      ? item.tools.map((tool, toolIndex) => ({ tool, path: `input[${inputIndex}].tools[${toolIndex}]` }))
+      : []),
+];
+
+export const collectOpenAIResponsesTools = (payload: CanonicalOpenAIResponsesPayload): OpenAIResponsesTool[] =>
+  collectOpenAIResponsesToolEntries(payload).map(entry => entry.tool);
 
 export const mapOpenAIResponsesTools = (
   payload: CanonicalOpenAIResponsesPayload,
@@ -1376,6 +1396,14 @@ type OpenAIResponsesStreamEventVariant =
     item_id: string;
     output_index: number;
     diff: string;
+  }
+  // Native compaction progress carries no summary; the final encrypted item
+  // arrives in output_item.done.
+  // https://github.com/openai/openai-node/blob/02f4ef94e8b3b02b43af6516c71a74c3c7a80b5d/src/resources/responses/responses.ts#L2311-L2335
+  | {
+    type: 'response.compaction.compacting';
+    item_id: string;
+    output_index: number;
   }
   | { type: 'response.completed'; response: OpenAIResponsesResult }
   | { type: 'response.incomplete'; response: OpenAIResponsesResult }
