@@ -275,7 +275,7 @@ describe('Codex terminal output recovery', () => {
     }
   });
 
-  test.each([false, true])('recovers an omitted assistant message after restored callable identities with Responses Lite=%s', async useResponsesLite => {
+  test.each([false, true])('recovers an omitted assistant message without changing callable items with Responses Lite=%s', async useResponsesLite => {
     seedFreshAccessToken();
     const wireCall = {
       type: 'function_call', id: 'fc_0', call_id: 'call_0', name: 'lookup', arguments: '{}', status: 'completed',
@@ -303,9 +303,7 @@ describe('Codex terminal output recovery', () => {
     });
     if (!result.ok) throw new Error('expected a successful summary stream');
     const collected = await collectOpenAIResponsesProtocolEventsToResult(result.events);
-    const expectedCall = { ...wireCall };
-    delete expectedCall.namespace;
-    expect(collected.output).toEqual([expectedCall, message]);
+    expect(collected.output).toEqual([wireCall, message]);
   });
 });
 
