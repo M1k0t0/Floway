@@ -130,6 +130,9 @@ export interface OpenAIResponsesInputMessage {
   role: 'user' | 'assistant' | 'system' | 'developer';
   content: string | OpenAIResponsesInputContent[];
   phase?: OpenAIResponsesMessagePhase;
+  // Codex marks base-instruction fragments on ordinary developer messages.
+  // https://github.com/openai/codex/blob/0462dcc062b822bb8fff16cc31ce6eeab69823b9/codex-rs/core/tests/suite/responses_lite.rs#L136-L155
+  internal_chat_message_metadata_passthrough?: Record<string, unknown>;
 }
 
 // The OpenAI Responses request schema's EasyInputMessage makes the constant
@@ -142,6 +145,7 @@ export interface OpenAIResponsesEasyInputMessage {
   role: 'user' | 'assistant' | 'system' | 'developer';
   phase?: OpenAIResponsesMessagePhase;
   type?: 'message';
+  internal_chat_message_metadata_passthrough?: Record<string, unknown>;
 }
 
 export type OpenAIResponsesRequestInputItem =

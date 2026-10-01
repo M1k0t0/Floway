@@ -275,7 +275,7 @@ describe('Codex terminal output recovery', () => {
     }
   });
 
-  test.each([false, true])('recovers an omitted assistant message after restored callable identities with Responses Lite=%s', async useResponsesLite => {
+  test.each([false, true])('recovers an omitted assistant message without changing callable items with Responses Lite=%s', async useResponsesLite => {
     seedFreshAccessToken();
     const wireCall = {
       type: 'function_call', id: 'fc_0', call_id: 'call_0', name: 'lookup', arguments: '{}', status: 'completed',
@@ -303,9 +303,7 @@ describe('Codex terminal output recovery', () => {
     });
     if (!result.ok) throw new Error('expected a successful summary stream');
     const collected = await collectOpenAIResponsesProtocolEventsToResult(result.events);
-    const expectedCall = { ...wireCall };
-    delete expectedCall.namespace;
-    expect(collected.output).toEqual([expectedCall, message]);
+    expect(collected.output).toEqual([wireCall, message]);
   });
 });
 
@@ -375,7 +373,7 @@ describe('Codex private Responses wire selection', () => {
           expect(wire.tool_choice).toBe('auto');
           expect(wire.stream).toBe(true);
           expect(wire.store).toBe(false);
-          expect(result.headers?.get(CODEX_RESPONSES_LITE_HEADER)).toBeNull();
+          expect(result.headers?.get(CODEX_RESPONSES_LITE_HEADER)).toBe('true');
           expect(result.headers?.get('x-upstream-custom')).toBe('retained');
           for await (const _frame of result.events) { /* Drain the actual parser. */ }
         } else {
@@ -386,21 +384,15 @@ describe('Codex private Responses wire selection', () => {
     }
   });
 
-  test.each(['generate', 'compact'] as const)('%s rejects malformed model data and identity collisions before any fetch', async action => {
+  test.each(['generate', 'compact'] as const)('%s rejects malformed model data before any fetch', async action => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const call = action === 'generate' ? callCodexOpenAIResponses : callCodexOpenAIResponsesCompact;
     const opts = { upstreamId, account: activeAccount, body: { input: [] }, headers: new Headers(), effects: makeEffects(), call: noopUpstreamCallOptions() };
     await expect(call({ ...opts, model: { ...model, providerData: { useResponsesLite: 'false' } } })).rejects.toThrow('useResponsesLite is not a boolean');
-    await expect(call({
-      ...opts, model: liteModel,
-      body: {
-        input: [], tools: [tool, { type: 'namespace', name: 'functions', description: '', tools: [tool] }],
-      },
-    })).rejects.toThrow('cannot preserve distinct callable identities');
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  test.each([true, false])('restores known calls and echoes before streaming=%s consumption and preserves future data', async stream => {
+  test.each([true, false])('projects moved top-level fields while preserving upstream calls through streaming=%s', async stream => {
     seedFreshAccessToken();
     const wireCall = { type: 'function_call' as const, id: 'fc_1', call_id: 'call_1', name: 'lookup', namespace: 'functions', arguments: '{}', status: 'completed' as const, future: 'retained' };
     const opaque = { type: 'reasoning', id: 'rs_opaque', summary: [], encrypted_content: 'opaque+encrypted==' };
@@ -425,33 +417,53 @@ describe('Codex private Responses wire selection', () => {
     });
     if (!result.ok) throw new Error('expected successful Responses stream');
     expect(result.headers?.get('content-type')).toBe('text/event-stream');
-    expect(result.headers?.has(CODEX_RESPONSES_LITE_HEADER)).toBe(false);
+    expect(result.headers?.has(CODEX_RESPONSES_LITE_HEADER)).toBe(true);
     expect(upstream.headers.get(CODEX_RESPONSES_LITE_HEADER)).toBe('true');
-    const expectedCall = { ...wireCall } as Record<string, unknown>;
-    delete expectedCall.namespace;
     if (stream) {
       const frames: ProtocolFrame<OpenAIResponsesStreamEvent>[] = [];
       for await (const frame of result.events) frames.push(frame);
-      expect(frames[0]).toMatchObject({ type: 'event', event: { item: expectedCall } });
+      expect(frames[0]).toMatchObject({ type: 'event', event: { item: wireCall } });
       expect(frames[1]).toEqual({ type: 'event', event: future });
-      expect(frames[2]).toMatchObject({ type: 'event', event: { item: expectedCall } });
-      expect(frames[3]).toMatchObject({
-        type: 'event',
-        event: {
-          response: {
-            ...wireResponse, output: [expectedCall, opaque], instructions: body.instructions, tools: body.tools,
-            parallel_tool_calls: false, reasoning: wireResponse.reasoning,
-          },
-        },
-      });
+      expect(frames[2]).toMatchObject({ type: 'event', event: { item: wireCall } });
+      expect(frames[3]).toMatchObject({ type: 'event', event: { response: { ...wireResponse, tools: body.tools, instructions: body.instructions } } });
       expect(frames[4]).toEqual({ type: 'done' });
     } else {
       const collected = await collectOpenAIResponsesProtocolEventsToResult(result.events);
-      expect(collected).toMatchObject({
-        ...wireResponse, output: [expectedCall, opaque], instructions: body.instructions, tools: body.tools,
-        parallel_tool_calls: false, reasoning: wireResponse.reasoning,
-      });
+      expect(collected).toMatchObject({ ...wireResponse, tools: body.tools, instructions: body.instructions });
     }
+  });
+
+  test('preserves the Lite upstream response for an existing positional tool prefix', async () => {
+    seedFreshAccessToken();
+    const tool = { type: 'namespace' as const, name: 'functions', description: '', tools: [{ type: 'function' as const, name: 'lookup', parameters: { type: 'object' } }] };
+    const item = { type: 'function_call' as const, id: 'fc_lite', call_id: 'call_lite', name: 'lookup', arguments: '{}', status: 'completed' as const };
+    const resource: OpenAIResponsesResult = {
+      id: 'resp_lite', object: 'response', model: liteModel.id, status: 'completed', output: [item],
+      tools: [tool], instructions: null, error: null, incomplete_details: null,
+    };
+    const events: OpenAIResponsesStreamEvent[] = [
+      { type: 'response.output_item.added', output_index: 0, item },
+      { type: 'response.function_call_arguments.done', item_id: item.id, output_index: 0, arguments: '{}' },
+      { type: 'response.output_item.done', output_index: 0, item },
+      { type: 'response.completed', response: resource },
+    ];
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseEventsResponse(events));
+    const result = await callCodexOpenAIResponses({
+      upstreamId, account: activeAccount, model: liteModel,
+      body: {
+        input: [
+          { type: 'additional_tools', role: 'developer', tools: [tool] },
+          { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'Caller base instructions' }], internal_chat_message_metadata_passthrough: { content_item_kinds: ['model.base_instructions'] } },
+          { type: 'message', role: 'user', content: 'Call the tool.' },
+        ],
+        instructions: '',
+      },
+      headers: new Headers(), effects: makeEffects(), call: noopUpstreamCallOptions(),
+    });
+    if (!result.ok) throw new Error('expected successful Lite response');
+    const frames: ProtocolFrame<OpenAIResponsesStreamEvent>[] = [];
+    for await (const frame of result.events) frames.push(frame);
+    expect(frames).toEqual([...events.map((event, sequence_number) => ({ type: 'event', event: { ...event, sequence_number } })), { type: 'done' }]);
   });
 
   test.each([true, false])('keeps effective settings through native SSE with omitted preferences=%s', async omitted => {
@@ -485,7 +497,7 @@ describe('Codex private Responses wire selection', () => {
     }
   });
 
-  test.each(['top-level', 'input', 'mixed'] as const)('restores echoed compact %s prefixes before the next real provider dispatch', async source => {
+  test.each(['top-level', 'input', 'mixed'] as const)('preserves the complete compact %s output window', async source => {
     seedFreshAccessToken();
     const opaque = { type: 'compaction', id: 'cmp_item', encrypted_content: 'opaque+encrypted==' };
     const body: responsesLite.CodexResponsesBody = {
@@ -496,35 +508,22 @@ describe('Codex private Responses wire selection', () => {
         { type: 'message', role: 'user', content: 'Continue' },
       ],
     };
-    const wires: Record<string, unknown>[] = [];
+    let sentInput: unknown[] | undefined;
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
       const wire = await readJsonRequest(init as RequestInit) as Record<string, unknown>;
-      wires.push(wire);
+      sentInput = wire.input as unknown[];
       expect(new Headers(init?.headers).get(CODEX_RESPONSES_LITE_HEADER)).toBe('true');
-      if (String(url).endsWith('/compact')) {
-        // This exact generated-prefix echo is a stipulated backend fixture.
-        return Response.json({ id: 'cmp_resource', object: 'response.compaction', output: [...wire.input as unknown[], opaque] });
-      }
-      return sseEventsResponse([]);
+      expect(String(url)).toContain('/compact');
+      return Response.json({ id: 'cmp_resource', object: 'response.compaction', output: [...wire.input as unknown[], opaque] });
     });
     const opts = { upstreamId, account: activeAccount, model: liteModel, headers: new Headers({ 'thread-id': 'compact-replay-thread' }), effects: makeEffects(), call: noopUpstreamCallOptions() };
     const compact = await callCodexOpenAIResponsesCompact({ ...opts, body });
     if (!compact.ok) throw new Error('expected successful compact response');
-    expect(compact.result.output).toEqual([...body.input, opaque]);
-    const replay = await callCodexOpenAIResponses({
-      ...opts, body: { ...body, instructions: 'New instructions', input: compact.result.output as OpenAIResponsesInputItem[] },
-    });
-    if (!replay.ok) throw new Error('expected successful replay');
-    for await (const _frame of replay.events) { /* Drain the actual parser. */ }
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-    expect(wires[1]!.input).toEqual([
-      (wires[0]!.input as unknown[])[0],
-      expect.objectContaining({ type: 'message', content: [{ type: 'input_text', text: 'New instructions' }] }),
-      ...body.input.filter(item => item.type !== 'additional_tools'), opaque,
-    ]);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(compact.result.output).toEqual([...sentInput!, opaque]);
   });
 
-  test('repairs compact function/custom identities without touching opaque output', async () => {
+  test('leaves callable and opaque compact output items unchanged', async () => {
     seedFreshAccessToken();
     const opaque = { type: 'compaction', id: 'cmp_original', encrypted_content: 'opaque+encrypted==' };
     const upstream = {
@@ -540,15 +539,10 @@ describe('Codex private Responses wire selection', () => {
       body: { input: [], tools: [{ type: 'custom', name: 'patch' }] }, headers: new Headers(), effects: makeEffects(), call: noopUpstreamCallOptions(),
     });
     if (!result.ok) throw new Error('expected successful compact response');
-    expect(result.result).toEqual({
-      ...upstream,
-      output: [
-        { type: 'custom_tool_call', name: 'patch', call_id: 'c1', input: 'apply', status: 'completed' }, opaque,
-      ],
-    });
+    expect(result.result).toEqual(upstream);
   });
 
-  test.each(['generate', 'compact'] as const)('%s reuses prepared bytes, metadata choice, identities and inverse map across 401 retry', async action => {
+  test.each(['generate', 'compact'] as const)('%s reuses prepared bytes and metadata choice across 401 retry', async action => {
     seedFreshAccessToken();
     const selectedModel = { ...liteModel, providerData: { useResponsesLite: true } };
     const encode = vi.spyOn(responsesLite, 'encodeCodexResponsesLiteRequest');
